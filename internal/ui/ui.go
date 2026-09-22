@@ -151,6 +151,19 @@ func (u *UI) NewSpectrumRow(tap *dsp.SpectrumTap) bool {
 	noise := bins[len(bins)/4]
 	u.floor += 0.05 * (noise - u.floor)
 
+	// Hide the DC spike (the classic RTL-SDR center spike survives the
+	// DC blocker as a permanent bright column): interpolate the middle
+	// bins from their neighbours, the same trick SDR# uses. Only ±2 bins
+	// (±1 kHz) so a real NFM signal around the center still shows.
+	c := n / 2
+	if c > 2 && c+2 < n {
+		loV, hiV := power[c-3], power[c+3]
+		for i := -2; i <= 2; i++ {
+			t := (float64(i) + 2) / 4
+			power[c+i] = loV + t*(hiV-loV)
+		}
+	}
+
 	// Scroll down one row.
 	pix := u.img.Pix
 	stride := u.img.Stride
