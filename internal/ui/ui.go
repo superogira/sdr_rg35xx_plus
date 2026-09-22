@@ -524,3 +524,75 @@ func formatHz(hz int64) string {
 }
 
 var _ = fmt.Sprintf
+
+// Keyboard layout rows for the host editor (domain name / IP:port).
+var kbRows = []string{
+	"0123456789",
+	"abcdefghijklmnopqrstuvwxyz",
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+	".:-_/",
+}
+
+// DrawKeyboard renders an on-screen keyboard for editing the rtl_tcp
+// host address. cursor is the text-edit position; kbR/kbC are the
+// selected key row/column; shift selects the uppercase row.
+func (u *UI) DrawKeyboard(text string, textCursor, kbR, kbC int) {
+	pw, ph := 520, 330
+	px := (u.W - pw) / 2
+	py := (u.H - ph) / 2
+
+	u.fillBlend(px+4, py+4, pw, ph, 0, 0, 0, 120)
+	u.fillBlend(px, py, pw, ph, 14, 20, 28, 242)
+
+	white := color.RGBA{240, 240, 240, 255}
+	grey := color.RGBA{150, 160, 170, 255}
+	cyan := color.RGBA{80, 220, 255, 255}
+
+	Face(16, true).DrawString(u.img, cyan, px+16, py+28, "Host / IP:port")
+	Face(11, false).DrawString(u.img, grey, px+16, py+46,
+		"↑↓←→ เลื่อน · A พิมพ์ · B ลบ · X ยืนยัน · Y ปิด")
+
+	// Text field with cursor
+	tf := Face(18, true)
+	tw := tf.TextWidth(text)
+	tx := px + (pw-tw)/2
+	if tx < px+10 {
+		tx = px + 10
+	}
+	ty := py + 78
+	u.fillBlend(px+10, ty-18, pw-20, 28, 30, 40, 50, 200)
+	tf.DrawString(u.img, white, tx, ty, text)
+	// Cursor box
+	if textCursor >= 0 && textCursor <= len(text) {
+		cw := tf.TextWidth(text[:textCursor])
+		u.fillBlend(tx+cw, ty-16, 2, 22, 255, 255, 255, 160)
+	}
+
+	// Keyboard rows
+	kbFace := Face(16, false)
+	kbFaceB := Face(16, true)
+	y := py + 120
+	for ri, row := range kbRows {
+		// Center each row
+		rw := kbFace.TextWidth(row)
+		rx := px + (pw-rw)/2
+		for ci, ch := range row {
+			cs := string(ch)
+			bw := kbFace.TextWidth(cs)
+			sel := ri == kbR && ci == kbC
+			if sel {
+				u.fillBlend(rx-2, y-14, bw+4, 24, 80, 220, 255, 120)
+			}
+			if sel {
+				kbFaceB.DrawString(u.img, white, rx, y, cs)
+			} else {
+				kbFace.DrawString(u.img, grey, rx, y, cs)
+			}
+			rx += bw + 6
+		}
+		y += 28
+	}
+
+	// Bottom row: ← space → ⌫ OK
+	Face(13, false).DrawString(u.img, grey, px+16, py+ph-14, "กด Y ยืนยันทันทีเมื่อพิมพ์เสร็จ")
+}

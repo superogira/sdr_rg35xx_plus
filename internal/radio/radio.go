@@ -561,6 +561,22 @@ func (r *Radio) Volume() float64 {
 	return r.vol
 }
 
+// SetHost changes the server address; the next reconnect uses it.
+func (r *Radio) SetHost(host string) {
+	r.mu.Lock()
+	if r.Host == host {
+		r.mu.Unlock()
+		return
+	}
+	r.Host = host
+	client := r.client
+	r.mu.Unlock()
+	if client != nil {
+		client.Close() // reconnect to the new address
+	}
+	fmt.Fprintf(os.Stderr, "radio: host now %s (reconnecting)\n", host)
+}
+
 // Hostname returns the host label the UI should display.
 func (r *Radio) Hostname() string {
 	r.mu.Lock()
