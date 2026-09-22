@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"math"
 	"os"
+	"sdr35/internal/i18n"
 
 	"sdr35/internal/dsp"
 )
@@ -82,8 +83,8 @@ func (u *UI) DrawMenu(items []MenuItem, sel int, footer string) {
 	grey := color.RGBA{150, 160, 170, 255}
 	cyan := color.RGBA{80, 220, 255, 255}
 
-	Face(17, true).DrawString(u.img, cyan, px+16, py+30, "ตั้งค่า — SETTINGS")
-	hint := "A เลือก/ปรับ · B ปิด"
+	Face(17, true).DrawString(u.img, cyan, px+16, py+30, i18n.T("menu_title"))
+	hint := i18n.T("menu_hint")
 	Face(11, false).DrawString(u.img, grey, px+pw-16-Face(11, false).TextWidth(hint), py+30, hint)
 
 	for i, it := range items {
@@ -121,9 +122,9 @@ func (u *UI) DrawFreqEditor(digits string, cursor int) {
 	grey := color.RGBA{150, 160, 170, 255}
 	cyan := color.RGBA{80, 220, 255, 255}
 
-	Face(16, true).DrawString(u.img, cyan, px+16, py+30, "ตั้งความถี่ (MHz)")
+	Face(16, true).DrawString(u.img, cyan, px+16, py+30, i18n.T("freq_title"))
 	Face(11, false).DrawString(u.img, grey, px+16, py+50,
-		"↑↓ เปลี่ยนตัวเลข · ←→ เลื่อนหลัก · A ยืนยัน · B ยกเลิก")
+		i18n.T("freq_hint"))
 
 	big := Face(40, true)
 	totalW := big.TextWidth(disp)
