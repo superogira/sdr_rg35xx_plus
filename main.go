@@ -271,8 +271,11 @@ func main() {
 		}
 	}
 	if v, ok := cfg["mode"]; ok && *mode == "nfm" {
-		if strings.EqualFold(v, "wfm") {
-			dspMode = dsp.ModeWFM
+		for _, m := range dsp.ModeList {
+			if strings.EqualFold(v, m.Name) {
+				dspMode = m
+				break
+			}
 		}
 	}
 	if v, ok := cfg["gain"]; ok && *gain == 40.0 {
@@ -328,6 +331,11 @@ func main() {
 	if rate != 2_048_000 {
 		r.SetCaptureRate(rate)
 	}
+	if v, ok := cfg["vol"]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1.5 {
+			*vol = f
+		}
+	}
 	r.SetVolume(*vol)
 	go r.Run(ctx)
 	defer func() {
@@ -364,6 +372,11 @@ func main() {
 	}
 	if ds != -1 {
 		r.SetDirectSamplingMode(ds)
+	}
+	if bwv, ok := cfg[fmt.Sprintf("bw.%s", r.Mode().Name)]; ok {
+		if f, err := strconv.ParseFloat(bwv, 64); err == nil {
+			r.SetBandwidth(f)
+		}
 	}
 	if !agcOn {
 		r.SetAGCEnabled(false)
@@ -410,7 +423,8 @@ func main() {
 		case 0:
 			dsPref = "off"
 		}
-		saveConfig(*host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref)
+		saveBwNow(cfg, r)
+		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref)
 		stop()
 	}
 	// Screenshot support: the last presented frame and a transient status
@@ -442,6 +456,7 @@ func main() {
 		uiMain = iota
 		uiMenu
 		uiFreqEdit
+		uiHostEdit
 	)
 	uiMode := uiMain
 	// Dev aid for PNG screenshot testing of the overlays.
@@ -462,6 +477,7 @@ func main() {
 		menuBW
 		menuDS
 		menuAGC
+		menuHost
 		menuLang
 		menuSpan
 		menuVolume
@@ -487,6 +503,8 @@ func main() {
 		return fmt.Sprintf("%04d%05d", mhz, frac)
 	}
 	editDigits := freqDigits()
+	hostText := *host
+	hostKbR, hostKbC := 0, 0
 	editCursor := 6 // default to the 10 kHz digit (index into 9 digits)
 
 	// Long-press exit: MENU or START held for 3s quits; a short MENU tap
@@ -497,6 +515,7 @@ func main() {
 	adjustItem := func(idx, dir int) {
 		switch idx {
 		case menuMode:
+			saveBwNow(cfg, r)
 			m := dsp.NextMode(r.Mode())
 			if dir < 0 {
 				// one back in a 5-cycle == four forward
@@ -537,6 +556,7 @@ func main() {
 			}
 			idx = (idx + len(bws) + dir) % len(bws)
 			r.SetBandwidth(bws[idx])
+			saveBwNow(cfg, r)
 		case menuDS:
 			// -1 auto → 2 on → 0 off → back to auto.
 			switch r.DirectSamplingMode() {
@@ -549,6 +569,7 @@ func main() {
 			}
 		case menuAGC:
 			r.SetAGCEnabled(!r.AGCEnabled())
+		case menuHost:
 		case menuLang:
 			if i18n.Lang() == "th" {
 				i18n.SetLang("en")
@@ -571,6 +592,9 @@ func main() {
 	}
 	activateItem := func(idx int) {
 		switch idx {
+		case menuHost:
+			hostText = r.Hostname()
+			uiMode = uiHostEdit
 		case menuFreq:
 			editDigits = freqDigits()
 			uiMode = uiFreqEdit
@@ -607,6 +631,8 @@ func main() {
 		case input.Down:
 			r.SetFreq(r.Freq() - 10*stepFor())
 		case input.A, input.Select:
+			// Save current mode's bandwidth before switching.
+			saveBwNow(cfg, r)
 			m := dsp.NextMode(r.Mode())
 			r.SetMode(m)
 			if bw, ok := cfg[fmt.Sprintf("bw.%s", m.Name)]; ok {
@@ -662,6 +688,38 @@ func main() {
 				activateItem(menuSel)
 			case input.B, input.Start:
 				uiMode = uiMain
+			}
+		case uiHostEdit:
+			switch b {
+			case input.Up:
+				hostKbR = (hostKbR + len(kbRows) - 1) % len(kbRows)
+				if hostKbC >= len(kbRows[hostKbR]) {
+					hostKbC = len(kbRows[hostKbR]) - 1
+				}
+			case input.Down:
+				hostKbR = (hostKbR + 1) % len(kbRows)
+				if hostKbC >= len(kbRows[hostKbR]) {
+					hostKbC = len(kbRows[hostKbR]) - 1
+				}
+			case input.Left:
+				hostKbC = (hostKbC + len(kbRows[hostKbR]) - 1) % len(kbRows[hostKbR])
+			case input.Right:
+				hostKbC = (hostKbC + 1) % len(kbRows[hostKbR])
+			case input.A:
+				if len(hostText) < 60 {
+					hostText += string(kbRows[hostKbR][hostKbC])
+				}
+			case input.B:
+				if len(hostText) > 0 {
+					hostText = hostText[:len(hostText)-1]
+				}
+			case input.X, input.Y:
+				if hostText != "" {
+					*host = hostText
+					cfg["host"] = hostText
+					r.SetHost(hostText)
+				}
+				uiMode = uiMenu
 			}
 		case uiFreqEdit:
 			switch b {
@@ -839,6 +897,7 @@ func main() {
 				{Label: i18n.T("m_bw"), Value: bwLabel(r.Bandwidth())},
 				{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
 				{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
+				{Label: "Host / IP", Value: r.Hostname()},
 				{Label: i18n.T("m_lang"), Value: langLabel()},
 				{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
 				{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
@@ -848,6 +907,8 @@ func main() {
 			u.DrawMenu(items, menuSel, fmt.Sprintf("รุ่น %s · %s", buildStamp, strings.ReplaceAll(buildTime, "_", " ")))
 		} else if uiMode == uiFreqEdit {
 			u.DrawFreqEditor(editDigits, editCursor)
+		} else if uiMode == uiHostEdit {
+			u.DrawKeyboard(hostText, len(hostText), hostKbR, hostKbC)
 		}
 		lastFrame = frame
 		if err := disp.Present(frame); err != nil {
@@ -868,6 +929,20 @@ func main() {
 			lastBeat = time.Now()
 		}
 	}
+}
+
+// saveBwNow records the current mode's bandwidth into the in-memory
+// config map (flushed to disk on quit).
+func saveBwNow(cfg map[string]string, r *radio.Radio) {
+	cfg[fmt.Sprintf("bw.%s", r.Mode().Name)] = fmt.Sprintf("%g", r.Bandwidth())
+}
+
+// kbRows mirrors ui.kbRows for the editor logic.
+var kbRows = []string{
+	"0123456789",
+	"abcdefghijklmnopqrstuvwxyz",
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+	".:-_/",
 }
 
 func langLabel() string {
@@ -930,11 +1005,17 @@ func readIni(path string) map[string]string {
 	return cfg
 }
 
-func saveConfig(host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string) {
+func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string) {
 	f, err := os.Create(configPath())
 	if err != nil {
 		return
 	}
 	defer f.Close()
 	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\nagc=%s\nlang=%s\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref, agcPref, langPref)
+	// Per-mode bandwidth entries from the live config map.
+	for _, m := range dsp.ModeList {
+		if v, ok := cfg[fmt.Sprintf("bw.%s", m.Name)]; ok {
+			fmt.Fprintf(f, "bw.%s=%s\n", m.Name, v)
+		}
+	}
 }
