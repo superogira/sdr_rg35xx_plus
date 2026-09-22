@@ -159,7 +159,7 @@ func (r *Radio) SetCaptureRate(hz int) {
 	if client != nil {
 		client.Close() // reconnect with the new rate
 	}
-	fmt.Fprintf(os.Stderr, "radio: capture rate now %d Hz (IF2 %d, audio %d)'+chr(92)+'n", hz, dsp.IF2Rate, dsp.AudioRate)
+	fmt.Fprintf(os.Stderr, "radio: capture rate now %d Hz (IF2 %d, audio %d)\n", hz, dsp.IF2Rate, dsp.AudioRate)
 }
 
 // NewDemo builds a Radio whose Run generates a synthetic signal in-process
@@ -251,7 +251,7 @@ func (r *Radio) session(ctx context.Context) error {
 			if err := client.SetSampleRate(uint32(r.iqRate)); err != nil {
 				return fmt.Errorf("sample rate: %w", err)
 			}
-			fmt.Fprintf(os.Stderr, "radio: requested %d Hz sample rate'+chr(92)+'n", r.iqRate)
+			fmt.Fprintf(os.Stderr, "radio: requested %d Hz sample rate\n", r.iqRate)
 		}
 		// Dongle bring-up. Configure once, then only ever retune:
 		// this server build (fixed 2.048 Msps, big-endian protocol)
@@ -300,6 +300,14 @@ func (r *Radio) session(ctx context.Context) error {
 	buf := make([]byte, readBufBytes)
 	var audioBuf []float32
 	flatBlocks := 0
+	// Actual-rate watchdog: this server remembers its last-set rate across
+	// connections, so the stream may arrive at a different Msps than the
+	// DSP assumes (observed: 1.024M stream into a 2.048M chain → audio
+	// plays ~2x fast with constant underruns). Measure the real rate
+	// after the initial burst settles and re-dimension the DSP to match.
+	var rateT0 time.Time
+	var rateB0 uint64
+	rateDone := false
 	defer func() {
 		r.mu.Lock()
 		if r.client == client {
@@ -337,7 +345,35 @@ func (r *Radio) session(ctx context.Context) error {
 			}
 			r.mu.Lock()
 			r.bytesRx += uint64(n)
+			total := r.bytesRx
 			r.mu.Unlock()
+			if !rateDone {
+				if rateT0.IsZero() && total >= 512*1024 {
+					rateT0 = time.Now()
+					rateB0 = total
+				} else if !rateT0.IsZero() && time.Since(rateT0) >= 2*time.Second {
+					actual := float64(total-rateB0) / time.Since(rateT0).Seconds() / 2
+					snap := int(math.Round(actual/32000) * 32000)
+					if snap < 256_000 {
+						snap = 256_000
+					}
+					if snap > 3_200_000 {
+						snap = 3_200_000
+					}
+					r.mu.Lock()
+					configured := r.iqRate
+					r.mu.Unlock()
+					if dsp.IQRate != snap {
+						fmt.Fprintf(os.Stderr, "radio: stream measures %.3f Msps — re-dimensioning DSP from %d to %d Hz\n", actual/1e6, dsp.IQRate, snap)
+						dsp.SetIQRate(snap)
+						r.SetMode(r.Mode()) // rebuilds the chain + resampler rate
+					} else {
+						fmt.Fprintf(os.Stderr, "radio: stream rate confirmed %d Hz (%.3f Msps measured)\n", snap, actual/1e6)
+					}
+					_ = configured
+					rateDone = true
+				}
+			}
 		}
 		if err != nil {
 			if ctx.Err() != nil {
