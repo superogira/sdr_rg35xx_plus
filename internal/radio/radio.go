@@ -69,6 +69,7 @@ type Radio struct {
 	gainDb float64 // tuner gain in dB at connect; negative = AGC
 	vol    float64
 	sqlDb  float64 // NFM squelch threshold above floor (40 = off)
+	iqRate int     // capture sample rate in Hz (server default 2.048M)
 	hfMode bool    // direct sampling active (below 24 MHz)
 
 	client  *rtltcp.Client
@@ -110,11 +111,53 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		gainDb: gainDb,
 		vol:    1,
 		sqlDb:  8,
+		iqRate: 2_048_000,
 		chain:  dsp.NewChain(mode, nil),
 	}
 }
 
 func (r *Radio) Tap() *dsp.SpectrumTap { return r.tap }
+
+// IQRate returns the configured capture rate.
+func (r *Radio) IQRate() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.iqRate
+}
+
+// SetCaptureRate switches the capture sample rate (supported: 2.048M and
+// 1.024M — both verified against the server). The whole DSP chain is
+// re-dimensioned and the client dropped, so the next session opens with
+// a SetSampleRate as its very first command — the only rate-change
+// pattern the server tolerates (mid-stream changes destabilize it).
+func (r *Radio) SetCaptureRate(hz int) {
+	if hz != 2_048_000 && hz != 1_024_000 {
+		return
+	}
+	r.mu.Lock()
+	if r.iqRate == hz {
+		r.mu.Unlock()
+		return
+	}
+	r.iqRate = hz
+	r.mu.Unlock()
+	if !dsp.SetIQRate(hz) {
+		return
+	}
+	r.mu.Lock()
+	r.chain = dsp.NewChain(r.mode, r.tap)
+	r.chain.SetVolume(r.vol)
+	r.chain.SetSquelchDb(r.sqlDb)
+	client := r.client
+	r.mu.Unlock()
+	if r.out != nil {
+		r.out.SetInputRate(dsp.AudioRate)
+	}
+	if client != nil {
+		client.Close() // reconnect with the new rate
+	}
+	fmt.Fprintf(os.Stderr, "radio: capture rate now %d Hz (IF2 %d, audio %d)'+chr(92)+'n", hz, dsp.IF2Rate, dsp.AudioRate)
+}
 
 // NewDemo builds a Radio whose Run generates a synthetic signal in-process
 // instead of connecting anywhere (display/audio development without a
@@ -199,6 +242,14 @@ func (r *Radio) session(ctx context.Context) error {
 		r.mu.Unlock()
 		chain.Reset()
 
+		if r.iqRate != 2_048_000 {
+			// The server accepts exactly one rate setting per connection
+			// and must see it before anything else.
+			if err := client.SetSampleRate(uint32(r.iqRate)); err != nil {
+				return fmt.Errorf("sample rate: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "radio: requested %d Hz sample rate'+chr(92)+'n", r.iqRate)
+		}
 		// Dongle bring-up. Configure once, then only ever retune:
 		// this server build (fixed 2.048 Msps, big-endian protocol)
 		// wedged into a zero stream after receiving a SetSampleRate

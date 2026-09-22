@@ -13,7 +13,7 @@ type FMDemod struct {
 func (f *FMDemod) Step(z complex128) float64 {
 	prod := z * conj(f.prev)
 	f.prev = z
-	return math.Atan2(imag(prod), real(prod)) * IF2Rate / (2 * math.Pi)
+	return math.Atan2(imag(prod), real(prod)) * float64(IF2Rate) / (2 * math.Pi)
 }
 
 func conj(z complex128) complex128 { return complex(real(z), -imag(z)) }

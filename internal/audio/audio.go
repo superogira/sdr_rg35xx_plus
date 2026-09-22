@@ -23,14 +23,11 @@ import (
 
 const (
 	// SampleRate is what the player processes are told to run at. The
-	// device codec is only known to support the 44.1/48 kHz family, so the
-	// DSP's 64 kHz stream is resampled to 48 kHz before the pipe.
+	// device codec is only known to support the 44.1/48 kHz family, so
+	// the DSP output (see SetInputRate) is resampled to 48 kHz first.
 	SampleRate = 48000
 	Channels   = 2
 	frameBytes = 4 // s16 stereo
-	// resampleRatio = dsp.AudioRate/SampleRate input steps per output
-	// sample (64k/48k = 4/3).
-	resampleStep = float64(dsp.AudioRate) / SampleRate
 )
 
 // Output wraps one long-lived player process fed over stdin.
@@ -45,6 +42,8 @@ type Output struct {
 	// resampler state between WriteAudio calls.
 	prevIn float32
 	pos    float64 // input-step position of the next output sample
+	inRate float64 // DSP-side audio rate feeding the pipe
+	step   float64 // input steps per output sample = inRate/SampleRate
 	closed bool
 
 	die chan struct{}
@@ -62,6 +61,15 @@ func Start() (*Output, error) {
 		return startNamed(name, path)
 	}
 	return nil, fmt.Errorf("no audio backend (aplay/mpv) found")
+}
+
+// SetInputRate (re)configures the resampler for the DSP audio rate
+// (changes when the capture sample rate changes).
+func (o *Output) SetInputRate(rate int) {
+	o.mu.Lock()
+	o.inRate = float64(rate)
+	o.step = float64(rate) / SampleRate
+	o.mu.Unlock()
 }
 
 func startNamed(name, path string) (*Output, error) {
@@ -82,6 +90,8 @@ func startNamed(name, path string) (*Output, error) {
 	}
 
 	o := &Output{name: name, pending: make([]byte, 0, chunkFrames*frameBytes), die: make(chan struct{})}
+	o.inRate = float64(dsp.AudioRate)
+	o.step = o.inRate / SampleRate
 	cmd := exec.Command(path, append(args, "-")...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -112,6 +122,10 @@ func (o *Output) WriteAudio(mono []float32) {
 	if o.closed {
 		return
 	}
+	if o.step <= 0 {
+		o.inRate = float64(dsp.AudioRate)
+		o.step = o.inRate / SampleRate
+	}
 	for _, s := range mono {
 		for o.pos <= 1 {
 			out := o.prevIn + (s-o.prevIn)*float32(o.pos)
@@ -120,7 +134,7 @@ func (o *Output) WriteAudio(mono []float32) {
 			if len(o.pending) >= chunkFrames*frameBytes {
 				o.writePending()
 			}
-			o.pos += resampleStep
+			o.pos += o.step
 		}
 		o.pos -= 1
 		o.prevIn = s

@@ -12,18 +12,31 @@ package dsp
 
 import "math"
 
-// Rates. The e25wop rtl_tcp build streams a fixed 2.048 Msps (it ignores
-// SetSampleRate), so the whole chain is dimensioned for that: IF2Rate and
-// AudioRate divide IQRate exactly.
-const (
+// Rates. The e25wop server accepts ONE SetSampleRate per connection
+// (mid-stream changes make its stream unstable), so the app sends the
+// chosen rate first thing on connect and dimensions the whole chain for
+// it. All rates must divide by 32 (÷8 to the IF, ÷4 to audio). These are
+// package variables set via SetIQRate before any Chain is built.
+var (
 	IQRate    = 2_048_000
 	IF2Rate   = IQRate / 8
 	AudioRate = IF2Rate / 4
-	// DisplaySpanHz is the half-width of spectrum shown. The full IF
-	// (±128 kHz) is displayed; the decimation filter's passband covers
-	// ±108 kHz, so the outermost columns are attenuated but genuine.
+	// DisplaySpanHz is the half-width of spectrum shown — the full IF.
 	DisplaySpanHz = IF2Rate / 2
 )
+
+// SetIQRate re-dimensions the DSP for a new capture rate. It must run
+// BEFORE NewChain (filters are designed from these values).
+func SetIQRate(hz int) bool {
+	if hz%32_000 != 0 {
+		return false
+	}
+	IQRate = hz
+	IF2Rate = hz / 8
+	AudioRate = IF2Rate / 4
+	DisplaySpanHz = IF2Rate / 2
+	return true
+}
 
 // Mode bundles the demodulation parameters for one receive mode.
 type Mode struct {
@@ -84,15 +97,16 @@ type Chain struct {
 // global rates. volume defaults to 1.
 func NewChain(mode Mode, tap *SpectrumTap) *Chain {
 	c := &Chain{mode: mode, tap: tap, volume: 1}
-	c.dc = NewDCBlocker(IQRate)
-	// 127 taps at 2.048 Msps: transition ≈53 kHz, so the ±108 kHz WFM
-	// channel passes while the aliasing zone above ±128 kHz is stopped.
-	c.ifTaps = DesignLowpass(127, 108000, IQRate)
+	c.dc = NewDCBlocker(float64(IQRate))
+	// 255 taps with cutoff at 0.40×IF2: the stopband lands almost exactly
+	// at the IF2 Nyquist edge for every supported rate (the tap count is
+	// rate-independent because IQRate/IF2Rate is fixed at 8).
+	c.ifTaps = DesignLowpass(255, float64(IF2Rate)*0.40, float64(float64(IQRate)))
 	c.ifD = IQRate / IF2Rate
-	c.auTaps = DesignLowpass(tapsFor(mode.AudioCut), mode.AudioCut, IF2Rate)
+	c.auTaps = DesignLowpass(tapsFor(mode.AudioCut), mode.AudioCut, float64(IF2Rate))
 	c.auD = IF2Rate / AudioRate
 	if mode.DeemphTau > 0 {
-		c.deemph = NewDeemph(mode.DeemphTau, AudioRate)
+		c.deemph = NewDeemph(mode.DeemphTau, float64(AudioRate))
 	}
 	c.sqlLevel = 8 // dB above floor
 	c.powerDb = -100
@@ -242,7 +256,7 @@ func (c *Chain) applySquelchRamp(x float64) float64 {
 	if c.muted || (c.mode.Squelch && !c.sqlOpen) {
 		target = 0
 	}
-	step := 200.0 / AudioRate
+	step := 200.0 / float64(AudioRate)
 	switch {
 	case c.sqlRamp < target:
 		c.sqlRamp += step

@@ -273,6 +273,12 @@ func main() {
 			*gain = g
 		}
 	}
+	rate := 2_048_000
+	if v, ok := cfg["rate"]; ok {
+		if n, err := strconv.Atoi(v); err == nil && (n == 2_048_000 || n == 1_024_000) {
+			rate = n
+		}
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -289,6 +295,10 @@ func main() {
 		r = radio.NewDemo(dspMode, out)
 	} else {
 		r = radio.New(*host, *freq, dspMode, *gain, out)
+	}
+	if rate != 2_048_000 {
+		r.SetCaptureRate(rate)
+		ui.DisplaySpan = dsp.DisplaySpanHz
 	}
 	r.SetVolume(*vol)
 	go r.Run(ctx)
@@ -350,7 +360,7 @@ func main() {
 		return 12_500
 	}
 	quit := func() {
-		saveConfig(*host, r.Freq(), r.Mode().Name, r.Volume(), *gain)
+		saveConfig(*host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate())
 		stop()
 	}
 	// Screenshot support: the last presented frame and a transient status
@@ -439,6 +449,15 @@ func main() {
 				db = 40
 			}
 			r.SetSquelchDb(db)
+		case menuSample:
+			// Verified rates only; the change reconnects with the new
+			// rate as the connection's first command.
+			next := 2_048_000
+			if r.IQRate() == 2_048_000 {
+				next = 1_024_000
+			}
+			r.SetCaptureRate(next)
+			ui.DisplaySpan = dsp.DisplaySpanHz
 		case menuVolume:
 			v := math.Round((r.Volume()+float64(dir)*0.025)*40) / 40
 			if v < 0 {
@@ -715,7 +734,7 @@ func main() {
 				{Label: "โหมดรับ", Value: r.Mode().Name},
 				{Label: "Gain", Value: fmt.Sprintf("%.1f dB", r.GainDb())},
 				{Label: "Squelch", Value: sq},
-				{Label: "Sample Rate", Value: "2.048M (server กำหนด)"},
+				{Label: "Sample Rate", Value: fmt.Sprintf("%.3fM (±%dk)", float64(r.IQRate())/1e6, dsp.DisplaySpanHz/1000)},
 				{Label: "วอลุ่ม", Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 				{Label: "ถ่ายภาพหน้าจอ", Value: "กด A"},
 				{Label: "ตรวจอัพเดท", Value: "กด A"},
@@ -779,11 +798,11 @@ func readIni(path string) map[string]string {
 	return cfg
 }
 
-func saveConfig(host string, freq int64, mode string, vol float64, gainDb float64) {
+func saveConfig(host string, freq int64, mode string, vol float64, gainDb float64, rate int) {
 	f, err := os.Create(configPath())
 	if err != nil {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\n", host, freq, mode, vol, gainDb)
+	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\n", host, freq, mode, vol, gainDb, rate)
 }
