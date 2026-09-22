@@ -957,8 +957,7 @@ func saveBwNow(cfg map[string]string, r *radio.Radio) {
 var kbRows = []string{
 	"0123456789",
 	"abcdefghijklmnopqrstuvwxyz",
-	"ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-	".:-_/",
+	".:-_/ ",
 }
 
 func langLabel() string {
