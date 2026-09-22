@@ -435,6 +435,74 @@ func (r *Radio) GainText() string {
 	return fmt.Sprintf("GAIN %.1fdB", r.gainDb)
 }
 
+// GainDb returns the current tuner gain in dB (-1 = AGC).
+func (r *Radio) GainDb() float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.gainDb
+}
+
+// SetGainDb applies a new tuner gain live: stored for the next connect and
+// pushed to a connected dongle at once (mid-stream gain commands are fine —
+// the earlier ban was an endianness misdiagnosis).
+func (r *Radio) SetGainDb(db float64) {
+	if db < 0 {
+		db = 0
+	}
+	if db > 49.6 {
+		db = 49.6
+	}
+	r.mu.Lock()
+	r.gainDb = db
+	client := r.client
+	r.mu.Unlock()
+	if client == nil {
+		return
+	}
+	if err := client.SetTunerAGC(false); err != nil {
+		client.Close()
+		return
+	}
+	if err := client.SetGainTenthsDB(int32(math.Round(db * 10))); err != nil {
+		client.Close() // poisoned stream — reconnect with the new gain
+	}
+}
+
+// GainStepDb moves db one entry up (dir>0) or down the RTL-SDR V4 gain
+// table, snapping to the nearest current entry first.
+func GainStepDb(db float64, dir int) float64 {
+	idx := GainDbToIndex(db)
+	idx += dir
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(r828dGains) {
+		idx = len(r828dGains) - 1
+	}
+	return r828dGains[idx]
+}
+
+// SquelchDb returns the current NFM squelch threshold (40 = off).
+func (r *Radio) SquelchDb() float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sqlDb
+}
+
+// SetSquelchDb applies a new NFM squelch threshold (clamped 4-40; 40 = off).
+func (r *Radio) SetSquelchDb(db float64) {
+	if db < 4 {
+		db = 4
+	}
+	if db > 40 {
+		db = 40
+	}
+	r.mu.Lock()
+	r.sqlDb = db
+	r.chain.SetSquelchDb(db)
+	r.mu.Unlock()
+}
+
 // Snapshot is the per-frame status for the UI.
 type Snapshot struct {
 	Connected   bool

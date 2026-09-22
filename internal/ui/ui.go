@@ -11,7 +11,7 @@ import (
 	"sdr35/internal/dsp"
 )
 
-// SavePNG writes a rendered frame to disk (the MENU capture button).
+// SavePNG writes a rendered frame to disk (the menu screenshot action).
 func SavePNG(path string, img *image.RGBA) error {
 	f, err := os.Create(path)
 	if err != nil {
@@ -19,6 +19,101 @@ func SavePNG(path string, img *image.RGBA) error {
 	}
 	defer f.Close()
 	return png.Encode(f, img)
+}
+
+// MenuItem is one row of the settings menu.
+type MenuItem struct {
+	Label string
+	Value string
+}
+
+// blendByte mixes c into dst with alpha a (0-255).
+func blendByte(dst, c uint8, a int) uint8 {
+	return uint8((int(dst)*(255-a) + int(c)*a) / 255)
+}
+
+// fillBlend alpha-fills a rectangle over the composed frame.
+func (u *UI) fillBlend(x, y, w, h int, r, g, b, a uint8) {
+	for yy := y; yy < y+h; yy++ {
+		if yy < 0 || yy >= u.H {
+			continue
+		}
+		for xx := x; xx < x+w; xx++ {
+			if xx < 0 || xx >= u.W {
+				continue
+			}
+			o := yy*u.img.Stride + xx*4
+			u.img.Pix[o+0] = blendByte(u.img.Pix[o+0], r, int(a))
+			u.img.Pix[o+1] = blendByte(u.img.Pix[o+1], g, int(a))
+			u.img.Pix[o+2] = blendByte(u.img.Pix[o+2], b, int(a))
+			u.img.Pix[o+3] = 255
+		}
+	}
+}
+
+// DrawMenu renders the settings overlay on top of the composed frame.
+func (u *UI) DrawMenu(items []MenuItem, sel int) {
+	rowH := 28
+	pw := 440
+	ph := 64 + rowH*len(items) + 30
+	px := (u.W - pw) / 2
+	py := (u.H - ph) / 2
+
+	u.fillBlend(px+4, py+4, pw, ph, 0, 0, 0, 120)
+	u.fillBlend(px, py, pw, ph, 14, 20, 28, 242)
+
+	white := color.RGBA{240, 240, 240, 255}
+	grey := color.RGBA{150, 160, 170, 255}
+	cyan := color.RGBA{80, 220, 255, 255}
+
+	Face(17, true).DrawString(u.img, cyan, px+16, py+30, "ตั้งค่า — SETTINGS")
+	hint := "A เลือก/ปรับ · B ปิด"
+	Face(11, false).DrawString(u.img, grey, px+pw-16-Face(11, false).TextWidth(hint), py+30, hint)
+
+	for i, it := range items {
+		y := py + 56 + i*rowH
+		if i == sel {
+			u.fillBlend(px+8, y-18, pw-16, rowH-2, 40, 96, 128, 210)
+		}
+		f := Face(15, i == sel)
+		f.DrawString(u.img, white, px+18, y, it.Label)
+		vw := f.TextWidth(it.Value)
+		vc := grey
+		if i == sel {
+			vc = color.RGBA{255, 230, 120, 255}
+		}
+		f.DrawString(u.img, vc, px+pw-18-vw, y, it.Value)
+	}
+}
+
+// DrawFreqEditor renders the digit editor: digits is 9 characters
+// (4 integer + 5 fractional MHz digits, the dot inserted when drawn);
+// cursor is the selected digit index 0-8.
+func (u *UI) DrawFreqEditor(digits string, cursor int) {
+	disp := digits[:4] + "." + digits[4:]
+	pw, ph := 460, 170
+	px := (u.W - pw) / 2
+	py := (u.H - ph) / 2
+
+	u.fillBlend(px+4, py+4, pw, ph, 0, 0, 0, 120)
+	u.fillBlend(px, py, pw, ph, 14, 20, 28, 242)
+
+	white := color.RGBA{240, 240, 240, 255}
+	grey := color.RGBA{150, 160, 170, 255}
+	cyan := color.RGBA{80, 220, 255, 255}
+
+	Face(16, true).DrawString(u.img, cyan, px+16, py+30, "ตั้งความถี่ (MHz)")
+	Face(11, false).DrawString(u.img, grey, px+16, py+50,
+		"↑↓ เปลี่ยนตัวเลข · ←→ เลื่อนหลัก · A ยืนยัน · B ยกเลิก")
+
+	big := Face(40, true)
+	totalW := big.TextWidth(disp)
+	bx := px + (pw-totalW)/2
+	by := py + 116
+	preW := big.TextWidth(disp[:cursor+4]) // width of chars before the selected digit
+	chW := big.TextWidth(disp[:cursor+5]) - preW
+	u.fillBlend(bx+preW-1, by-34, chW+2, 46, 80, 220, 255, 90)
+	big.DrawString(u.img, white, bx, by, disp)
 }
 
 // BarHeight is the bottom status bar; everything above it is waterfall.
@@ -376,7 +471,7 @@ func (u *UI) drawBottomBar() {
 
 	// Step + button hints (bottom right).
 	hint := Face(12, false)
-	hintText := "←→ จูน · SELECT โหมด · X sql · MENU ภาพ · VOL± วอลุ่ม · START ออก"
+	hintText := "←→ จูน · SELECT โหมด · X sql · MENU เมนู (ค้าง 3 วิ = ออก)"
 	hint.DrawString(u.img, grey, u.W-hint.TextWidth(hintText)-8, u.H-8, hintText)
 }
 

@@ -139,8 +139,8 @@ func main() {
 		saveConfig(*host, r.Freq(), r.Mode().Name, r.Volume(), *gain)
 		stop()
 	}
-	// MENU capture support: the last presented frame and a transient
-	// status message pointing at the saved file.
+	// Screenshot support: the last presented frame and a transient status
+	// message pointing at the saved file (triggered from the menu).
 	var lastFrame *image.RGBA
 	capturedMsg := ""
 	var capturedAt time.Time
@@ -162,6 +162,104 @@ func main() {
 		capturedAt = time.Now()
 		fmt.Fprintln(os.Stderr, capturedMsg)
 	}
+
+	// --- UI state machine: main screen / settings menu / freq editor ---
+	const (
+		uiMain = iota
+		uiMenu
+		uiFreqEdit
+	)
+	uiMode := uiMain
+	// Dev aid for PNG screenshot testing of the overlays.
+	switch os.Getenv("SDR_UI") {
+	case "menu":
+		uiMode = uiMenu
+	case "freq":
+		uiMode = uiFreqEdit
+	}
+	menuSel := 0
+	const menuFreq = 0
+	const (
+		menuMode = iota + 1
+		menuGain
+		menuSQL
+		menuSample
+		menuVolume
+		menuShot
+	)
+	menuCount := menuShot + 1
+
+	freqDigits := func() string {
+		hz := r.Freq()
+		mhz := hz / 1_000_000
+		frac := (hz % 1_000_000) / 10 // 5 digits of 10 Hz
+		return fmt.Sprintf("%04d%05d", mhz, frac)
+	}
+	editDigits := freqDigits()
+	editCursor := 6 // default to the 10 kHz digit (index into 9 digits)
+
+	// Long-press exit: MENU or START held for 3s quits; a short MENU tap
+	// opens/closes the settings menu.
+	var menuDownAt, startDownAt time.Time
+	exitHint := ""
+
+	adjustItem := func(idx, dir int) {
+		switch idx {
+		case menuMode:
+			if dir > 0 || r.Mode() == dsp.ModeWFM {
+				if r.Mode() == dsp.ModeWFM {
+					r.SetMode(dsp.ModeNFM)
+				} else {
+					r.SetMode(dsp.ModeWFM)
+				}
+			}
+		case menuGain:
+			r.SetGainDb(radio.GainStepDb(r.GainDb(), dir))
+		case menuSQL:
+			db := r.SquelchDb() + float64(dir)*4
+			if db < 4 {
+				db = 4
+			}
+			if db > 40 {
+				db = 40
+			}
+			r.SetSquelchDb(db)
+		case menuVolume:
+			v := math.Round((r.Volume()+float64(dir)*0.025)*40) / 40
+			if v < 0 {
+				v = 0
+			}
+			if v > 1.5 {
+				v = 1.5
+			}
+			r.SetVolume(v)
+		}
+	}
+	activateItem := func(idx int) {
+		switch idx {
+		case menuFreq:
+			editDigits = freqDigits()
+			uiMode = uiFreqEdit
+		case menuShot:
+			capture()
+		default:
+			adjustItem(idx, +1)
+		}
+	}
+	commitFreq := func(digits string) {
+		var mhz, frac int
+		fmt.Sscanf(digits[:4], "%d", &mhz)
+		fmt.Sscanf(digits[4:], "%d", &frac)
+		hz := int64(mhz)*1_000_000 + int64(frac)*10
+		if hz < 24_000_000 {
+			hz = 24_000_000
+		}
+		if hz > 1_766_000_000 {
+			hz = 1_766_000_000
+		}
+		r.SetFreq(hz)
+	}
+
 	act := func(b input.Button) {
 		switch b {
 		case input.Left:
@@ -207,10 +305,53 @@ func main() {
 				v = 1.5
 			}
 			r.SetVolume(v)
-		case input.Menu:
-			capture()
-		case input.Start:
-			quit()
+		}
+	}
+	handlePress := func(b input.Button) {
+		switch uiMode {
+		case uiMain:
+			act(b)
+		case uiMenu:
+			switch b {
+			case input.Up:
+				menuSel = (menuSel + menuCount - 1) % menuCount
+			case input.Down:
+				menuSel = (menuSel + 1) % menuCount
+			case input.Left:
+				adjustItem(menuSel, -1)
+			case input.Right:
+				adjustItem(menuSel, +1)
+			case input.A:
+				activateItem(menuSel)
+			case input.B, input.Start:
+				uiMode = uiMain
+			}
+		case uiFreqEdit:
+			switch b {
+		case input.Left:
+			if editCursor > 0 {
+				editCursor--
+			}
+		case input.Right:
+			if editCursor < 8 {
+				editCursor++
+			}
+			case input.Up, input.Down:
+				d := 1
+				if b == input.Down {
+					d = 9 // -1 mod 10
+				}
+				bb := []byte(editDigits)
+				c := int(bb[editCursor]-'0') + d
+				c %= 10
+				bb[editCursor] = byte('0' + c)
+				editDigits = string(bb)
+			case input.A:
+				commitFreq(editDigits)
+				uiMode = uiMenu
+			case input.B:
+				uiMode = uiMenu
+			}
 		}
 	}
 
@@ -258,19 +399,62 @@ func main() {
 			pad.Poll()
 			for _, ev := range pad.Events() {
 				held[ev.Button] = ev.Down
+				switch ev.Button {
+				case input.Menu:
+					if ev.Down {
+						menuDownAt = time.Now()
+					} else {
+						if time.Since(menuDownAt) < 3*time.Second {
+							// Short tap: toggle the settings menu
+							// (or back out of the freq editor).
+							switch uiMode {
+							case uiFreqEdit, uiMenu:
+								uiMode = uiMain
+							default:
+								uiMode = uiMenu
+							}
+						}
+						menuDownAt = time.Time{}
+					}
+					continue
+				case input.Start:
+					if ev.Down {
+						startDownAt = time.Now()
+					} else {
+						startDownAt = time.Time{}
+					}
+					continue
+				}
 				if ev.Down {
-					act(ev.Button)
+					handlePress(ev.Button)
 					lastRepeat[ev.Button] = time.Now()
 				}
 			}
-			// Key repeat for held tuning/volume buttons: 450 ms delay,
-			// then every 150 ms.
-			for _, b := range []input.Button{input.Left, input.Right, input.Up, input.Down, input.L1, input.R1, input.VolDown, input.VolUp} {
-				if held[b] && time.Since(lastRepeat[b]) > 450*time.Millisecond {
-					act(b)
-					lastRepeat[b] = lastRepeat[b].Add(150 * time.Millisecond)
-					if time.Since(lastRepeat[b]) < 0 {
-						lastRepeat[b] = time.Now()
+			// Hold-to-exit: MENU or START held 3 s.
+			exitHint = ""
+			if !menuDownAt.IsZero() || !startDownAt.IsZero() {
+				var d time.Duration
+				if !menuDownAt.IsZero() {
+					d = time.Since(menuDownAt)
+				} else {
+					d = time.Since(startDownAt)
+				}
+				if d >= 3*time.Second {
+					quit()
+				} else {
+					exitHint = fmt.Sprintf("กดค้างเพื่อออก… %.1fs", float64(3*time.Second-d)/float64(time.Second))
+				}
+			}
+			// Key repeat for held tuning/volume buttons (main screen
+			// only): 450 ms delay, then every 150 ms.
+			if uiMode == uiMain {
+				for _, b := range []input.Button{input.Left, input.Right, input.Up, input.Down, input.L1, input.R1, input.VolDown, input.VolUp} {
+					if held[b] && time.Since(lastRepeat[b]) > 450*time.Millisecond {
+						act(b)
+						lastRepeat[b] = lastRepeat[b].Add(150 * time.Millisecond)
+						if time.Since(lastRepeat[b]) < 0 {
+							lastRepeat[b] = time.Now()
+						}
 					}
 				}
 			}
@@ -279,6 +463,9 @@ func main() {
 		u.NewSpectrumRow(r.Tap())
 		snap := r.Snapshot()
 		status := snap.StatusText
+		if exitHint != "" {
+			status = exitHint
+		}
 		if capturedMsg != "" && time.Since(capturedAt) < 3*time.Second {
 			status = capturedMsg
 		}
@@ -295,6 +482,27 @@ func main() {
 			GainText:    r.GainText() + " · " + r.SquelchLabel(),
 			Host:        r.Hostname(),
 		})
+		// Settings overlays on top of the composed frame.
+		if uiMode == uiMenu {
+			sq := r.SquelchLabel()
+			if v := r.SquelchDb(); v >= 40 {
+				sq = "ปิด (Monitor)"
+			} else {
+				sq = fmt.Sprintf("%.0f dB", v)
+			}
+			items := []ui.MenuItem{
+				{Label: "ความถี่", Value: fmt.Sprintf("%.5f MHz ▸", float64(r.Freq())/1e6)},
+				{Label: "โหมดรับ", Value: r.Mode().Name},
+				{Label: "Gain", Value: fmt.Sprintf("%.1f dB", r.GainDb())},
+				{Label: "Squelch", Value: sq},
+				{Label: "Sample Rate", Value: "2.048M (server กำหนด)"},
+				{Label: "วอลุ่ม", Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
+				{Label: "ถ่ายภาพหน้าจอ", Value: "กด A"},
+			}
+			u.DrawMenu(items, menuSel)
+		} else if uiMode == uiFreqEdit {
+			u.DrawFreqEditor(editDigits, editCursor)
+		}
 		lastFrame = frame
 		if err := disp.Present(frame); err != nil {
 			fmt.Fprintf(os.Stderr, "present: %v\n", err)
