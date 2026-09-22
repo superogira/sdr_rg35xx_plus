@@ -25,10 +25,11 @@ var ft8SyncPositions = [7]int{0, 36, 37, 38, 72, 73, 74}
 
 // FT8Detection is one detected FT8 signal.
 type FT8Detection struct {
-	FreqHz     float64 // audio frequency of the signal (0-3000 Hz)
-	SNRDb      float64 // estimated signal-to-noise ratio
-	TimeSlot   int     // 0 = first 15s, 1 = second 15s (in each 30s cycle)
-	Confidence float64 // 0-1 sync match quality
+	FreqHz     float64     // audio frequency of the signal (0-3000 Hz)
+	SNRDb      float64     // estimated signal-to-noise ratio
+	TimeSlot   int         // 0 = first 15s, 1 = second 15s (in each 30s cycle)
+	Confidence float64     // 0-1 sync match quality
+	Message    *FT8Message // decoded message (nil if decode failed)
 }
 
 // FT8Detector scans 8 kHz audio for FT8 sync patterns using Goertzel
@@ -125,6 +126,7 @@ func (d *FT8Detector) Process() {
 	// For each candidate slot, check the Costas sync at the known positions.
 	for _, centerHz := range d.slotHz {
 		if det, ok := d.checkSyncAt(linear, centerHz); ok {
+			det.Message = DecodeFT8(linear, centerHz)
 			d.results = append(d.results, det)
 		}
 	}

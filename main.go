@@ -896,7 +896,12 @@ func main() {
 					best = d
 				}
 			}
-			status = fmt.Sprintf("FT8: %.0f Hz SNR %.0f dB (%.0f%% sync)", best.FreqHz, best.SNRDb, best.Confidence*100)
+			if best.Message != nil && best.Message.Valid {
+				m := best.Message
+				status = fmt.Sprintf("FT8: %s→%s %s (%.0f Hz %.0f dB)", m.CallsignFrom, m.CallsignTo, m.Grid, best.FreqHz, best.SNRDb)
+			} else {
+				status = fmt.Sprintf("FT8: %.0f Hz SNR %.0f dB (%.0f%% sync)", best.FreqHz, best.SNRDb, best.Confidence*100)
+			}
 		}
 		if exitHint != "" {
 			status = exitHint
