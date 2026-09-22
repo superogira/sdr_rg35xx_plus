@@ -168,8 +168,9 @@ type Chain struct {
 	auD    int
 
 	deemph *Deemph
-	agc    *AGC // SSB/CW loudness
-	agcOn  bool // AGC enable switch (menu)
+	agc    *AGC         // SSB/CW loudness
+	ft8    *FT8Detector // nil = disabled
+	agcOn  bool         // AGC enable switch (menu)
 
 	// Squelch + metering state.
 	sqlOpen  bool
@@ -279,6 +280,11 @@ func (c *Chain) SetMute(m bool) { c.muted = m }
 
 // PowerDb returns the smoothed IF power in dBFS.
 func (c *Chain) PowerDb() float64 { return c.powerDb }
+
+// SetFT8Detector attaches or detaches an FT8 detector.
+func (c *Chain) SetFT8Detector(d *FT8Detector) {
+	c.ft8 = d
+}
 
 // SetAGCEnabled toggles the SSB/CW AGC live.
 func (c *Chain) SetAGCEnabled(on bool) {
@@ -390,6 +396,13 @@ func (c *Chain) processSSB(out *[]float32) {
 	complexCIFIR(c.ssbTaps, &c.ssbHist, slow, &side)
 	c.sbOut = side
 
+	if c.ft8 != nil {
+		ft8buf := make([]float64, 0, len(side))
+		for _, z := range side {
+			ft8buf = append(ft8buf, real(z)*3.0)
+		}
+		c.ft8.Feed(ft8buf)
+	}
 	for _, z := range side {
 		x := real(z) * 3.0
 		if c.agc != nil && c.agcOn {

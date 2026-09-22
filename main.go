@@ -298,6 +298,10 @@ func main() {
 			sqlPref = f
 		}
 	}
+	ft8On := false
+	if v, ok := cfg["ft8"]; ok && v == "on" {
+		ft8On = true
+	}
 	agcOn := true
 	if v, ok := cfg["agc"]; ok && v == "off" {
 		agcOn = false
@@ -390,6 +394,9 @@ func main() {
 	if !agcOn {
 		r.SetAGCEnabled(false)
 	}
+	if ft8On {
+		r.SetFT8Enabled(true)
+	}
 	fmt.Fprintf(os.Stderr, "step: ui created\n")
 
 	// Boot frame right away: a solid color on screen proves the whole
@@ -421,6 +428,10 @@ func main() {
 	}
 	quit := func() {
 		langPref := i18n.Lang()
+		ft8Pref := "off"
+		if r.FT8Enabled() {
+			ft8Pref = "on"
+		}
 		agcPref := "on"
 		if !r.AGCEnabled() {
 			agcPref = "off"
@@ -433,7 +444,7 @@ func main() {
 			dsPref = "off"
 		}
 		saveBwNow(cfg, r)
-		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref)
+		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref, ft8Pref)
 		stop()
 	}
 	// Screenshot support: the last presented frame and a transient status
@@ -485,6 +496,7 @@ func main() {
 		menuSample
 		menuBW
 		menuDS
+		menuFT8
 		menuAGC
 		menuHost
 		menuLang
@@ -582,6 +594,8 @@ func main() {
 			default:
 				r.SetDirectSamplingMode(-1)
 			}
+		case menuFT8:
+			r.SetFT8Enabled(!r.FT8Enabled())
 		case menuAGC:
 			r.SetAGCEnabled(!r.AGCEnabled())
 		case menuHost:
@@ -871,9 +885,19 @@ func main() {
 			}
 		}
 
+		r.FT8Process()
 		u.NewSpectrumRow(r.Tap(), r.RawTap())
 		snap := r.Snapshot()
 		status := snap.StatusText
+		if ft8s := r.FT8Results(); len(ft8s) > 0 {
+			best := ft8s[0]
+			for _, d := range ft8s[1:] {
+				if d.SNRDb > best.SNRDb {
+					best = d
+				}
+			}
+			status = fmt.Sprintf("FT8: %.0f Hz SNR %.0f dB (%.0f%% sync)", best.FreqHz, best.SNRDb, best.Confidence*100)
+		}
 		if exitHint != "" {
 			status = exitHint
 		}
@@ -912,6 +936,7 @@ func main() {
 				{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
 				{Label: i18n.T("m_bw"), Value: bwLabel(r.Bandwidth())},
 				{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
+				{Label: "FT8 Decode", Value: ft8Label(r.FT8Enabled())},
 				{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
 				{Label: "Host / IP", Value: r.Hostname()},
 				{Label: i18n.T("m_lang"), Value: langLabel()},
@@ -958,6 +983,13 @@ var kbRows = []string{
 	"0123456789",
 	"abcdefghijklmnopqrstuvwxyz",
 	".:-_/ ",
+}
+
+func ft8Label(on bool) string {
+	if on {
+		return "เปิด"
+	}
+	return "ปิด"
 }
 
 func langLabel() string {
@@ -1020,13 +1052,13 @@ func readIni(path string) map[string]string {
 	return cfg
 }
 
-func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string) {
+func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref, ft8Pref string) {
 	f, err := os.Create(configPath())
 	if err != nil {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\nagc=%s\nlang=%s\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref, agcPref, langPref)
+	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\nagc=%s\nlang=%s\nft8=%s\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref, agcPref, langPref, ft8Pref)
 	// Squelch level from the live config map.
 	if v, ok := cfg["sql"]; ok {
 		fmt.Fprintf(f, "sql=%s\n", v)

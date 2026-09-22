@@ -74,7 +74,9 @@ type Radio struct {
 	iqRate    int     // capture sample rate in Hz (server default 2.048M)
 	dsMode    int     // -1 auto (DS below 24 MHz), 0 force off, 2 force on (Q)
 	agcOn     bool    // SSB/CW AGC enabled
-	hfApplied int     // direct-sampling mode currently set on the server
+	ft8On     bool
+	ft8       *dsp.FT8Detector
+	hfApplied int // direct-sampling mode currently set on the server
 
 	client  *rtltcp.Client
 	gains   int32
@@ -118,6 +120,7 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		sqlDb:  8,
 		iqRate: 2_048_000,
 		agcOn:  true,
+		ft8:    dsp.NewFT8Detector(),
 		chain:  dsp.NewChain(mode, nil, nil),
 	}
 }
@@ -156,6 +159,9 @@ func (r *Radio) SetCaptureRate(hz int) {
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
 	r.chain.SetAGCEnabled(r.agcOn)
+	if r.ft8On {
+		r.chain.SetFT8Detector(r.ft8)
+	}
 	client := r.client
 	r.mu.Unlock()
 	if r.out != nil {
@@ -248,6 +254,9 @@ func (r *Radio) session(ctx context.Context) error {
 		chain.SetVolume(r.vol)
 		chain.SetSquelchDb(r.sqlDb)
 		chain.SetAGCEnabled(r.agcOn)
+		if r.ft8On {
+			chain.SetFT8Detector(r.ft8)
+		}
 		r.chain = chain
 		r.state = stateStreaming
 		freq, gainDb := r.freqHz, r.gainDb
@@ -517,6 +526,9 @@ func (r *Radio) SetMode(mode dsp.Mode) {
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
 	r.chain.SetAGCEnabled(r.agcOn)
+	if r.ft8On {
+		r.chain.SetFT8Detector(r.ft8)
+	}
 	r.mu.Unlock()
 	// SSB/CW chains produce 8 kHz audio; FM modes IF2/4.
 	if r.out != nil {
@@ -618,6 +630,51 @@ func (r *Radio) directSamplingFor(hz int64) int {
 			return 2
 		}
 		return 0
+	}
+}
+
+// FT8Enabled reports whether FT8 detection is active.
+func (r *Radio) FT8Enabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ft8On
+}
+
+// SetFT8Enabled toggles FT8 detection (USB mode on the FT8 sub-bands).
+func (r *Radio) SetFT8Enabled(on bool) {
+	r.mu.Lock()
+	r.ft8On = on
+	r.ft8.SetEnabled(on)
+	chain := r.chain
+	r.mu.Unlock()
+	if chain != nil {
+		if on {
+			chain.SetFT8Detector(r.ft8)
+		} else {
+			chain.SetFT8Detector(nil)
+		}
+	}
+	fmt.Fprintf(os.Stderr, "radio: FT8 detection %v\n", on)
+}
+
+// FT8Results returns the latest FT8 detections.
+func (r *Radio) FT8Results() []dsp.FT8Detection {
+	r.mu.Lock()
+	det := r.ft8
+	r.mu.Unlock()
+	if det == nil {
+		return nil
+	}
+	return det.Results()
+}
+
+// FT8Process runs the detector analysis (call periodically).
+func (r *Radio) FT8Process() {
+	r.mu.Lock()
+	det := r.ft8
+	r.mu.Unlock()
+	if det != nil && det.Enabled() {
+		det.Process()
 	}
 }
 
@@ -726,6 +783,9 @@ func (r *Radio) SetBandwidth(bw float64) {
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
 	r.chain.SetAGCEnabled(r.agcOn)
+	if r.ft8On {
+		r.chain.SetFT8Detector(r.ft8)
+	}
 	r.mu.Unlock()
 	fmt.Fprintf(os.Stderr, "radio: bandwidth %.4g Hz (%s)\n", bw, m.Name)
 }
