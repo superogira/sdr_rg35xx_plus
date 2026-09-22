@@ -410,17 +410,18 @@ func main() {
 		uiMode = uiFreqEdit
 	}
 	menuSel := 0
+	// Row indexes MUST match the items slice built for DrawMenu below.
 	const menuFreq = 0
 	const (
 		menuMode = iota + 1
 		menuGain
 		menuSQL
 		menuSample
+		menuSpan
 		menuVolume
 		menuShot
+		menuUpdate
 	)
-	const menuSpan = 7
-	const menuUpdate = 8
 	menuCount := menuUpdate + 1
 	spanSteps := []int{1000, 750, 500, 250, 125, 100, 50}
 	spanIdx := func() int {
