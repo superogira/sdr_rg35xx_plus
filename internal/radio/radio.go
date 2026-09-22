@@ -14,6 +14,7 @@ import (
 
 	"sdr35/internal/audio"
 	"sdr35/internal/dsp"
+	"sdr35/internal/i18n"
 	"sdr35/internal/rtltcp"
 )
 
@@ -614,11 +615,11 @@ func (r *Radio) DirectSamplingMode() int {
 func (r *Radio) DirectSamplingLabel() string {
 	switch r.DirectSamplingMode() {
 	case 0:
-		return "ปิด (tuner เสมอ)"
+		return i18n.T("ds_off")
 	case 2:
-		return "เปิด (Q branch)"
+		return i18n.T("ds_on")
 	default:
-		return "อัตโนมัติ"
+		return i18n.T("ds_auto")
 	}
 }
 
@@ -780,11 +781,11 @@ func (r *Radio) Snapshot() Snapshot {
 		s.Connected = true
 	case stateConnecting:
 		s.Connecting = true
-		s.StatusText = "กำลังเชื่อมต่อ " + r.Host
+		s.StatusText = i18n.T("connecting") + r.Host
 	default:
-		s.StatusText = "ขาดการเชื่อมต่อ: " + r.lastErr
+		s.StatusText = i18n.T("disconnected") + r.lastErr
 		if r.reconAt.After(time.Now()) {
-			s.StatusText += fmt.Sprintf(" (ลองใหม่ใน %ds)", int(time.Until(r.reconAt).Seconds())+1)
+			s.StatusText += fmt.Sprintf(i18n.T("retry_in"), int(time.Until(r.reconAt).Seconds())+1)
 		}
 	}
 	if r.chain != nil {

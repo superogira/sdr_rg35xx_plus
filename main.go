@@ -36,6 +36,7 @@ import (
 
 	"sdr35/internal/audio"
 	"sdr35/internal/dsp"
+	"sdr35/internal/i18n"
 	"sdr35/internal/input"
 	"sdr35/internal/radio"
 	"sdr35/internal/ui"
@@ -166,10 +167,10 @@ func runUpdate(u *updater, base string, manual bool) {
 			return
 		}
 		if local > 0 && stamp <= local {
-			u.setMsg("เวอร์ชั่นล่าสุดแล้ว (%s)", buildStamp)
+			u.setMsg("%s", fmt.Sprintf(i18n.T("uptodate"), buildStamp))
 			return
 		}
-		u.setMsg("กำลังโหลดเวอร์ชั่นใหม่ %d …", stamp)
+		u.setMsg("%s", fmt.Sprintf(i18n.T("downloading"), stamp))
 
 		resp, err := updateGet(fmt.Sprintf("%s/sdrg35xx-linux-arm64.gz", base), 180*time.Second)
 		if err != nil {
@@ -194,7 +195,7 @@ func runUpdate(u *updater, base string, manual bool) {
 		}
 		sum := sha256.Sum256(gz)
 		if fmt.Sprintf("%x", sum) != sha {
-			u.setMsg("checksum ไม่ตรง — ยกเลิก")
+			u.setMsg("%s", i18n.T("checksum"))
 			return
 		}
 		zr, err := gzip.NewReader(bytes.NewReader(gz))
@@ -226,7 +227,7 @@ func runUpdate(u *updater, base string, manual bool) {
 			u.setMsg("แทนที่ไฟล์ไม่ได้: %v", err)
 			return
 		}
-		u.setMsg("อัพเดทเป็นเวอร์ชั่น %d แล้ว — กำลังรีสตาร์ท", stamp)
+		u.setMsg("%s", fmt.Sprintf(i18n.T("updated"), stamp))
 		fmt.Fprintf(os.Stderr, "update: installed stamp %d (was %s), re-exec\n", stamp, buildStamp)
 		time.Sleep(700 * time.Millisecond) // let the message reach the screen
 		syncDir(dir)
@@ -369,7 +370,7 @@ func main() {
 	// Boot frame right away: a solid color on screen proves the whole
 	// display path before anything else can hang, and exercises the first
 	// Present (which also runs the pan + mirror logic) immediately.
-	boot := u.Frame(ui.FrameStats{FreqHz: *freq, Mode: dspMode.Name, StepHz: 12_500, StatusText: "กำลังเริ่มระบบ…"})
+	boot := u.Frame(ui.FrameStats{FreqHz: *freq, Mode: dspMode.Name, StepHz: 12_500, StatusText: i18n.T("starting")})
 	if err := disp.Present(boot); err != nil {
 		fmt.Fprintf(os.Stderr, "boot present: %v\n", err)
 		return
@@ -394,6 +395,7 @@ func main() {
 		return 12_500
 	}
 	quit := func() {
+		langPref := i18n.Lang()
 		agcPref := "on"
 		if !r.AGCEnabled() {
 			agcPref = "off"
@@ -405,7 +407,7 @@ func main() {
 		case 0:
 			dsPref = "off"
 		}
-		saveConfig(*host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref)
+		saveConfig(*host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref)
 		stop()
 	}
 	// Screenshot support: the last presented frame and a transient status
@@ -424,9 +426,9 @@ func main() {
 		}
 		path := filepath.Join(dir, fmt.Sprintf("capture_%s.png", time.Now().Format("150405")))
 		if err := ui.SavePNG(path, lastFrame); err != nil {
-			capturedMsg = "บันทึกภาพไม่สำเร็จ: " + err.Error()
+			capturedMsg = i18n.T("shot_fail") + err.Error()
 		} else {
-			capturedMsg = "บันทึกภาพแล้ว: " + path
+			capturedMsg = i18n.T("shot_ok") + path
 		}
 		capturedAt = time.Now()
 		fmt.Fprintln(os.Stderr, capturedMsg)
@@ -768,7 +770,7 @@ func main() {
 				if d >= 3*time.Second {
 					quit()
 				} else {
-					exitHint = fmt.Sprintf("กดค้างเพื่อออก… %.1fs", float64(3*time.Second-d)/float64(time.Second))
+					exitHint = fmt.Sprintf(i18n.T("hold_exit"), float64(3*time.Second-d)/float64(time.Second))
 				}
 			}
 			// Key repeat for held tuning/volume buttons (main screen
@@ -815,23 +817,23 @@ func main() {
 		if uiMode == uiMenu {
 			sq := r.SquelchLabel()
 			if v := r.SquelchDb(); v >= 40 {
-				sq = "ปิด (Monitor)"
+				sq = i18n.T("sql_off")
 			} else {
 				sq = fmt.Sprintf("%.0f dB", v)
 			}
 			items := []ui.MenuItem{
-				{Label: "ความถี่", Value: fmt.Sprintf("%.5f MHz ▸", float64(r.Freq())/1e6)},
-				{Label: "โหมดรับ", Value: r.Mode().Name},
-				{Label: "Gain", Value: fmt.Sprintf("%.1f dB", r.GainDb())},
-				{Label: "Squelch", Value: sq},
-				{Label: "Sample Rate", Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
-				{Label: "Bandwidth", Value: bwLabel(r.Bandwidth())},
-				{Label: "HF Direct Sampling", Value: r.DirectSamplingLabel()},
-				{Label: "AGC (SSB/CW)", Value: agcLabel(r.AGCEnabled())},
-				{Label: "Span จอ (zoom)", Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
-				{Label: "วอลุ่ม", Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
-				{Label: "ถ่ายภาพหน้าจอ", Value: "กด A"},
-				{Label: "ตรวจอัพเดท", Value: "กด A"},
+				{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.5f MHz ▸", float64(r.Freq())/1e6)},
+				{Label: i18n.T("m_mode"), Value: r.Mode().Name},
+				{Label: i18n.T("m_gain"), Value: fmt.Sprintf("%.1f dB", r.GainDb())},
+				{Label: i18n.T("m_sql"), Value: sq},
+				{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
+				{Label: i18n.T("m_bw"), Value: bwLabel(r.Bandwidth())},
+				{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
+				{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
+				{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
+				{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
+				{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
+				{Label: i18n.T("m_update"), Value: i18n.T("press_a")},
 			}
 			u.DrawMenu(items, menuSel, fmt.Sprintf("รุ่น %s · %s", buildStamp, strings.ReplaceAll(buildTime, "_", " ")))
 		} else if uiMode == uiFreqEdit {
@@ -860,9 +862,9 @@ func main() {
 
 func agcLabel(on bool) string {
 	if on {
-		return "เปิด"
+		return i18n.T("on")
 	}
-	return "ปิด"
+	return i18n.T("off")
 }
 
 // bwLabel formats a bandwidth value: kHz for >= 1 kHz, Hz below.
@@ -911,11 +913,11 @@ func readIni(path string) map[string]string {
 	return cfg
 }
 
-func saveConfig(host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref string) {
+func saveConfig(host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string) {
 	f, err := os.Create(configPath())
 	if err != nil {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\nagc=%s\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref, agcPref)
+	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\nagc=%s\nlang=%s\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref, agcPref, langPref)
 }
