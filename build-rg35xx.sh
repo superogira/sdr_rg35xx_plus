@@ -10,10 +10,12 @@ echo "== cross-compiling SDRg35xx (linux/arm64, pure Go) =="
 # The stamp (YYYYMMDDHHMM) is both the OTA version number (compared by
 # the app against version.txt on the download server) and the build id.
 STAMP="$(date +%Y%m%d%H%M)"
-echo "build stamp: $STAMP"
+# Underscore instead of a space: -X values must survive ldflags quoting.
+BUILD_TIME="$(date '+%Y-%m-%d_%H:%M')"
+echo "build stamp: $STAMP ($BUILD_TIME)"
 printf '%s\n' "$STAMP" > dist/rg35xx/buildstamp.txt
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
-  go build -trimpath -ldflags "-s -w -X main.buildStamp=$STAMP" \
+  go build -trimpath -ldflags "-s -w -X main.buildStamp=$STAMP -X main.buildTime=$BUILD_TIME" \
   -o dist/rg35xx/SDRg35xx/sdrg35xx .
 
 echo "== copying launcher + icon =="
