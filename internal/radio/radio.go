@@ -72,6 +72,7 @@ type Radio struct {
 	sqlDb     float64 // NFM squelch threshold above floor (40 = off)
 	iqRate    int     // capture sample rate in Hz (server default 2.048M)
 	dsMode    int     // -1 auto (DS below 24 MHz), 0 force off, 2 force on (Q)
+	agcOn     bool    // SSB/CW AGC enabled
 	hfApplied int     // direct-sampling mode currently set on the server
 
 	client  *rtltcp.Client
@@ -115,6 +116,7 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		vol:    1,
 		sqlDb:  8,
 		iqRate: 2_048_000,
+		agcOn:  true,
 		chain:  dsp.NewChain(mode, nil, nil),
 	}
 }
@@ -152,6 +154,7 @@ func (r *Radio) SetCaptureRate(hz int) {
 	r.chain = dsp.NewChain(r.mode, r.tap, r.rawTap)
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
+	r.chain.SetAGCEnabled(r.agcOn)
 	client := r.client
 	r.mu.Unlock()
 	if r.out != nil {
@@ -240,6 +243,7 @@ func (r *Radio) session(ctx context.Context) error {
 		chain := dsp.NewChain(r.mode, r.tap, r.rawTap)
 		chain.SetVolume(r.vol)
 		chain.SetSquelchDb(r.sqlDb)
+		chain.SetAGCEnabled(r.agcOn)
 		r.chain = chain
 		r.state = stateStreaming
 		freq, gainDb := r.freqHz, r.gainDb
@@ -491,6 +495,7 @@ func (r *Radio) SetMode(mode dsp.Mode) {
 	r.chain = dsp.NewChain(mode, r.tap, r.rawTap)
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
+	r.chain.SetAGCEnabled(r.agcOn)
 	r.mu.Unlock()
 	// SSB/CW chains produce 8 kHz audio; FM modes IF2/4.
 	if r.out != nil {
@@ -579,6 +584,25 @@ func (r *Radio) directSamplingFor(hz int64) int {
 	}
 }
 
+// AGCEnabled reports whether SSB/CW AGC is on.
+func (r *Radio) AGCEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.agcOn
+}
+
+// SetAGCEnabled toggles the SSB/CW AGC live (also applied to future
+// chain rebuilds).
+func (r *Radio) SetAGCEnabled(on bool) {
+	r.mu.Lock()
+	r.agcOn = on
+	chain := r.chain
+	r.mu.Unlock()
+	if chain != nil {
+		chain.SetAGCEnabled(on)
+	}
+}
+
 // DirectSamplingMode returns the preference: -1 auto, 0 off, 2 on.
 func (r *Radio) DirectSamplingMode() int {
 	r.mu.Lock()
@@ -664,6 +688,7 @@ func (r *Radio) SetBandwidth(bw float64) {
 	r.chain = dsp.NewChain(m, r.tap, r.rawTap)
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
+	r.chain.SetAGCEnabled(r.agcOn)
 	r.mu.Unlock()
 	fmt.Fprintf(os.Stderr, "radio: bandwidth %.4g Hz (%s)\n", bw, m.Name)
 }

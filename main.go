@@ -285,6 +285,10 @@ func main() {
 			rate = n
 		}
 	}
+	agcOn := true
+	if v, ok := cfg["agc"]; ok && v == "off" {
+		agcOn = false
+	}
 	ds := -1
 	if v, ok := cfg["ds"]; ok {
 		switch v {
@@ -357,6 +361,9 @@ func main() {
 	if ds != -1 {
 		r.SetDirectSamplingMode(ds)
 	}
+	if !agcOn {
+		r.SetAGCEnabled(false)
+	}
 	fmt.Fprintf(os.Stderr, "step: ui created\n")
 
 	// Boot frame right away: a solid color on screen proves the whole
@@ -387,6 +394,10 @@ func main() {
 		return 12_500
 	}
 	quit := func() {
+		agcPref := "on"
+		if !r.AGCEnabled() {
+			agcPref = "off"
+		}
 		dsPref := "auto"
 		switch r.DirectSamplingMode() {
 		case 2:
@@ -394,7 +405,7 @@ func main() {
 		case 0:
 			dsPref = "off"
 		}
-		saveConfig(*host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref)
+		saveConfig(*host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref)
 		stop()
 	}
 	// Screenshot support: the last presented frame and a transient status
@@ -445,6 +456,7 @@ func main() {
 		menuSample
 		menuBW
 		menuDS
+		menuAGC
 		menuSpan
 		menuVolume
 		menuShot
@@ -529,6 +541,8 @@ func main() {
 			default:
 				r.SetDirectSamplingMode(-1)
 			}
+		case menuAGC:
+			r.SetAGCEnabled(!r.AGCEnabled())
 		case menuSpan:
 			spanIdx = (spanIdx + len(spanSteps) + dir) % len(spanSteps)
 			u.SetSpanKHz(spanSteps[spanIdx])
@@ -813,6 +827,7 @@ func main() {
 				{Label: "Sample Rate", Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
 				{Label: "Bandwidth", Value: bwLabel(r.Bandwidth())},
 				{Label: "HF Direct Sampling", Value: r.DirectSamplingLabel()},
+				{Label: "AGC (SSB/CW)", Value: agcLabel(r.AGCEnabled())},
 				{Label: "Span จอ (zoom)", Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
 				{Label: "วอลุ่ม", Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 				{Label: "ถ่ายภาพหน้าจอ", Value: "กด A"},
@@ -841,6 +856,13 @@ func main() {
 			lastBeat = time.Now()
 		}
 	}
+}
+
+func agcLabel(on bool) string {
+	if on {
+		return "เปิด"
+	}
+	return "ปิด"
 }
 
 // bwLabel formats a bandwidth value: kHz for >= 1 kHz, Hz below.
@@ -889,11 +911,11 @@ func readIni(path string) map[string]string {
 	return cfg
 }
 
-func saveConfig(host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref string) {
+func saveConfig(host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref string) {
 	f, err := os.Create(configPath())
 	if err != nil {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref)
+	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\nagc=%s\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref, agcPref)
 }

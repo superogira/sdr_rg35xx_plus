@@ -165,6 +165,7 @@ type Chain struct {
 
 	deemph *Deemph
 	agc    *AGC // SSB/CW loudness
+	agcOn  bool // AGC enable switch (menu)
 
 	// Squelch + metering state.
 	sqlOpen  bool
@@ -251,6 +252,7 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 	}
 	if mode.SSB {
 		c.agc = NewAGC()
+		c.agcOn = true
 	}
 	c.sqlLevel = 8 // dB above floor
 	c.powerDb = -100
@@ -273,6 +275,14 @@ func (c *Chain) SetMute(m bool) { c.muted = m }
 
 // PowerDb returns the smoothed IF power in dBFS.
 func (c *Chain) PowerDb() float64 { return c.powerDb }
+
+// SetAGCEnabled toggles the SSB/CW AGC live.
+func (c *Chain) SetAGCEnabled(on bool) {
+	c.agcOn = on
+	if on && c.agc == nil {
+		c.agc = NewAGC()
+	}
+}
 
 // SquelchOpen reports whether the squelch is currently open.
 func (c *Chain) SquelchOpen() bool { return c.sqlOpen }
@@ -378,7 +388,7 @@ func (c *Chain) processSSB(out *[]float32) {
 
 	for _, z := range side {
 		x := real(z) * 3.0
-		if c.agc != nil {
+		if c.agc != nil && c.agcOn {
 			x = c.agc.Step(x)
 		}
 		x = c.applySquelchRamp(x)
