@@ -1,0 +1,15 @@
+# Build output
+dist/
+
+# Dev-machine test artifacts
+*.exe
+*.wav
+*.raw
+capture_*.png
+smoke*.png
+screenshot*.png
+shot*.png
+thai_test.png
+
+# Go
+*.test
