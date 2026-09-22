@@ -285,6 +285,15 @@ func main() {
 			rate = n
 		}
 	}
+	ds := -1
+	if v, ok := cfg["ds"]; ok {
+		switch v {
+		case "on":
+			ds = 2
+		case "off":
+			ds = 0
+		}
+	}
 	span := 0
 	if v, ok := cfg["span"]; ok {
 		if n, err := strconv.Atoi(v); err == nil && n >= 10 && n <= 2048 {
@@ -344,6 +353,9 @@ func main() {
 	u := ui.New(dw, dh)
 	if span > 0 {
 		u.SetSpanKHz(span)
+	}
+	if ds != -1 {
+		r.SetDirectSamplingMode(ds)
 	}
 	fmt.Fprintf(os.Stderr, "step: ui created\n")
 
@@ -432,6 +444,7 @@ func main() {
 		menuSQL
 		menuSample
 		menuBW
+		menuDS
 		menuSpan
 		menuVolume
 		menuShot
@@ -506,6 +519,16 @@ func main() {
 			}
 			idx = (idx + len(bws) + dir) % len(bws)
 			r.SetBandwidth(bws[idx])
+		case menuDS:
+			// -1 auto → 2 on → 0 off → back to auto.
+			switch r.DirectSamplingMode() {
+			case -1:
+				r.SetDirectSamplingMode(2)
+			case 2:
+				r.SetDirectSamplingMode(0)
+			default:
+				r.SetDirectSamplingMode(-1)
+			}
 		case menuSpan:
 			spanIdx = (spanIdx + len(spanSteps) + dir) % len(spanSteps)
 			u.SetSpanKHz(spanSteps[spanIdx])
@@ -789,6 +812,7 @@ func main() {
 				{Label: "Squelch", Value: sq},
 				{Label: "Sample Rate", Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
 				{Label: "Bandwidth", Value: bwLabel(r.Bandwidth())},
+				{Label: "HF Direct Sampling", Value: r.DirectSamplingLabel()},
 				{Label: "Span จอ (zoom)", Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
 				{Label: "วอลุ่ม", Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 				{Label: "ถ่ายภาพหน้าจอ", Value: "กด A"},
