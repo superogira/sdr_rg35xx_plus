@@ -64,14 +64,15 @@ type Radio struct {
 	out    *audio.Output    // nil = waterfall only
 	name   string           // audio backend name for status
 
-	mu     sync.Mutex
-	freqHz int64
-	mode   dsp.Mode
-	gainDb float64 // tuner gain in dB at connect; negative = AGC
-	vol    float64
-	sqlDb  float64 // NFM squelch threshold above floor (40 = off)
-	iqRate int     // capture sample rate in Hz (server default 2.048M)
-	hfMode bool    // direct sampling active (below 24 MHz)
+	mu        sync.Mutex
+	freqHz    int64
+	mode      dsp.Mode
+	gainDb    float64 // tuner gain in dB at connect; negative = AGC
+	vol       float64
+	sqlDb     float64 // NFM squelch threshold above floor (40 = off)
+	iqRate    int     // capture sample rate in Hz (server default 2.048M)
+	dsMode    int     // -1 auto (DS below 24 MHz), 0 force off, 2 force on (Q)
+	hfApplied int     // direct-sampling mode currently set on the server
 
 	client  *rtltcp.Client
 	gains   int32
@@ -264,11 +265,11 @@ func (r *Radio) session(ctx context.Context) error {
 		// rtl-sdr-web-monitor uses against this same server; index
 		// based gain is avoided entirely.
 		r.mu.Lock()
-		r.hfMode = freq < 24_000_000
-		hf := r.hfMode
+		want := r.directSamplingFor(freq)
+		r.hfApplied = want
 		r.mu.Unlock()
-		if hf {
-			if err := client.SetDirectSampling(2); err != nil {
+		if want != 0 {
+			if err := client.SetDirectSampling(want); err != nil {
 				return fmt.Errorf("direct sampling: %w", err)
 			}
 		}
@@ -430,26 +431,20 @@ func (r *Radio) SetFreq(hz int64) {
 	r.mu.Lock()
 	r.freqHz = hz
 	client := r.client
-	hf := hz < 24_000_000
-	switchHF := hf != r.hfMode
-	r.hfMode = hf
+	want := r.directSamplingFor(hz)
+	switchHF := want != r.hfApplied
+	r.hfApplied = want
 	r.mu.Unlock()
 	if client == nil {
 		return
 	}
 	if switchHF {
-		// Crossed the tuner/direct-sampling boundary: the V4 receives HF
-		// through its internal mux on the Q branch.
-		mode := 0
-		if hf {
-			mode = 2
-		}
-		if err := client.SetDirectSampling(mode); err != nil {
-			fmt.Fprintf(os.Stderr, "radio: direct sampling %d failed: %v\n", mode, err)
+		if err := client.SetDirectSampling(want); err != nil {
+			fmt.Fprintf(os.Stderr, "radio: direct sampling %d failed: %v\n", want, err)
 			client.Close()
 			return
 		}
-		fmt.Fprintf(os.Stderr, "radio: direct sampling mode %d (HF=%v)\n", mode, hf)
+		fmt.Fprintf(os.Stderr, "radio: direct sampling mode %d (freq %.4f MHz)\n", want, float64(hz)/1e6)
 	}
 	if err := client.SetFrequency(uint32(hz)); err != nil {
 		fmt.Fprintf(os.Stderr, "radio: tune %d failed: %v — reconnecting\n", hz, err)
@@ -547,6 +542,66 @@ func (r *Radio) Hostname() string {
 }
 
 // GainText describes the current gain setting for the UI (in dB).
+// directSamplingFor returns the direct-sampling command value for a
+// frequency under the current preference (-1 auto / 0 off / 2 on).
+func (r *Radio) directSamplingFor(hz int64) int {
+	switch r.dsMode {
+	case 0:
+		return 0
+	case 2:
+		return 2
+	default:
+		if hz < 24_000_000 {
+			return 2
+		}
+		return 0
+	}
+}
+
+// DirectSamplingMode returns the preference: -1 auto, 0 off, 2 on.
+func (r *Radio) DirectSamplingMode() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.dsMode
+}
+
+// DirectSamplingLabel names the preference for the menu.
+func (r *Radio) DirectSamplingLabel() string {
+	switch r.DirectSamplingMode() {
+	case 0:
+		return "ปิด (tuner เสมอ)"
+	case 2:
+		return "เปิด (Q branch)"
+	default:
+		return "อัตโนมัติ"
+	}
+}
+
+// SetDirectSamplingMode stores the preference and applies it live
+// (re-sending the frequency so the tuner path re-arms after a switch).
+func (r *Radio) SetDirectSamplingMode(mode int) {
+	if mode != -1 && mode != 0 && mode != 2 {
+		return
+	}
+	r.mu.Lock()
+	r.dsMode = mode
+	want := r.directSamplingFor(r.freqHz)
+	switchNow := want != r.hfApplied
+	r.hfApplied = want
+	client := r.client
+	freq := r.freqHz
+	r.mu.Unlock()
+	if client != nil && switchNow {
+		if err := client.SetDirectSampling(want); err != nil {
+			fmt.Fprintf(os.Stderr, "radio: direct sampling %d failed: %v\n", want, err)
+			client.Close()
+			return
+		}
+		_ = client.SetFrequency(uint32(freq))
+	}
+	fmt.Fprintf(os.Stderr, "radio: direct sampling preference %d\n", mode)
+}
+
 func (r *Radio) GainText() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
