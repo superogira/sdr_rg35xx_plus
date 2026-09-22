@@ -69,6 +69,7 @@ type Radio struct {
 	gainDb float64 // tuner gain in dB at connect; negative = AGC
 	vol    float64
 	sqlDb  float64 // NFM squelch threshold above floor (40 = off)
+	hfMode bool    // direct sampling active (below 24 MHz)
 
 	client  *rtltcp.Client
 	gains   int32
@@ -91,8 +92,8 @@ const (
 func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Output) *Radio {
 	// Sanitize the startup frequency (a hand-edited or corrupted config
 	// must not reach the dongle).
-	if freqHz < 24_000_000 {
-		freqHz = 24_000_000
+	if freqHz < 500_000 {
+		freqHz = 500_000 // RTL-SDR Blog V4 lower edge (HF direct sampling)
 	}
 	if freqHz > 1_766_000_000 {
 		freqHz = 1_766_000_000
@@ -208,6 +209,15 @@ func (r *Radio) session(ctx context.Context) error {
 		// dB via CMD_SET_GAIN — the recipe the user's own
 		// rtl-sdr-web-monitor uses against this same server; index
 		// based gain is avoided entirely.
+		r.mu.Lock()
+		r.hfMode = freq < 24_000_000
+		hf := r.hfMode
+		r.mu.Unlock()
+		if hf {
+			if err := client.SetDirectSampling(2); err != nil {
+				return fmt.Errorf("direct sampling: %w", err)
+			}
+		}
 		if err := client.SetFrequency(uint32(freq)); err != nil {
 			return fmt.Errorf("initial tune: %w", err)
 		}
@@ -321,8 +331,8 @@ func max(a, b int) int {
 // the connection is poisoned (partial frame) — closing the client makes
 // the session loop reconnect with a clean stream.
 func (r *Radio) SetFreq(hz int64) {
-	if hz < 24_000_000 {
-		hz = 24_000_000
+	if hz < 500_000 {
+		hz = 500_000 // RTL-SDR Blog V4 lower edge (HF direct sampling)
 	}
 	if hz > 1_766_000_000 {
 		hz = 1_766_000_000
@@ -330,9 +340,26 @@ func (r *Radio) SetFreq(hz int64) {
 	r.mu.Lock()
 	r.freqHz = hz
 	client := r.client
+	hf := hz < 24_000_000
+	switchHF := hf != r.hfMode
+	r.hfMode = hf
 	r.mu.Unlock()
 	if client == nil {
 		return
+	}
+	if switchHF {
+		// Crossed the tuner/direct-sampling boundary: the V4 receives HF
+		// through its internal mux on the Q branch.
+		mode := 0
+		if hf {
+			mode = 2
+		}
+		if err := client.SetDirectSampling(mode); err != nil {
+			fmt.Fprintf(os.Stderr, "radio: direct sampling %d failed: %v\n", mode, err)
+			client.Close()
+			return
+		}
+		fmt.Fprintf(os.Stderr, "radio: direct sampling mode %d (HF=%v)\n", mode, hf)
 	}
 	if err := client.SetFrequency(uint32(hz)); err != nil {
 		fmt.Fprintf(os.Stderr, "radio: tune %d failed: %v — reconnecting\n", hz, err)
