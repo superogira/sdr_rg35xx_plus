@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"math"
 	"os"
+	"sort"
 
 	"sdr35/internal/dsp"
 )
@@ -138,6 +139,26 @@ func (u *UI) NewSpectrumRow(tap *dsp.SpectrumTap) bool {
 	power := make([]float64, n)
 	for i := 0; i < n; i++ {
 		power[i] = 20 * math.Log10(math.Hypot(u.re[(i+n/2)%n], u.im[(i+n/2)%n]) + 1e-12)
+	}
+
+	// Narrowband blanking: a 7-bin median across frequency replaces thin
+	// stationary spectral lines (the ~2 kHz comb the server's stream
+	// handling produces) with the local floor. Real channels are far
+	// wider than the window (NFM ≈ 25 bins, WFM ≈ 400) and pass through
+	// untouched. This also removes the residual DC spike.
+	for i := 0; i < n; i++ {
+		lo2, hi2 := i-3, i+3
+		if lo2 < 0 {
+			lo2 = 0
+		}
+		if hi2 > n-1 {
+			hi2 = n - 1
+		}
+		w := append([]float64(nil), power[lo2:hi2+1]...)
+		sort.Float64s(w)
+		if m := w[len(w)/2]; m < power[i] {
+			power[i] = m
+		}
 	}
 
 	// Track the noise floor as the 25th percentile and normalize to it.
