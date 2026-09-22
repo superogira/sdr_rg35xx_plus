@@ -159,7 +159,10 @@ func (r *Radio) SetCaptureRate(hz int) {
 	client := r.client
 	r.mu.Unlock()
 	if r.out != nil {
-		r.out.SetInputRate(dsp.AudioRate)
+		// The chain's audio rate changed with the capture rate —
+		// re-tune the resampler to the MODE's rate (dsp.AudioRate is
+		// the old fixed 32k constant, wrong at 1.024M/512k).
+		r.out.SetInputRate(r.mode.AudioOutRate())
 	}
 	if client != nil {
 		client.Close() // reconnect with the new rate
