@@ -110,8 +110,17 @@ func (u *UI) DrawFreqEditor(digits string, cursor int) {
 	totalW := big.TextWidth(disp)
 	bx := px + (pw-totalW)/2
 	by := py + 116
-	preW := big.TextWidth(disp[:cursor+4]) // width of chars before the selected digit
-	chW := big.TextWidth(disp[:cursor+5]) - preW
+	if cursor < 0 || cursor > 8 {
+		cursor = 6
+	}
+	// Digit i sits at display position i before the dot, i+1 after it
+	// (the dot occupies position 4).
+	pos := cursor
+	if cursor >= 4 {
+		pos = cursor + 1
+	}
+	preW := big.TextWidth(disp[:pos])
+	chW := big.TextWidth(disp[:pos+1]) - preW
 	u.fillBlend(bx+preW-1, by-34, chW+2, 46, 80, 220, 255, 90)
 	big.DrawString(u.img, white, bx, by, disp)
 }
