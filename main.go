@@ -424,6 +424,7 @@ func main() {
 		menuGain
 		menuSQL
 		menuSample
+		menuBW
 		menuSpan
 		menuVolume
 		menuShot
@@ -483,6 +484,21 @@ func main() {
 				next = 1_024_000
 			}
 			r.SetCaptureRate(next)
+		case menuBW:
+			bws := r.Bandwidths()
+			if len(bws) == 0 {
+				return
+			}
+			cur := r.Bandwidth()
+			idx := 0
+			for i, v := range bws {
+				if v == cur {
+					idx = i
+					break
+				}
+			}
+			idx = (idx + len(bws) + dir) % len(bws)
+			r.SetBandwidth(bws[idx])
 		case menuSpan:
 			spanIdx = (spanIdx + len(spanSteps) + dir) % len(spanSteps)
 			u.SetSpanKHz(spanSteps[spanIdx])
@@ -535,7 +551,13 @@ func main() {
 		case input.Down:
 			r.SetFreq(r.Freq() - 10*stepFor())
 		case input.A, input.Select:
-			r.SetMode(dsp.NextMode(r.Mode()))
+			m := dsp.NextMode(r.Mode())
+			r.SetMode(m)
+			if bw, ok := cfg[fmt.Sprintf("bw.%s", m.Name)]; ok {
+				if v, err := strconv.ParseFloat(bw, 64); err == nil {
+					r.SetBandwidth(v)
+				}
+			}
 		case input.X:
 			r.CycleSquelch()
 		case input.L1:
@@ -759,6 +781,7 @@ func main() {
 				{Label: "Gain", Value: fmt.Sprintf("%.1f dB", r.GainDb())},
 				{Label: "Squelch", Value: sq},
 				{Label: "Sample Rate", Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
+				{Label: "Bandwidth", Value: bwLabel(r.Bandwidth())},
 				{Label: "Span จอ (zoom)", Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
 				{Label: "วอลุ่ม", Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 				{Label: "ถ่ายภาพหน้าจอ", Value: "กด A"},
@@ -783,6 +806,14 @@ func main() {
 			lastBeat = time.Now()
 		}
 	}
+}
+
+// bwLabel formats a bandwidth value: kHz for >= 1 kHz, Hz below.
+func bwLabel(hz float64) string {
+	if hz >= 1000 {
+		return fmt.Sprintf("%g kHz", hz/1000)
+	}
+	return fmt.Sprintf("%g Hz", hz)
 }
 
 // --- tiny config file ---------------------------------------------------
