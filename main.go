@@ -559,7 +559,7 @@ func main() {
 			spanIdx = (spanIdx + len(spanSteps) + dir) % len(spanSteps)
 			u.SetSpanKHz(spanSteps[spanIdx])
 		case menuVolume:
-			v := math.Round((r.Volume()+float64(dir)*0.025)*40) / 40
+			v := math.Round((r.Volume()+float64(dir)*0.01)*100) / 100
 			if v < 0 {
 				v = 0
 			}
@@ -617,28 +617,27 @@ func main() {
 		case input.X:
 			r.CycleSquelch()
 		case input.L1:
-			v := r.Volume() - 0.1
+			v := math.Round((r.Volume()-0.01)*100) / 100
 			if v < 0 {
 				v = 0
 			}
 			r.SetVolume(v)
 		case input.R1:
-			v := r.Volume() + 0.1
+			v := math.Round((r.Volume()+0.01)*100) / 100
 			if v > 1.5 {
 				v = 1.5
 			}
 			r.SetVolume(v)
 		case input.VolDown:
-			// The side volume wheel: fine steps (2.5%) for precise
-			// listening levels; L1/R1 stay coarse. Rounded to the
-			// 2.5% grid so repeated taps land on exact values.
-			v := math.Round((r.Volume()-0.025)*40) / 40
+			// Side volume wheel: 1% steps for precise levels; held
+			// buttons auto-repeat (see the key-repeat block below).
+			v := math.Round((r.Volume()-0.01)*100) / 100
 			if v < 0 {
 				v = 0
 			}
 			r.SetVolume(v)
 		case input.VolUp:
-			v := math.Round((r.Volume()+0.025)*40) / 40
+			v := math.Round((r.Volume()+0.01)*100) / 100
 			if v > 1.5 {
 				v = 1.5
 			}
