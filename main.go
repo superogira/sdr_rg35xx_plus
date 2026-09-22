@@ -458,13 +458,12 @@ func main() {
 	adjustItem := func(idx, dir int) {
 		switch idx {
 		case menuMode:
-			if dir > 0 || r.Mode() == dsp.ModeWFM {
-				if r.Mode() == dsp.ModeWFM {
-					r.SetMode(dsp.ModeNFM)
-				} else {
-					r.SetMode(dsp.ModeWFM)
-				}
+			m := dsp.NextMode(r.Mode())
+			if dir < 0 {
+				// one back in a 5-cycle == four forward
+				m = dsp.NextMode(dsp.NextMode(dsp.NextMode(dsp.NextMode(r.Mode()))))
 			}
+			r.SetMode(m)
 		case menuGain:
 			r.SetGainDb(radio.GainStepDb(r.GainDb(), dir))
 		case menuSQL:
@@ -536,11 +535,7 @@ func main() {
 		case input.Down:
 			r.SetFreq(r.Freq() - 10*stepFor())
 		case input.A, input.Select:
-			if r.Mode() == dsp.ModeWFM {
-				r.SetMode(dsp.ModeNFM)
-			} else {
-				r.SetMode(dsp.ModeWFM)
-			}
+			r.SetMode(dsp.NextMode(r.Mode()))
 		case input.X:
 			r.CycleSquelch()
 		case input.L1:

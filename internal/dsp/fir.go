@@ -142,3 +142,41 @@ func (d *DCBlocker) Step(x complex128) complex128 {
 	d.x1, d.y1 = x, y
 	return y
 }
+
+// complexCIFIR filters complex input with COMPLEX taps (no decimation),
+// appending to *out. Used for the SSB sideband bandpass, whose taps are
+// a lowpass prototype rotated to the sideband centre.
+func complexCIFIR(taps []complex128, hist *[]complex128, in []complex128, out *[]complex128) {
+	L := len(taps)
+	H := *hist
+	if cap(H) < L-1 {
+		H = make([]complex128, L-1)
+	}
+	H = H[:L-1]
+
+	base := len(*out)
+	*out = growComplex(*out, base+len(in))[0 : base+len(in)]
+	for j := 0; j < len(in); j++ {
+		var acc complex128
+		for k := 0; k < L; k++ {
+			idx := j - k
+			var x complex128
+			if idx >= 0 {
+				x = in[idx]
+			} else {
+				x = H[L-1+idx]
+			}
+			acc += x * taps[k]
+		}
+		(*out)[base+j] = acc
+	}
+
+	if len(in) >= L-1 {
+		copy(H, in[len(in)-(L-1):])
+	} else {
+		keep := L - 1 - len(in)
+		copy(H, H[len(H)-keep:])
+		copy(H[keep:], in)
+	}
+	*hist = H
+}
