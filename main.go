@@ -279,6 +279,12 @@ func main() {
 			rate = n
 		}
 	}
+	span := 0
+	if v, ok := cfg["span"]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 10 && n <= 2048 {
+			span = n
+		}
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -298,7 +304,6 @@ func main() {
 	}
 	if rate != 2_048_000 {
 		r.SetCaptureRate(rate)
-		ui.DisplaySpan = dsp.DisplaySpanHz
 	}
 	r.SetVolume(*vol)
 	go r.Run(ctx)
@@ -330,6 +335,9 @@ func main() {
 	dw, dh := disp.Size()
 	fmt.Fprintf(os.Stderr, "step: display ok %dx%d\n", dw, dh)
 	u := ui.New(dw, dh)
+	if span > 0 {
+		u.SetSpanKHz(span)
+	}
 	fmt.Fprintf(os.Stderr, "step: ui created\n")
 
 	// Boot frame right away: a solid color on screen proves the whole
@@ -360,7 +368,7 @@ func main() {
 		return 12_500
 	}
 	quit := func() {
-		saveConfig(*host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate())
+		saveConfig(*host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000)
 		stop()
 	}
 	// Screenshot support: the last presented frame and a transient status
@@ -411,8 +419,19 @@ func main() {
 		menuVolume
 		menuShot
 	)
-	const menuUpdate = 7
+	const menuSpan = 7
+	const menuUpdate = 8
 	menuCount := menuUpdate + 1
+	spanSteps := []int{1000, 750, 500, 250, 125, 100, 50}
+	spanIdx := func() int {
+		want := u.SpanFull / 1000
+		for i, v := range spanSteps {
+			if v == want {
+				return i
+			}
+		}
+		return 2 // default 500k if unset
+	}()
 
 	freqDigits := func() string {
 		hz := r.Freq()
@@ -457,7 +476,9 @@ func main() {
 				next = 1_024_000
 			}
 			r.SetCaptureRate(next)
-			ui.DisplaySpan = dsp.DisplaySpanHz
+		case menuSpan:
+			spanIdx = (spanIdx + len(spanSteps) + dir) % len(spanSteps)
+			u.SetSpanKHz(spanSteps[spanIdx])
 		case menuVolume:
 			v := math.Round((r.Volume()+float64(dir)*0.025)*40) / 40
 			if v < 0 {
@@ -696,7 +717,7 @@ func main() {
 			}
 		}
 
-		u.NewSpectrumRow(r.Tap())
+		u.NewSpectrumRow(r.Tap(), r.RawTap())
 		snap := r.Snapshot()
 		status := snap.StatusText
 		if exitHint != "" {
@@ -734,7 +755,8 @@ func main() {
 				{Label: "โหมดรับ", Value: r.Mode().Name},
 				{Label: "Gain", Value: fmt.Sprintf("%.1f dB", r.GainDb())},
 				{Label: "Squelch", Value: sq},
-				{Label: "Sample Rate", Value: fmt.Sprintf("%.3fM (±%dk)", float64(r.IQRate())/1e6, dsp.DisplaySpanHz/1000)},
+				{Label: "Sample Rate", Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
+				{Label: "Span จอ (zoom)", Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
 				{Label: "วอลุ่ม", Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 				{Label: "ถ่ายภาพหน้าจอ", Value: "กด A"},
 				{Label: "ตรวจอัพเดท", Value: "กด A"},
@@ -798,7 +820,7 @@ func readIni(path string) map[string]string {
 	return cfg
 }
 
-func saveConfig(host string, freq int64, mode string, vol float64, gainDb float64, rate int) {
+func saveConfig(host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int) {
 	f, err := os.Create(configPath())
 	if err != nil {
 		return

@@ -158,7 +158,7 @@ func main() {
 	// Discard ~300 ms of settling, then capture.
 	drain(c, 300*time.Millisecond)
 
-	chain := dsp.NewChain(dspMode, nil)
+	chain := dsp.NewChain(dspMode, nil, nil)
 	var audioOut []float32
 	var raw []byte
 	buf := make([]byte, 128*1024)

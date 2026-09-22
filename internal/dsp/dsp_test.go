@@ -95,7 +95,7 @@ func dominantTone(samples []float32, rate int) (float64, float64) {
 func TestChainRecoversWFMTone(t *testing.T) {
 	const tone = 1000.0
 	iq := genFM(0.5, tone, 40000, 0.8)
-	ch := NewChain(ModeWFM, nil)
+	ch := NewChain(ModeWFM, nil, nil)
 	var audio []float32
 	ch.Process(iq, &audio)
 	want := int(0.5 * float64(AudioRate))
@@ -148,7 +148,7 @@ func TestChainRecoversNFMTone(t *testing.T) {
 	noise := genNoise(0.4, 0.004)
 	sig := genFM(0.5, tone, 2500, 0.5)
 	iq := append(noise, sig...)
-	ch := NewChain(ModeNFM, nil)
+	ch := NewChain(ModeNFM, nil, nil)
 	var audio []float32
 	processChunked(ch, iq, &audio)
 	// Analyze the on-air part only (skip the noise pre-roll and filter
@@ -177,7 +177,7 @@ func TestChainRecoversNFMTone(t *testing.T) {
 }
 
 func TestSquelchCycle(t *testing.T) {
-	ch := NewChain(ModeNFM, nil)
+	ch := NewChain(ModeNFM, nil, nil)
 	ch.SetSquelchDb(8)
 	var audio []float32
 	// 0.3s noise → squelch must be closed and audio silent.

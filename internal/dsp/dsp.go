@@ -90,13 +90,14 @@ type Chain struct {
 	fdem     []float64
 	audioBuf []float64
 
-	tap *SpectrumTap
+	tap    *SpectrumTap // IF-rate tap (after decimation) for narrow spans
+	rawTap *SpectrumTap // full-rate tap (before decimation) for wide spans
 }
 
 // NewChain builds a chain for the mode with filters designed for the fixed
 // global rates. volume defaults to 1.
-func NewChain(mode Mode, tap *SpectrumTap) *Chain {
-	c := &Chain{mode: mode, tap: tap, volume: 1}
+func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
+	c := &Chain{mode: mode, tap: tap, rawTap: rawTap, volume: 1}
 	c.dc = NewDCBlocker(float64(IQRate))
 	// 255 taps with cutoff at 0.40×IF2: the stopband lands almost exactly
 	// at the IF2 Nyquist edge for every supported rate (the tap count is
@@ -159,6 +160,10 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 		re := (float64(iq[2*i]) - 127.5) / 127.5
 		im := (float64(iq[2*i+1]) - 127.5) / 127.5
 		c.fiq[i] = c.dc.Step(complex(re, im))
+	}
+
+	if c.rawTap != nil {
+		c.rawTap.Push(c.fiq)
 	}
 
 	// IF decimation IQRate -> IF2Rate.
