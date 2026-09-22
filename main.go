@@ -286,6 +286,9 @@ func main() {
 			rate = n
 		}
 	}
+	if v, ok := cfg["lang"]; ok {
+		i18n.SetLang(v)
+	}
 	agcOn := true
 	if v, ok := cfg["agc"]; ok && v == "off" {
 		agcOn = false
@@ -459,6 +462,7 @@ func main() {
 		menuBW
 		menuDS
 		menuAGC
+		menuLang
 		menuSpan
 		menuVolume
 		menuShot
@@ -545,6 +549,12 @@ func main() {
 			}
 		case menuAGC:
 			r.SetAGCEnabled(!r.AGCEnabled())
+		case menuLang:
+			if i18n.Lang() == "th" {
+				i18n.SetLang("en")
+			} else {
+				i18n.SetLang("th")
+			}
 		case menuSpan:
 			spanIdx = (spanIdx + len(spanSteps) + dir) % len(spanSteps)
 			u.SetSpanKHz(spanSteps[spanIdx])
@@ -830,6 +840,7 @@ func main() {
 				{Label: i18n.T("m_bw"), Value: bwLabel(r.Bandwidth())},
 				{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
 				{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
+				{Label: i18n.T("m_lang"), Value: langLabel()},
 				{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
 				{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 				{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
@@ -858,6 +869,13 @@ func main() {
 			lastBeat = time.Now()
 		}
 	}
+}
+
+func langLabel() string {
+	if i18n.Lang() == "en" {
+		return "English"
+	}
+	return "ไทย"
 }
 
 func agcLabel(on bool) string {
