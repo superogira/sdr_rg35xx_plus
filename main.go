@@ -48,6 +48,10 @@ const defaultHost = "e25wop.thddns.net:2255"
 // accepts whatever the update server offers.
 var buildStamp = "0"
 
+// buildTime is the human build timestamp (YYYY-MM-DD_HH:MM, also from
+// -ldflags; the underscore keeps the value shell-friendly).
+var buildTime = "-"
+
 // --- over-the-air updater -------------------------------------------------
 
 const defaultUpdateBase = "https://downloads.catgg.net/sdrg35xx"
@@ -317,6 +321,7 @@ func main() {
 
 	// Over-the-air updater: auto-check after boot (config update=off
 	// disables), manual re-check from the settings menu.
+	fmt.Fprintf(os.Stderr, "SDRg35xx build %s (%s)\n", buildStamp, strings.ReplaceAll(buildTime, "_", " "))
 	upd := &updater{}
 	updateBase := defaultUpdateBase
 	if v, ok := cfg["updateurl"]; ok && v != "" {
@@ -764,7 +769,7 @@ func main() {
 				{Label: "ถ่ายภาพหน้าจอ", Value: "กด A"},
 				{Label: "ตรวจอัพเดท", Value: "กด A"},
 			}
-			u.DrawMenu(items, menuSel)
+			u.DrawMenu(items, menuSel, fmt.Sprintf("รุ่น %s · %s", buildStamp, strings.ReplaceAll(buildTime, "_", " ")))
 		} else if uiMode == uiFreqEdit {
 			u.DrawFreqEditor(editDigits, editCursor)
 		}

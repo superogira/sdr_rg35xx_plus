@@ -65,10 +65,13 @@ func (u *UI) fillBlend(x, y, w, h int, r, g, b, a uint8) {
 }
 
 // DrawMenu renders the settings overlay on top of the composed frame.
-func (u *UI) DrawMenu(items []MenuItem, sel int) {
+func (u *UI) DrawMenu(items []MenuItem, sel int, footer string) {
 	rowH := 28
 	pw := 440
 	ph := 64 + rowH*len(items) + 30
+	if footer != "" {
+		ph += 22
+	}
 	px := (u.W - pw) / 2
 	py := (u.H - ph) / 2
 
@@ -96,6 +99,9 @@ func (u *UI) DrawMenu(items []MenuItem, sel int) {
 			vc = color.RGBA{255, 230, 120, 255}
 		}
 		f.DrawString(u.img, vc, px+pw-18-vw, y, it.Value)
+	}
+	if footer != "" {
+		Face(11, false).DrawString(u.img, grey, px+16, py+ph-12, footer)
 	}
 }
 
