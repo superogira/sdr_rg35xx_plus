@@ -529,15 +529,14 @@ var _ = fmt.Sprintf
 var kbRows = []string{
 	"0123456789",
 	"abcdefghijklmnopqrstuvwxyz",
-	"ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-	".:-_/",
+	".:-_/ ",
 }
 
 // DrawKeyboard renders an on-screen keyboard for editing the rtl_tcp
 // host address. cursor is the text-edit position; kbR/kbC are the
 // selected key row/column; shift selects the uppercase row.
 func (u *UI) DrawKeyboard(text string, textCursor, kbR, kbC int) {
-	pw, ph := 520, 330
+	pw, ph := 520, 260
 	px := (u.W - pw) / 2
 	py := (u.H - ph) / 2
 
@@ -568,31 +567,36 @@ func (u *UI) DrawKeyboard(text string, textCursor, kbR, kbC int) {
 		u.fillBlend(tx+cw, ty-16, 2, 22, 255, 255, 255, 160)
 	}
 
-	// Keyboard rows
+	// Keyboard rows: fixed-width grid cells, left-aligned so columns
+	// line up neatly across rows of different length.
 	kbFace := Face(16, false)
 	kbFaceB := Face(16, true)
-	y := py + 120
+	const cellW = 18
+	const cellH = 30
+	y0 := py + 120
 	for ri, row := range kbRows {
-		// Center each row
-		rw := kbFace.TextWidth(row)
-		rx := px + (pw-rw)/2
 		for ci, ch := range row {
 			cs := string(ch)
-			bw := kbFace.TextWidth(cs)
+			cx := px + 60 + ci*cellW
+			cy := y0 + ri*cellH
 			sel := ri == kbR && ci == kbC
 			if sel {
-				u.fillBlend(rx-2, y-14, bw+4, 24, 80, 220, 255, 120)
+				u.fillBlend(cx, cy-15, cellW, cellH-4, 80, 220, 255, 130)
 			}
+			// Centre the glyph inside its cell
+			gw := kbFace.TextWidth(cs)
+			gx := cx + (cellW-gw)/2
 			if sel {
-				kbFaceB.DrawString(u.img, white, rx, y, cs)
+				kbFaceB.DrawString(u.img, white, gx, cy, cs)
 			} else {
-				kbFace.DrawString(u.img, grey, rx, y, cs)
+				kbFace.DrawString(u.img, grey, gx, cy, cs)
 			}
-			rx += bw + 6
 		}
-		y += 28
 	}
+	// Bottom bar: ⌫ and OK labels
+	by := y0 + len(kbRows)*cellH + 10
+	Face(13, false).DrawString(u.img, grey, px+60, by, "B = ⌫")
 
 	// Bottom row: ← space → ⌫ OK
-	Face(13, false).DrawString(u.img, grey, px+16, py+ph-14, "กด Y ยืนยันทันทีเมื่อพิมพ์เสร็จ")
+	// hint text in the B label row
 }
