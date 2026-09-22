@@ -21,6 +21,19 @@ func SavePNG(path string, img *image.RGBA) error {
 	return png.Encode(f, img)
 }
 
+// SetSpanKHz sets the waterfall zoom (full width in kHz). Values wider
+// than the capture rate are clamped to it.
+func (u *UI) SetSpanKHz(khz int) {
+	max := dsp.IQRate / 1000
+	if khz > max {
+		khz = max
+	}
+	if khz < 10 {
+		khz = 10
+	}
+	u.SpanFull = khz * 1000
+}
+
 // MenuItem is one row of the settings menu.
 type MenuItem struct {
 	Label string
@@ -128,10 +141,6 @@ func (u *UI) DrawFreqEditor(digits string, cursor int) {
 // BarHeight is the bottom status bar; everything above it is waterfall.
 const BarHeight = 64
 
-// DisplaySpan is the half-width of spectrum shown (full IF; follows the
-// capture rate — see dsp.DisplaySpanHz).
-var DisplaySpan = dsp.DisplaySpanHz
-
 // UI owns the frame buffer and draws one screen per present.
 type UI struct {
 	W, H          int
@@ -145,6 +154,10 @@ type UI struct {
 	// waterfall. Now overlays are composed fresh on top of a copy of wf
 	// every frame and can never persist into the history.
 	wf *image.RGBA
+
+	// SpanFull is the displayed spectrum width in Hz (zoom). Spans wider
+	// than the decimated IF are fed from the raw full-rate tap.
+	SpanFull int
 
 	lut [256]color.RGBA
 
@@ -176,7 +189,7 @@ type FrameStats struct {
 }
 
 func New(w, h int) *UI {
-	u := &UI{W: w, H: h, WaterfallRows: h - BarHeight, floor: -95}
+	u := &UI{W: w, H: h, WaterfallRows: h - BarHeight, floor: -95, SpanFull: dsp.IF2Rate}
 	u.img = image.NewRGBA(image.Rect(0, 0, w, h))
 	u.wf = image.NewRGBA(image.Rect(0, 0, w, u.WaterfallRows))
 	u.snap = make([]complex128, dsp.TapLen)
@@ -237,8 +250,16 @@ func (u *UI) clearAll() {
 // NewSpectrumRow scrolls the waterfall by one row if the tap has fresh
 // samples and draws the newest spectrum on top. Returns true when the
 // waterfall advanced.
-func (u *UI) NewSpectrumRow(tap *dsp.SpectrumTap) bool {
-	g := tap.Snapshot(u.snap)
+func (u *UI) NewSpectrumRow(tap, rawTap *dsp.SpectrumTap) bool {
+	// Pick the source: the decimated IF tap for spans inside the IF
+	// (fine 500 Hz bins), the raw full-rate tap for wider views.
+	src := tap
+	srcRate := dsp.IF2Rate
+	if u.SpanFull/2 > dsp.IF2Rate/2 {
+		src = rawTap
+		srcRate = dsp.IQRate
+	}
+	g := src.Snapshot(u.snap)
 	if g == 0 || g == u.lastG {
 		return false
 	}
@@ -277,7 +298,7 @@ func (u *UI) NewSpectrumRow(tap *dsp.SpectrumTap) bool {
 
 	// Draw the new row, stretching the displayed bin range across the
 	// width.
-	nVis := n * DisplaySpan / dsp.IF2Rate // half-width in bins
+	nVis := n * (u.SpanFull / 2) / srcRate // half-width in bins
 	if nVis < 1 || nVis > n/2 {
 		nVis = n / 2
 	}
@@ -344,7 +365,7 @@ func (u *UI) drawSpanLabels() {
 	white := color.RGBA{235, 235, 235, 255}
 	shadow := color.RGBA{0, 0, 0, 220}
 	centerMHz := float64(u.stats.FreqHz) / 1e6
-	span := formatSpan(float64(DisplaySpan))
+	span := formatSpan(float64(u.SpanFull) / 2)
 	center := fmt.Sprintf("%.4f MHz", centerMHz)
 	labels := []struct {
 		x int

@@ -59,9 +59,10 @@ type Radio struct {
 	Host string
 	demo bool
 
-	tap  *dsp.SpectrumTap
-	out  *audio.Output // nil = waterfall only
-	name string        // audio backend name for status
+	tap    *dsp.SpectrumTap
+	rawTap *dsp.SpectrumTap // full-rate tap for wide waterfall spans
+	out    *audio.Output    // nil = waterfall only
+	name   string           // audio backend name for status
 
 	mu     sync.Mutex
 	freqHz int64
@@ -105,6 +106,7 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 	return &Radio{
 		Host:   host,
 		tap:    dsp.NewSpectrumTap(),
+		rawTap: dsp.NewSpectrumTap(),
 		out:    out,
 		freqHz: freqHz,
 		mode:   mode,
@@ -112,11 +114,12 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		vol:    1,
 		sqlDb:  8,
 		iqRate: 2_048_000,
-		chain:  dsp.NewChain(mode, nil),
+		chain:  dsp.NewChain(mode, nil, nil),
 	}
 }
 
-func (r *Radio) Tap() *dsp.SpectrumTap { return r.tap }
+func (r *Radio) Tap() *dsp.SpectrumTap    { return r.tap }
+func (r *Radio) RawTap() *dsp.SpectrumTap { return r.rawTap }
 
 // IQRate returns the configured capture rate.
 func (r *Radio) IQRate() int {
@@ -145,7 +148,7 @@ func (r *Radio) SetCaptureRate(hz int) {
 		return
 	}
 	r.mu.Lock()
-	r.chain = dsp.NewChain(r.mode, r.tap)
+	r.chain = dsp.NewChain(r.mode, r.tap, r.rawTap)
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
 	client := r.client
@@ -173,7 +176,7 @@ func (r *Radio) Run(ctx context.Context) {
 	if r.demo {
 		r.mu.Lock()
 		r.state = stateStreaming
-		r.chain = dsp.NewChain(r.mode, r.tap)
+		r.chain = dsp.NewChain(r.mode, r.tap, r.rawTap)
 		r.chain.SetVolume(r.vol)
 		r.mu.Unlock()
 		dsp.RunDemo(ctx, func() *dsp.Chain {
@@ -233,7 +236,7 @@ func (r *Radio) session(ctx context.Context) error {
 		r.mu.Lock()
 		r.client = client
 		r.gains = client.Info.GainCount
-		chain := dsp.NewChain(r.mode, r.tap)
+		chain := dsp.NewChain(r.mode, r.tap, r.rawTap)
 		chain.SetVolume(r.vol)
 		chain.SetSquelchDb(r.sqlDb)
 		r.chain = chain
@@ -433,7 +436,7 @@ func (r *Radio) Freq() int64 {
 func (r *Radio) SetMode(mode dsp.Mode) {
 	r.mu.Lock()
 	r.mode = mode
-	r.chain = dsp.NewChain(mode, r.tap)
+	r.chain = dsp.NewChain(mode, r.tap, r.rawTap)
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
 	r.mu.Unlock()
