@@ -50,19 +50,40 @@ type Mode struct {
 	SSB      bool    // use the SSB branch instead of the FM discriminator
 	ShiftHz  float64 // band center offset: USB +1500, LSB -1500, CW +700
 	HalfBwHz float64 // half of the audio passband: 1300 SSB, 150 CW
+
+	// BwHz is the receive channel bandwidth in Hz (NFM/WFM: the IF
+	// channel filter; SSB/CW: the audio passband width). 0 = default.
+	BwHz float64
 }
+
+// Bandwidths lists the selectable channel bandwidths (Hz) for a mode.
+func (m Mode) Bandwidths() []float64 {
+	switch {
+	case m.Name == "NFM":
+		return []float64{5000, 6250, 8000, 10000, 12500, 15000, 20000, 25000}
+	case m.Name == "WFM":
+		return []float64{50000, 75000, 100000, 150000, 200000, 250000}
+	case m.SSB && m.Name != "CW":
+		return []float64{500, 1000, 1500, 2000, 2500, 3000}
+	case m.Name == "CW":
+		return []float64{50, 100, 150, 200, 250, 300, 400, 500}
+	}
+	return nil
+}
+
+func (m Mode) String() string { return m.Name }
 
 var (
 	// ModeWFM is broadcast FM (200 kHz channel, ±75 kHz deviation).
-	ModeWFM = Mode{Name: "WFM", Deviation: 75000, AudioCut: 15000, DeemphTau: 50e-6}
+	ModeWFM = Mode{Name: "WFM", Deviation: 75000, AudioCut: 15000, DeemphTau: 50e-6, BwHz: 200000}
 	// ModeNFM is narrowband FM voice (12.5/25 kHz channels, ±2.5 kHz).
-	ModeNFM = Mode{Name: "NFM", Deviation: 2500, AudioCut: 2800, DeemphTau: 0, Squelch: true}
+	ModeNFM = Mode{Name: "NFM", Deviation: 2500, AudioCut: 2800, DeemphTau: 0, Squelch: true, BwHz: 12500}
 
 	// SSB voice: 200-2800 Hz passband selected by sideband.
-	ModeUSB = Mode{Name: "USB", SSB: true, ShiftHz: 1500, HalfBwHz: 1300}
-	ModeLSB = Mode{Name: "LSB", SSB: true, ShiftHz: -1500, HalfBwHz: 1300}
+	ModeUSB = Mode{Name: "USB", SSB: true, ShiftHz: 1500, HalfBwHz: 1300, BwHz: 2600}
+	ModeLSB = Mode{Name: "LSB", SSB: true, ShiftHz: -1500, HalfBwHz: 1300, BwHz: 2600}
 	// CW: a 300 Hz window centred on a +700 Hz beat note.
-	ModeCW = Mode{Name: "CW", SSB: true, ShiftHz: 700, HalfBwHz: 150}
+	ModeCW = Mode{Name: "CW", SSB: true, ShiftHz: 700, HalfBwHz: 150, BwHz: 300}
 )
 
 // SSBRate is the audio rate of the SSB/CW branch.
@@ -82,12 +103,22 @@ func NextMode(m Mode) Mode {
 }
 
 // AudioOutRate is the audio sample rate this mode's chain produces
-// (used to re-configure the output resampler).
+// (used to re-configure the output resampler): 8 kHz for NFM/SSB/CW,
+// 32 kHz for WFM.
 func (m Mode) AudioOutRate() int {
-	if m.SSB {
+	if m.SSB || m.Name == "NFM" {
 		return SSBRate
 	}
-	return AudioRate
+	return IF2Rate / 8
+}
+
+// OutRate returns the running chain's audio rate (matches
+// Mode.AudioOutRate).
+func (c *Chain) OutRate() int {
+	if c.outRate == 0 {
+		return AudioRate
+	}
+	return c.outRate
 }
 
 // Chain holds all per-connection DSP state. Reuse across reconnects is fine
@@ -102,6 +133,18 @@ type Chain struct {
 	ifTaps []float64
 	ifHist []complex128
 	ifD    int
+
+	// Channel filter (selectivity) after the IF decimation. NFM: complex
+	// FIR decimates 256k -> 32k with cutoff BwHz/2 (sharp, 511 taps).
+	// WFM: no decimation, 127 taps. chRate is the demod input rate.
+	chTaps    []float64
+	chHist    []complex128
+	chD       int
+	chRate    int
+	chScratch []complex128
+
+	// Audio output rate for this chain (8k NFM/SSB/CW, 32k WFM).
+	outRate int
 
 	demod FMDemod
 
@@ -150,22 +193,58 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 	// rate-independent because IQRate/IF2Rate is fixed at 8).
 	c.ifTaps = DesignLowpass(255, float64(IF2Rate)*0.40, float64(float64(IQRate)))
 	c.ifD = IQRate / IF2Rate
-	if mode.SSB {
-		// 255-tap lowpass at 3.4 kHz then decimate by 32 to 8 kHz.
+	bw := mode.BwHz
+	if bw <= 0 {
+		bw = 12500
+	}
+	switch {
+	case mode.SSB:
+		c.outRate = SSBRate
+		// Wide lowpass, then decimate by 32 to 8 kHz.
 		c.ssbDecTaps = DesignLowpass(255, 3400, float64(IF2Rate))
 		c.ssbDecD = IF2Rate / SSBRate
-		// Rotate a lowpass prototype to the sideband centre: a complex
-		// bandpass with a real passband width of 2×HalfBwHz.
-		lp := DesignLowpass(127, mode.HalfBwHz, float64(SSBRate))
+		// Sideband bandpass: a lowpass prototype rotated to the band
+		// centre. Narrow settings need longer filters; the transition is
+		// kept to about half the passband.
+		half := bw / 2
+		if half < 25 {
+			half = 25
+		}
+		taps := int(3.3 * float64(SSBRate) / half)
+		if taps < 127 {
+			taps = 127
+		}
+		if taps > 2047 {
+			taps = 2047
+		}
+		lp := DesignLowpass(taps, half, float64(SSBRate))
 		c.ssbTaps = make([]complex128, len(lp))
 		for n, h := range lp {
 			ang := 2 * math.Pi * mode.ShiftHz * float64(n) / float64(SSBRate)
 			c.ssbTaps[n] = complex(h*math.Cos(ang), h*math.Sin(ang))
 		}
-	} else {
-		c.auTaps = DesignLowpass(tapsFor(mode.AudioCut), mode.AudioCut, float64(IF2Rate))
+		c.mode.HalfBwHz = half
+
+	case mode.Name == "NFM":
+		// Sharp channel filter that also decimates to 32 kHz; the FM
+		// discriminator then runs at 32k and audio lands at 8 kHz.
+		c.outRate = SSBRate // 8 kHz
+		c.chTaps = DesignLowpass(511, bw/2, float64(IF2Rate))
+		c.chD = 8
+		c.chRate = IF2Rate / 8
+		c.demod = FMDemod{rate: float64(c.chRate)}
+		c.auTaps = DesignLowpass(255, mode.AudioCut, float64(c.chRate))
+		c.auD = c.chRate / c.outRate
+
+	default: // WFM
+		c.outRate = IF2Rate / 8 // 32 kHz
+		c.chTaps = DesignLowpass(127, bw/2, float64(IF2Rate))
+		c.chD = 1
+		c.chRate = IF2Rate
+		c.demod = FMDemod{rate: float64(IF2Rate)}
+		c.auTaps = DesignLowpass(255, mode.AudioCut, float64(IF2Rate))
+		c.auD = IF2Rate / c.outRate
 	}
-	c.auD = IF2Rate / AudioRate
 	if mode.DeemphTau > 0 {
 		c.deemph = NewDeemph(mode.DeemphTau, float64(AudioRate))
 	}
@@ -230,8 +309,11 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 	c.fif2 = c.fif2[:0]
 	complexFIRDecim(c.ifTaps, &c.ifHist, c.ifD, c.fiq, &c.fif2)
 
-	// Power meter + squelch decision run on the decimated IF.
-	c.measure(c.fif2)
+	// SSB/CW keep the IF-band power meter (their squelch is open
+	// anyway); FM modes measure in-band audio power after demod.
+	if c.mode.SSB {
+		c.measureIF(c.fif2)
+	}
 
 	if c.tap != nil {
 		c.tap.Push(c.fif2)
@@ -242,17 +324,29 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 		return
 	}
 
+	// Channel filter (selectivity) — decimates for NFM, straight for WFM.
+	chanf := c.chScratch[:0]
+	complexFIRDecim(c.chTaps, &c.chHist, c.chD, c.fif2, &chanf)
+	c.chScratch = chanf
+
 	// FM demodulation -> instantaneous frequency in Hz.
-	dn := len(c.fif2)
+	dn := len(chanf)
 	c.fdem = growFloat(c.fdem, dn)
-	for i, z := range c.fif2 {
+	for i, z := range chanf {
 		c.fdem[i] = c.demod.Step(z)
 	}
 
-	// Audio decimation IF2Rate -> AudioRate.
+	// Audio decimation to the chain output rate.
 	audio := c.audioBuf[:0]
 	realFIRDecim(c.auTaps, &c.auHist, c.auD, c.fdem, &audio)
 	c.audioBuf = audio
+
+	// Squelch decision on CHANNEL power (the complex stream after the
+	// channel filter): a strong carrier elsewhere in the ±128 kHz window
+	// is filtered out, so only energy inside the selected bandwidth moves
+	// the meter — the bug that made the SQL setting feel dead was
+	// measuring the whole IF instead.
+	c.measureIF(chanf)
 
 	scale := 0.85 / c.mode.Deviation // demod outputs Hz; map deviation to ~0.85 FS
 	for _, v := range audio {
@@ -297,7 +391,7 @@ func appendOutput(out *[]float32, x float64) {
 }
 
 // measure updates the power meter and squelch state from one IF block.
-func (c *Chain) measure(block []complex128) {
+func (c *Chain) measureIF(block []complex128) {
 	if len(block) == 0 {
 		return
 	}

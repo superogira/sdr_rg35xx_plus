@@ -520,6 +520,42 @@ func (r *Radio) GainText() string {
 	return fmt.Sprintf("GAIN %.1fdB", r.gainDb)
 }
 
+// Bandwidths returns the selectable bandwidths (Hz) for the current mode.
+func (r *Radio) Bandwidths() []float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.mode.Bandwidths()
+}
+
+// Bandwidth returns the current channel bandwidth in Hz.
+func (r *Radio) Bandwidth() float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.mode.BwHz
+}
+
+// SetBandwidth applies a new channel bandwidth to the current mode (pure
+// DSP — the chain is rebuilt; no server interaction).
+func (r *Radio) SetBandwidth(bw float64) {
+	r.mu.Lock()
+	m := r.mode
+	if bw <= 0 {
+		return
+	}
+	for _, v := range m.Bandwidths() {
+		if v == bw {
+			m.BwHz = bw
+			break
+		}
+	}
+	r.mode = m
+	r.chain = dsp.NewChain(m, r.tap, r.rawTap)
+	r.chain.SetVolume(r.vol)
+	r.chain.SetSquelchDb(r.sqlDb)
+	r.mu.Unlock()
+	fmt.Fprintf(os.Stderr, "radio: bandwidth %.4g Hz (%s)\n", bw, m.Name)
+}
+
 // GainDb returns the current tuner gain in dB (-1 = AGC).
 func (r *Radio) GainDb() float64 {
 	r.mu.Lock()

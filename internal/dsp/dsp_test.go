@@ -98,7 +98,7 @@ func TestChainRecoversWFMTone(t *testing.T) {
 	ch := NewChain(ModeWFM, nil, nil)
 	var audio []float32
 	ch.Process(iq, &audio)
-	want := int(0.5 * float64(AudioRate))
+	want := int(0.5 * float64(ch.OutRate()))
 	if len(audio) < want*95/100 {
 		t.Fatalf("audio length %d, want ~%d", len(audio), want)
 	}
@@ -117,7 +117,7 @@ func TestChainRecoversWFMTone(t *testing.T) {
 	if rms < 0.01 {
 		t.Fatalf("RMS %v too small — demod produced silence", rms)
 	}
-	f, mag := dominantTone(audio, AudioRate)
+	f, mag := dominantTone(audio, ch.OutRate())
 	if math.Abs(f-tone) > 60 {
 		t.Errorf("dominant tone %v Hz, want %v ±60", f, tone)
 	}
@@ -153,7 +153,7 @@ func TestChainRecoversNFMTone(t *testing.T) {
 	processChunked(ch, iq, &audio)
 	// Analyze the on-air part only (skip the noise pre-roll and filter
 	// settling: 0.4s + 0.1s).
-	start := (4 + 1) * AudioRate / 10
+	start := (4 + 1) * ch.OutRate() / 10
 	if start >= len(audio) {
 		t.Fatalf("audio too short: %d", len(audio))
 	}
@@ -169,7 +169,7 @@ func TestChainRecoversNFMTone(t *testing.T) {
 	if rms < 0.001 {
 		t.Fatalf("RMS %v too small — squelch never opened on a strong signal", rms)
 	}
-	f, _ := dominantTone(audio, AudioRate)
+	f, _ := dominantTone(audio, ch.OutRate())
 	if math.Abs(f-tone) > 60 {
 		t.Errorf("dominant tone %v Hz, want %v ±60", f, tone)
 	}
@@ -209,7 +209,7 @@ func TestSquelchCycle(t *testing.T) {
 	tail := audio[nOpen:]
 	// Skip the hang period — audio legitimately flows while the meter
 	// releases; silence is required only after it settles.
-	quietFrom := len(tail) - AudioRate/2
+	quietFrom := len(tail) - ch.OutRate()/2
 	if quietFrom < 0 {
 		quietFrom = 0
 	}

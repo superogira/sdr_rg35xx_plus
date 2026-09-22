@@ -6,6 +6,7 @@ import "math"
 // consecutive IF samples is the instantaneous frequency. Output is in Hz
 // relative to the channel center.
 type FMDemod struct {
+	rate float64 // samples per second of the input stream
 	prev complex128
 }
 
@@ -13,7 +14,11 @@ type FMDemod struct {
 func (f *FMDemod) Step(z complex128) float64 {
 	prod := z * conj(f.prev)
 	f.prev = z
-	return math.Atan2(imag(prod), real(prod)) * float64(IF2Rate) / (2 * math.Pi)
+	r := f.rate
+	if r == 0 {
+		r = float64(IF2Rate)
+	}
+	return math.Atan2(imag(prod), real(prod)) * r / (2 * math.Pi)
 }
 
 func conj(z complex128) complex128 { return complex(real(z), -imag(z)) }

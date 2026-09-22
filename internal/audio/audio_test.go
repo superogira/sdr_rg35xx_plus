@@ -18,13 +18,13 @@ func (p *bufPipe) Close() error                { return nil }
 func TestResamplerRateAndTone(t *testing.T) {
 	pipe := &bufPipe{}
 	o := &Output{pending: make([]byte, 0, chunkFrames*frameBytes), stdin: pipe}
-	o.SetInputRate(dsp.AudioRate)
+	o.SetInputRate(8000)
 
 	seconds := 2.0
-	n := int(seconds * float64(dsp.AudioRate))
+	n := int(seconds * 8000)
 	tone := make([]float32, n)
 	for i := range tone {
-		tone[i] = float32(0.5 * math.Sin(2*math.Pi*1000*float64(i)/float64(dsp.AudioRate)))
+		tone[i] = float32(0.5 * math.Sin(2*math.Pi*1000*float64(i)/8000))
 	}
 	o.WriteAudio(tone)
 
