@@ -30,17 +30,17 @@ func RunDemo(ctx context.Context, getChain func() *Chain, sink func([]float32)) 
 		for i := 0; i < blockSamples; i++ {
 			t++
 			// Wanted FM station: 1 kHz tone, deviation per mode.
-			m := math.Sin(2 * math.Pi * 1000 * float64(t) / IQRate)
-			phaseMain += 2 * math.Pi * dev * 0.6 * m / IQRate
+			m := math.Sin(2 * math.Pi * 1000 * float64(t) / float64(float64(IQRate)))
+			phaseMain += 2 * math.Pi * dev * 0.6 * m / float64(IQRate)
 			amp := 0.42
 			re := amp * math.Cos(phaseMain)
 			im := amp * math.Sin(phaseMain)
 
 			// Two drifting carriers ±60-90 kHz off center.
-			fA := 65e3 + 8e3*math.Sin(2*math.Pi*0.05*float64(t)/IQRate)
-			fB := -82e3 + 6e3*math.Sin(2*math.Pi*0.03*float64(t)/IQRate)
-			phaseA += 2 * math.Pi * fA / IQRate
-			phaseB += 2 * math.Pi * fB / IQRate
+			fA := 65e3 + 8e3*math.Sin(2*math.Pi*0.05*float64(t)/float64(IQRate))
+			fB := -82e3 + 6e3*math.Sin(2*math.Pi*0.03*float64(t)/float64(IQRate))
+			phaseA += 2 * math.Pi * fA / float64(IQRate)
+			phaseB += 2 * math.Pi * fB / float64(IQRate)
 			re += 0.20*math.Cos(phaseA) + 0.16*math.Cos(phaseB)
 			im += 0.20*math.Sin(phaseA) + 0.16*math.Sin(phaseB)
 

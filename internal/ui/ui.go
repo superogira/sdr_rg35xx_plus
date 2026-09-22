@@ -128,9 +128,9 @@ func (u *UI) DrawFreqEditor(digits string, cursor int) {
 // BarHeight is the bottom status bar; everything above it is waterfall.
 const BarHeight = 64
 
-// DisplaySpan is the half-width of spectrum shown, after cropping the
-// filter transition band at the edges (see dsp.DisplaySpanHz).
-const DisplaySpan = dsp.DisplaySpanHz
+// DisplaySpan is the half-width of spectrum shown (full IF; follows the
+// capture rate — see dsp.DisplaySpanHz).
+var DisplaySpan = dsp.DisplaySpanHz
 
 // UI owns the frame buffer and draws one screen per present.
 type UI struct {

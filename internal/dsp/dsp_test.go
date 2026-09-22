@@ -11,9 +11,9 @@ func TestDesignLowpassDCGain(t *testing.T) {
 		taps      int
 		cut, rate float64
 	}{
-		{63, 108000, IQRate},
-		{47, 15000, IF2Rate},
-		{191, 2800, IF2Rate},
+		{63, 108000, float64(IQRate)},
+		{47, 15000, float64(IF2Rate)},
+		{191, 2800, float64(IF2Rate)},
 	} {
 		h := DesignLowpass(tc.taps, tc.cut, tc.rate)
 		var sum float64
@@ -53,12 +53,12 @@ func TestFFTSingleBin(t *testing.T) {
 // u8 interleaved, carrier at center, plus a DC offset to exercise the DC
 // blocker.
 func genFM(seconds float64, toneHz, deviation, amplitude float64) []byte {
-	n := int(seconds * IQRate)
+	n := int(seconds * float64(IQRate))
 	out := make([]byte, 2*n)
 	phase := 0.0
 	for i := 0; i < n; i++ {
-		m := math.Sin(2 * math.Pi * toneHz * float64(i) / IQRate)
-		phase += 2 * math.Pi * deviation * m / IQRate
+		m := math.Sin(2 * math.Pi * toneHz * float64(i) / float64(IQRate))
+		phase += 2 * math.Pi * deviation * m / float64(IQRate)
 		z := complex(amplitude*math.Cos(phase), amplitude*math.Sin(phase))
 		// +8 counts of DC on both rails like the real dongle.
 		out[2*i] = byte(math.Round(real(z)*119 + 127.5 + 8))
@@ -98,7 +98,7 @@ func TestChainRecoversWFMTone(t *testing.T) {
 	ch := NewChain(ModeWFM, nil)
 	var audio []float32
 	ch.Process(iq, &audio)
-	want := int(0.5 * AudioRate)
+	want := int(0.5 * float64(AudioRate))
 	if len(audio) < want*95/100 {
 		t.Fatalf("audio length %d, want ~%d", len(audio), want)
 	}
@@ -226,7 +226,7 @@ func TestSquelchCycle(t *testing.T) {
 // genNoise produces idle-channel IQ at the given RMS amplitude per rail
 // (gaussian, before u8 quantization).
 func genNoise(seconds float64, amp float64) []byte {
-	n := int(seconds * IQRate)
+	n := int(seconds * float64(IQRate))
 	out := make([]byte, 2*n)
 	for i := 0; i < n; i++ {
 		out[2*i] = byte(clampq(127.5 + rand.NormFloat64()*amp*119))

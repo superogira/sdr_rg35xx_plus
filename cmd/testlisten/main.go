@@ -31,6 +31,7 @@ func main() {
 	hi := flag.Int64("hi", 108_000_000, "scan upper edge Hz")
 	step := flag.Int64("step", 400_000, "scan step Hz")
 	gain := flag.Int("gain", -1, "manual tuner gain index (-1 = AGC)")
+	rate := flag.Int("rate", 2_048_000, "capture rate in Hz (applied as first command)")
 	out := flag.String("out", "capture.wav", "output WAV file")
 	iqFile := flag.String("save-iq", "", "also save the raw IQ stream to this file")
 	flag.Parse()
@@ -108,9 +109,16 @@ func main() {
 		return
 	}
 
-	if err := c.SetSampleRate(dsp.IQRate); err != nil {
+	if err := c.SetSampleRate(uint32(dsp.IQRate)); err != nil {
 		fmt.Println("set rate failed:", err)
 		os.Exit(1)
+	}
+	if *rate != 2_048_000 {
+		dsp.SetIQRate(*rate)
+		if err := c.SetSampleRate(uint32(*rate)); err != nil {
+			fmt.Println("set rate failed:", err)
+			os.Exit(1)
+		}
 	}
 	if err := c.SetTunerAGC(*gain < 0); err != nil {
 		fmt.Println("set agc failed:", err)
@@ -171,7 +179,7 @@ func main() {
 			break
 		}
 	}
-	dur := float64(got/2) / dsp.IQRate
+	dur := float64(got/2) / float64(dsp.IQRate)
 	fmt.Printf("received %.1f MB = %.2fs of IQ (%.0f%% of wall time)\n",
 		float64(got)/1e6, dur, 100*dur / *seconds)
 
@@ -333,7 +341,7 @@ func ifSpectrum(raw []byte) {
 	var peaks []pk
 	for i := 0; i < nfft; i++ {
 		if i > 0 && i < nfft-1 && mags[i] > mags[i-1] && mags[i] >= mags[i+1] && mags[i]-median > 10 {
-			off := float64(i)*binHz - dsp.IQRate/2 // fftshifted offset
+			off := float64(i)*binHz - float64(dsp.IQRate)/2 // fftshifted offset
 			peaks = append(peaks, pk{off, mags[i] - median})
 		}
 	}
@@ -449,7 +457,7 @@ func analyzeAudio(samples []float32, mode dsp.Mode) {
 	}
 	rms := math.Sqrt(sumSq / float64(len(samples)))
 	fmt.Printf("audio: %d samples (%.1fs) RMS=%.4f (%.1f dBFS) peak=%.3f silent=%.1f%%\n",
-		len(samples), float64(len(samples))/dsp.AudioRate, rms, 20*math.Log10(rms+1e-12), peak,
+		len(samples), float64(len(samples))/float64(dsp.AudioRate), rms, 20*math.Log10(rms+1e-12), peak,
 		100*float64(silence)/float64(len(samples)))
 
 	// FFT the whole capture for spectral peaks.
@@ -480,14 +488,18 @@ func analyzeAudio(samples []float32, mode dsp.Mode) {
 			}
 		}
 		sort.Float64s(vals)
-		medDb = vals[len(vals)/2]
+		if len(vals) > 0 {
+			medDb = vals[len(vals)/2]
+		}
 		return
 	}
 
 	fmt.Println("top spectral regions:")
 	maxHz, maxDb, _ := power(300, 4000)
 	fmt.Printf("  voice band 300–4k:  peak %.0f Hz at %.1f dB\n", maxHz, maxDb)
-	if mode.Name == "WFM" {
+	if mode.Name == "WFM" && dsp.AudioRate >= 44_100 {
+		// The 19 kHz pilot check needs audio bandwidth above 19 kHz
+		// (not available at the 1.024M capture rate).
 		pHz, pDb, pMed := power(18_700, 19_300)
 		_, _, ref := power(16_000, 18_500)
 		fmt.Printf("  pilot 18.7–19.3k:   peak %.1f Hz, %.1f dB over local median (ref %.1f dB)\n",
