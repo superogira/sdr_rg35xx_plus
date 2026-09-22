@@ -440,6 +440,10 @@ func (r *Radio) SetMode(mode dsp.Mode) {
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
 	r.mu.Unlock()
+	// SSB/CW chains produce 8 kHz audio; FM modes IF2/4.
+	if r.out != nil {
+		r.out.SetInputRate(mode.AudioOutRate())
+	}
 }
 
 // CycleSquelch steps the NFM squelch threshold 4 → 8 → 12 → 16 → off and

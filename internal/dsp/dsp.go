@@ -41,10 +41,15 @@ func SetIQRate(hz int) bool {
 // Mode bundles the demodulation parameters for one receive mode.
 type Mode struct {
 	Name      string
-	Deviation float64 // peak FM deviation, Hz
-	AudioCut  float64 // final low-pass cutoff, Hz
+	Deviation float64 // peak FM deviation, Hz (FM modes)
+	AudioCut  float64 // final low-pass cutoff, Hz (FM modes)
 	DeemphTau float64 // seconds; 0 = none
 	Squelch   bool    // mute on weak signal (NFM)
+
+	// SSB/CW modes (phasing via complex bandpass at 8 kHz).
+	SSB      bool    // use the SSB branch instead of the FM discriminator
+	ShiftHz  float64 // band center offset: USB +1500, LSB -1500, CW +700
+	HalfBwHz float64 // half of the audio passband: 1300 SSB, 150 CW
 }
 
 var (
@@ -52,7 +57,38 @@ var (
 	ModeWFM = Mode{Name: "WFM", Deviation: 75000, AudioCut: 15000, DeemphTau: 50e-6}
 	// ModeNFM is narrowband FM voice (12.5/25 kHz channels, ±2.5 kHz).
 	ModeNFM = Mode{Name: "NFM", Deviation: 2500, AudioCut: 2800, DeemphTau: 0, Squelch: true}
+
+	// SSB voice: 200-2800 Hz passband selected by sideband.
+	ModeUSB = Mode{Name: "USB", SSB: true, ShiftHz: 1500, HalfBwHz: 1300}
+	ModeLSB = Mode{Name: "LSB", SSB: true, ShiftHz: -1500, HalfBwHz: 1300}
+	// CW: a 300 Hz window centred on a +700 Hz beat note.
+	ModeCW = Mode{Name: "CW", SSB: true, ShiftHz: 700, HalfBwHz: 150}
 )
+
+// SSBRate is the audio rate of the SSB/CW branch.
+const SSBRate = 8000
+
+// ModeList is the cycling order for the mode button/menu.
+var ModeList = []Mode{ModeNFM, ModeWFM, ModeUSB, ModeLSB, ModeCW}
+
+// NextMode returns the mode after m in the cycling order.
+func NextMode(m Mode) Mode {
+	for i, v := range ModeList {
+		if v.Name == m.Name {
+			return ModeList[(i+1)%len(ModeList)]
+		}
+	}
+	return ModeNFM
+}
+
+// AudioOutRate is the audio sample rate this mode's chain produces
+// (used to re-configure the output resampler).
+func (m Mode) AudioOutRate() int {
+	if m.SSB {
+		return SSBRate
+	}
+	return AudioRate
+}
 
 // Chain holds all per-connection DSP state. Reuse across reconnects is fine
 // after Reset.
@@ -68,6 +104,16 @@ type Chain struct {
 	ifD    int
 
 	demod FMDemod
+
+	// SSB branch: decimate 256k -> 8k (wide complex LPF), then a complex
+	// bandpass picks the sideband; audio is the real part.
+	ssbDecTaps []float64
+	ssbDecHist []complex128
+	ssbDecD    int
+	ssbTaps    []complex128 // rotated lowpass = complex bandpass
+	ssbHist    []complex128
+	ssbScratch []complex128
+	sbOut      []complex128
 
 	// Audio decimator: real, IF2Rate -> AudioRate.
 	auTaps []float64
@@ -104,7 +150,21 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 	// rate-independent because IQRate/IF2Rate is fixed at 8).
 	c.ifTaps = DesignLowpass(255, float64(IF2Rate)*0.40, float64(float64(IQRate)))
 	c.ifD = IQRate / IF2Rate
-	c.auTaps = DesignLowpass(tapsFor(mode.AudioCut), mode.AudioCut, float64(IF2Rate))
+	if mode.SSB {
+		// 255-tap lowpass at 3.4 kHz then decimate by 32 to 8 kHz.
+		c.ssbDecTaps = DesignLowpass(255, 3400, float64(IF2Rate))
+		c.ssbDecD = IF2Rate / SSBRate
+		// Rotate a lowpass prototype to the sideband centre: a complex
+		// bandpass with a real passband width of 2×HalfBwHz.
+		lp := DesignLowpass(127, mode.HalfBwHz, float64(SSBRate))
+		c.ssbTaps = make([]complex128, len(lp))
+		for n, h := range lp {
+			ang := 2 * math.Pi * mode.ShiftHz * float64(n) / float64(SSBRate)
+			c.ssbTaps[n] = complex(h*math.Cos(ang), h*math.Sin(ang))
+		}
+	} else {
+		c.auTaps = DesignLowpass(tapsFor(mode.AudioCut), mode.AudioCut, float64(IF2Rate))
+	}
 	c.auD = IF2Rate / AudioRate
 	if mode.DeemphTau > 0 {
 		c.deemph = NewDeemph(mode.DeemphTau, float64(AudioRate))
@@ -177,6 +237,11 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 		c.tap.Push(c.fif2)
 	}
 
+	if c.mode.SSB {
+		c.processSSB(out)
+		return
+	}
+
 	// FM demodulation -> instantaneous frequency in Hz.
 	dn := len(c.fif2)
 	c.fdem = growFloat(c.fdem, dn)
@@ -197,13 +262,38 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 		}
 		x = c.applySquelchRamp(x)
 		x *= c.volume
-		if x > 0.98 {
-			x = 0.98
-		} else if x < -0.98 {
-			x = -0.98
-		}
-		*out = append(*out, float32(x))
+		appendOutput(out, x)
 	}
+}
+
+// processSSB: decimate the IF to SSBRate, select the sideband with a
+// complex bandpass, and emit the real part as audio (×3 gain makes SSB
+// levels comparable to the FM path).
+func (c *Chain) processSSB(out *[]float32) {
+	slow := c.ssbScratch[:0]
+	complexFIRDecim(c.ssbDecTaps, &c.ssbDecHist, c.ssbDecD, c.fif2, &slow)
+	c.ssbScratch = slow
+
+	side := c.sbOut[:0]
+	complexCIFIR(c.ssbTaps, &c.ssbHist, slow, &side)
+	c.sbOut = side
+
+	for _, z := range side {
+		x := real(z) * 3.0
+		x = c.applySquelchRamp(x)
+		x *= c.volume
+		appendOutput(out, x)
+	}
+}
+
+// appendOutput clamps and appends one audio sample.
+func appendOutput(out *[]float32, x float64) {
+	if x > 0.98 {
+		x = 0.98
+	} else if x < -0.98 {
+		x = -0.98
+	}
+	*out = append(*out, float32(x))
 }
 
 // measure updates the power meter and squelch state from one IF block.
