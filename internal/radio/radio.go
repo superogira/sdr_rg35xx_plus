@@ -317,7 +317,6 @@ func (r *Radio) session(ctx context.Context) error {
 	// Cumulative drop monitor: nominal bytes vs received over the whole
 	// session. A deficit means the SERVER dropped samples (WiFi jitter
 	// on its side) — heard on SSB/CW as a momentary pitch slide.
-	nominalBps := int64(dsp.IQRate) * 2
 	var sessT0 time.Time
 	var lastDropChk time.Time
 	defer func() {
@@ -394,8 +393,14 @@ func (r *Radio) session(ctx context.Context) error {
 				total := r.bytesRx
 				r.mu.Unlock()
 				elapsed := time.Since(sessT0).Seconds()
-				expect := int64(float64(nominalBps) * elapsed)
 				got := int64(total - rateB0)
+				// Use the CURRENT DSP rate — the watchdog may have
+				// re-dimensioned it after this monitor captured its
+				// nominal rate.
+				r.mu.Lock()
+				nominal := int64(dsp.IQRate) * 2
+				r.mu.Unlock()
+				expect := int64(float64(nominal) * elapsed)
 				deficit := 100 * float64(expect-got) / float64(expect)
 				if deficit > 0.5 {
 					fmt.Fprintf(os.Stderr, "radio: sample drop detected — %.1f%% short over %.0fs (expect %d got %d bytes)\n", deficit, elapsed, expect, got)
