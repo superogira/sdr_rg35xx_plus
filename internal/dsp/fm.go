@@ -38,3 +38,44 @@ func (d *Deemph) Step(x float64) float64 {
 	d.y1 = d.y1*d.a + (1-d.a)*x
 	return d.y1
 }
+
+// AGC is a peak-following automatic gain control for the SSB/CW branch.
+// Speech sidebands swing tens of dB between peaks and pauses while FM
+// needs none of this (constant envelope), which is why SSB without AGC
+// sounds much quieter than the FM modes. Fast attack tames peaks, slow
+// release lifts quiet passages; the gain range is capped so noise
+// between transmissions is not amplified to full scale.
+type AGC struct {
+	gain   float64
+	env    float64
+	target float64
+	max    float64
+}
+
+func NewAGC() *AGC {
+	return &AGC{gain: 1, target: 0.5, max: 32}
+}
+
+func (a *AGC) Step(x float64) float64 {
+	// Envelope: instant rise, ~150 ms decay at 8 kHz.
+	env := math.Abs(x)
+	if env > a.env {
+		a.env = env
+	} else {
+		a.env += 0.999 * (env - a.env)
+	}
+	desired := a.target / math.Max(a.env, 1e-4)
+	if desired > a.max {
+		desired = a.max
+	}
+	if desired < 0.25 {
+		desired = 0.25
+	}
+	// Attack (gain down) fast ~5 ms, release (gain up) slow ~300 ms.
+	k := 0.0007
+	if desired < a.gain {
+		k = 0.04
+	}
+	a.gain += k * (desired - a.gain)
+	return x * a.gain
+}

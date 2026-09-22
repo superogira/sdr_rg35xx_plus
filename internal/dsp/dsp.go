@@ -164,6 +164,7 @@ type Chain struct {
 	auD    int
 
 	deemph *Deemph
+	agc    *AGC // SSB/CW loudness
 
 	// Squelch + metering state.
 	sqlOpen  bool
@@ -247,6 +248,9 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 	}
 	if mode.DeemphTau > 0 {
 		c.deemph = NewDeemph(mode.DeemphTau, float64(AudioRate))
+	}
+	if mode.SSB {
+		c.agc = NewAGC()
 	}
 	c.sqlLevel = 8 // dB above floor
 	c.powerDb = -100
@@ -374,6 +378,9 @@ func (c *Chain) processSSB(out *[]float32) {
 
 	for _, z := range side {
 		x := real(z) * 3.0
+		if c.agc != nil {
+			x = c.agc.Step(x)
+		}
 		x = c.applySquelchRamp(x)
 		x *= c.volume
 		appendOutput(out, x)
