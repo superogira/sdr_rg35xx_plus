@@ -365,11 +365,23 @@ func (r *Radio) session(ctx context.Context) error {
 				} else if !rateT0.IsZero() && time.Since(rateT0) >= 2*time.Second {
 					actual := float64(total-rateB0) / time.Since(rateT0).Seconds() / 2
 					snap := int(math.Round(actual/32000) * 32000)
-					if snap < 256_000 {
-						snap = 256_000
+					if snap < 512_000 {
+						snap = 512_000
 					}
 					if snap > 3_200_000 {
 						snap = 3_200_000
+					}
+					// A just-reconnected server ramps up slowly; if
+					// the measurement is wildly below the configured
+					// rate, it is a startup transient — trust the
+					// config and re-measure later instead of
+					// re-dimensioning to a nonsense rate.
+					if actual < float64(snap)*0.4 {
+						fmt.Fprintf(os.Stderr, "radio: measured %.3f Msps is a startup transient — keeping %d Hz\n", actual, dsp.IQRate)
+						rateDone = true
+						sessT0 = rateT0
+						lastDropChk = time.Now()
+						break
 					}
 					r.mu.Lock()
 					configured := r.iqRate
