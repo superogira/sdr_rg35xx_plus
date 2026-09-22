@@ -1,9 +1,9 @@
 package ui
 
 import (
+	_ "embed"
 	"image"
 	"image/color"
-	_ "embed"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
@@ -18,9 +18,9 @@ var boldTTF []byte
 
 // FontFace is a parsed face plus its metrics for cheap text measuring.
 type FontFace struct {
-	face      font.Face
-	height   int
-	ascent   int
+	face   font.Face
+	height int
+	ascent int
 }
 
 type fontSet struct {
@@ -71,9 +71,9 @@ func Face(size int, bold bool) *FontFace {
 	}
 	m := face.Metrics()
 	ff := &FontFace{
-		face:    face,
-		height:  m.Height.Ceil(),
-		ascent:  m.Ascent.Ceil(),
+		face:   face,
+		height: m.Height.Ceil(),
+		ascent: m.Ascent.Ceil(),
 	}
 	fonts.faces[key] = ff
 	return ff

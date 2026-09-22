@@ -7,7 +7,10 @@ import (
 )
 
 func TestDesignLowpassDCGain(t *testing.T) {
-	for _, tc := range []struct{ taps int; cut, rate float64 }{
+	for _, tc := range []struct {
+		taps      int
+		cut, rate float64
+	}{
 		{63, 108000, IQRate},
 		{47, 15000, IF2Rate},
 		{191, 2800, IF2Rate},

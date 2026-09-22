@@ -4,10 +4,16 @@
 # Roms/APPS.
 set -e
 cd "$(dirname "$0")"
+mkdir -p dist/rg35xx/SDRg35xx
 
 echo "== cross-compiling SDRg35xx (linux/arm64, pure Go) =="
+# The stamp (YYYYMMDDHHMM) is both the OTA version number (compared by
+# the app against version.txt on the download server) and the build id.
+STAMP="$(date +%Y%m%d%H%M)"
+echo "build stamp: $STAMP"
+printf '%s\n' "$STAMP" > dist/rg35xx/buildstamp.txt
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
-  go build -trimpath -ldflags "-s -w" \
+  go build -trimpath -ldflags "-s -w -X main.buildStamp=$STAMP" \
   -o dist/rg35xx/SDRg35xx/sdrg35xx .
 
 echo "== copying launcher + icon =="

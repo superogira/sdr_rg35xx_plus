@@ -39,6 +39,6 @@ type Reader struct{}
 
 func Open() (*Reader, error) { return nil, fmt.Errorf("evdev input requires Linux") }
 
-func (r *Reader) Poll()          {}
+func (r *Reader) Poll()           {}
 func (r *Reader) Events() []Event { return nil }
-func (r *Reader) Close()         {}
+func (r *Reader) Close()          {}

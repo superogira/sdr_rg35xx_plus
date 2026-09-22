@@ -173,7 +173,7 @@ func main() {
 	}
 	dur := float64(got/2) / dsp.IQRate
 	fmt.Printf("received %.1f MB = %.2fs of IQ (%.0f%% of wall time)\n",
-		float64(got)/1e6, dur, 100*dur/ *seconds)
+		float64(got)/1e6, dur, 100*dur / *seconds)
 
 	if *iqFile != "" {
 		if err := os.WriteFile(*iqFile, raw, 0644); err != nil {
@@ -252,7 +252,7 @@ func rateCheck(c *rtltcp.Client, gain int) {
 			hist[buf[j+1]]++
 		}
 		n := float64(len(buf))
-		db := 10 * math.Log10(p/n + 1e-12)
+		db := 10 * math.Log10(p/n+1e-12)
 		railPct := 100 * float64(hist[0]+hist[255]) / n
 		fmt.Printf("    DC(I)=%+.3f DC(Q)=%+.3f  rail(00/FF)=%.1f%%  min/max used=%d/%d\n",
 			sumI/(n/2), sumQ/(n/2), railPct, firstNonZero(hist[:]), lastNonZero(hist[:]))
@@ -325,7 +325,7 @@ func ifSpectrum(raw []byte) {
 	var vals []float64
 	mags := make([]float64, nfft)
 	for i := range acc {
-		mags[i] = 20 * math.Log10(acc[i]/windows + 1e-12)
+		mags[i] = 20 * math.Log10(acc[i]/windows+1e-12)
 		vals = append(vals, mags[i])
 	}
 	sort.Float64s(vals)
@@ -398,7 +398,7 @@ func scanBand(c *rtltcp.Client, lo, hi, step int64) []station {
 		dsp.FFT(re, im)
 		for i := range bins {
 			// fftshift so bins[0] is the lowest frequency
-			bins[i] = 20 * math.Log10(math.Hypot(re[(i+nfft/2)%nfft], im[(i+nfft/2)%nfft]) + 1e-12)
+			bins[i] = 20 * math.Log10(math.Hypot(re[(i+nfft/2)%nfft], im[(i+nfft/2)%nfft])+1e-12)
 		}
 		sorted := append([]float64(nil), bins...)
 		sort.Float64s(sorted)
@@ -473,7 +473,7 @@ func analyzeAudio(samples []float32, mode dsp.Mode) {
 		}
 		var vals []float64
 		for i := lo; i <= hi; i++ {
-			db := 20 * math.Log10(math.Hypot(re[i], im[i]) + 1e-12)
+			db := 20 * math.Log10(math.Hypot(re[i], im[i])+1e-12)
 			vals = append(vals, db)
 			if db > maxDb || len(vals) == 1 {
 				maxDb, maxHz = db, float64(i)*binHz

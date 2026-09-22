@@ -19,6 +19,25 @@
 ./build-rg35xx.sh
 ```
 
+## ปล่อยอัพเดทผ่านอินเทอร์เน็ต (OTA)
+
+แอปเช็คเวอร์ชั่นจาก `https://downloads.catgg.net/sdrg35xx/version.txt`
+ตอนเปิดโปรแกรม (และจากเมนู "ตรวจอัพเดท") — ถ้ามีเวอร์ชั่นใหม่กว่าจะโหลด
+`sdrg35xx-linux-arm64.gz` ตรวจ sha256 แทนไฟล์ตัวเอง แล้วรีสตาร์ทเข้า
+เวอร์ชั่นใหม่ทันที ไม่ต้องเสียบ SD card
+
+ปล่อยเวอร์ชั่นใหม่ทำบนเครื่อง dev:
+
+```sh
+./upload.sh     # build → gzip → sha256 → FTP ขึ้น server
+```
+
+- รหัส FTP อยู่ใน `ftp.env` ข้างสคริปต์ (**ถูก .gitignore ไว้ ห้าม commit**)
+  รูปแบบ: `FTP_HOST=…` / `FTP_USER=…` / `FTP_PASS=…` / `FTP_PATH=/`
+- เลขเวอร์ชั่น = เวลา build (YYYYMMDDHHMM) ฝังใน binary อัตโนมัติ
+- ปิด auto-check บนเครื่องเกมได้ที่ `sdrg35xx.ini`: `update=off`
+  หรือเปลี่ยน server: `updateurl=https://…`
+
 ได้แพ็กเกจใน `dist/rg35xx/`:
 
 ```

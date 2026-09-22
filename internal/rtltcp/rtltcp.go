@@ -14,21 +14,21 @@ import (
 
 // Command opcodes (rtl-sdr src/rtl_tcp.c).
 const (
-	CmdSetFrequency     = 0x01
-	CmdSetSampleRate    = 0x02
-	CmdSetGainMode      = 0x03 // 0 = manual, 1 = tuner AGC
-	CmdSetGain          = 0x04 // gain in tenths of dB (manual mode)
+	CmdSetFrequency      = 0x01
+	CmdSetSampleRate     = 0x02
+	CmdSetGainMode       = 0x03 // 0 = manual, 1 = tuner AGC
+	CmdSetGain           = 0x04 // gain in tenths of dB (manual mode)
 	CmdSetFreqCorrection = 0x05
-	CmdSetAGCMode       = 0x08 // RTL2832 IF AGC
-	CmdSetGainByIndex   = 0x0d
+	CmdSetAGCMode        = 0x08 // RTL2832 IF AGC
+	CmdSetGainByIndex    = 0x0d
 )
 
 // DongleInfo is the 52-byte header the server sends right after accept.
 type DongleInfo struct {
-	Magic       string // "RTL0"
-	TunerType   int32
-	GainCount   int32
-	Extra       [10]int32
+	Magic     string // "RTL0"
+	TunerType int32
+	GainCount int32
+	Extra     [10]int32
 }
 
 // Client is one rtl_tcp connection. It is safe for one writer goroutine to
