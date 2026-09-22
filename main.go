@@ -182,6 +182,17 @@ func runUpdate(u *updater, base string, manual bool) {
 			u.setMsg("โหลดไม่สำเร็จ: %v", err)
 			return
 		}
+		// version.txt carries the sha256 of the GZIPPED package (what
+		// upload.sh hashes) — verify both before touching the disk.
+		if size > 0 && int64(len(gz)) != size {
+			u.setMsg("ขนาดไฟล์ไม่ตรง (%d != %d)", len(gz), size)
+			return
+		}
+		sum := sha256.Sum256(gz)
+		if fmt.Sprintf("%x", sum) != sha {
+			u.setMsg("checksum ไม่ตรง — ยกเลิก")
+			return
+		}
 		zr, err := gzip.NewReader(bytes.NewReader(gz))
 		if err != nil {
 			u.setMsg("ไฟล์เสีย (gzip): %v", err)
@@ -190,15 +201,6 @@ func runUpdate(u *updater, base string, manual bool) {
 		bin, err := io.ReadAll(zr)
 		if err != nil {
 			u.setMsg("ไฟล์เสีย (gzip): %v", err)
-			return
-		}
-		if size > 0 && int64(len(gz)) != size {
-			u.setMsg("ขนาดไฟล์ไม่ตรง (%d != %d)", len(gz), size)
-			return
-		}
-		sum := sha256.Sum256(bin)
-		if fmt.Sprintf("%x", sum) != sha {
-			u.setMsg("checksum ไม่ตรง — ยกเลิก")
 			return
 		}
 
