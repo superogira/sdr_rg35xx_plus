@@ -801,8 +801,12 @@ func main() {
 		// when reading a launch log.
 		if time.Since(lastBeat) >= 10*time.Second {
 			s := r.Snapshot()
-			fmt.Fprintf(os.Stderr, "alive: frames=%d connected=%v freq=%.4f MHz mode=%s bytes=%d\n",
-				atomic.LoadUint64(&frames), s.Connected, float64(r.Freq())/1e6, r.Mode().Name, s.BytesRx)
+			var af, astall int64
+			if out != nil {
+				af, astall = out.Stats()
+			}
+			fmt.Fprintf(os.Stderr, "alive: frames=%d connected=%v freq=%.4f MHz mode=%s bytes=%d audioFrames=%d maxStall=%dms\n",
+				atomic.LoadUint64(&frames), s.Connected, float64(r.Freq())/1e6, r.Mode().Name, s.BytesRx, af, astall)
 			lastBeat = time.Now()
 		}
 	}
