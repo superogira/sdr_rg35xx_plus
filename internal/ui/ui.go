@@ -7,7 +7,6 @@ import (
 	"image/png"
 	"math"
 	"os"
-	"sort"
 
 	"sdr35/internal/dsp"
 )
@@ -34,6 +33,14 @@ type UI struct {
 	W, H          int
 	WaterfallRows int
 	img           *image.RGBA
+	// wf is the waterfall ALONE — the scrolling history never mixes with
+	// the overlay drawings (labels, center line). Overlays used to be
+	// drawn into the same buffer that scrolls, so each frame's text was
+	// dragged down one row, leaving faint vertical trails under every
+	// glyph — exactly the mysterious "lines" that flowed with the
+	// waterfall. Now overlays are composed fresh on top of a copy of wf
+	// every frame and can never persist into the history.
+	wf *image.RGBA
 
 	lut [256]color.RGBA
 
@@ -67,6 +74,7 @@ type FrameStats struct {
 func New(w, h int) *UI {
 	u := &UI{W: w, H: h, WaterfallRows: h - BarHeight, floor: -95}
 	u.img = image.NewRGBA(image.Rect(0, 0, w, h))
+	u.wf = image.NewRGBA(image.Rect(0, 0, w, u.WaterfallRows))
 	u.snap = make([]complex128, dsp.TapLen)
 	u.re = make([]float64, dsp.TapLen)
 	u.im = make([]float64, dsp.TapLen)
@@ -115,6 +123,11 @@ func (u *UI) clearAll() {
 			u.img.SetRGBA(x, y, black)
 		}
 	}
+	for y := 0; y < u.WaterfallRows; y++ {
+		for x := 0; x < u.W; x++ {
+			u.wf.SetRGBA(x, y, black)
+		}
+	}
 }
 
 // NewSpectrumRow scrolls the waterfall by one row if the tap has fresh
@@ -141,26 +154,6 @@ func (u *UI) NewSpectrumRow(tap *dsp.SpectrumTap) bool {
 		power[i] = 20 * math.Log10(math.Hypot(u.re[(i+n/2)%n], u.im[(i+n/2)%n]) + 1e-12)
 	}
 
-	// Narrowband blanking: a 7-bin median across frequency replaces thin
-	// stationary spectral lines (the ~2 kHz comb the server's stream
-	// handling produces) with the local floor. Real channels are far
-	// wider than the window (NFM ≈ 25 bins, WFM ≈ 400) and pass through
-	// untouched. This also removes the residual DC spike.
-	for i := 0; i < n; i++ {
-		lo2, hi2 := i-3, i+3
-		if lo2 < 0 {
-			lo2 = 0
-		}
-		if hi2 > n-1 {
-			hi2 = n - 1
-		}
-		w := append([]float64(nil), power[lo2:hi2+1]...)
-		sort.Float64s(w)
-		if m := w[len(w)/2]; m < power[i] {
-			power[i] = m
-		}
-	}
-
 	// Track the noise floor as the 25th percentile and normalize to it.
 	sorted := append([]float64(nil), power...)
 	bins := sorted
@@ -172,28 +165,14 @@ func (u *UI) NewSpectrumRow(tap *dsp.SpectrumTap) bool {
 	noise := bins[len(bins)/4]
 	u.floor += 0.05 * (noise - u.floor)
 
-	// Hide the DC spike (the classic RTL-SDR center spike survives the
-	// DC blocker as a permanent bright column): interpolate the middle
-	// bins from their neighbours, the same trick SDR# uses. Only ±2 bins
-	// (±1 kHz) so a real NFM signal around the center still shows.
-	c := n / 2
-	if c > 2 && c+2 < n {
-		loV, hiV := power[c-3], power[c+3]
-		for i := -2; i <= 2; i++ {
-			t := (float64(i) + 2) / 4
-			power[c+i] = loV + t*(hiV-loV)
-		}
-	}
-
-	// Scroll down one row.
-	pix := u.img.Pix
-	stride := u.img.Stride
+	// Scroll the waterfall history down one row (the pure waterfall
+	// buffer — no overlay ever lands in here).
+	pix := u.wf.Pix
+	stride := u.wf.Stride
 	copy(pix[stride:], pix[:stride*(u.WaterfallRows-1)])
 
 	// Draw the new row, stretching the displayed bin range across the
-	// width. The outermost bins (filter transition band) are cropped —
-	// they glow constantly and used to paint fake bright columns at the
-	// left/right screen edges.
+	// width.
 	nVis := n * DisplaySpan / dsp.IF2Rate // half-width in bins
 	if nVis < 1 || nVis > n/2 {
 		nVis = n / 2
@@ -232,10 +211,14 @@ func (u *UI) NewSpectrumRow(tap *dsp.SpectrumTap) bool {
 	return true
 }
 
-// Frame draws the overlays (center marker, span labels, bottom bar) and
-// returns the composited image for presenting.
+// Frame composes one screen: a fresh copy of the waterfall history with
+// the overlays (center line, span labels) and the bottom bar drawn on top,
+// then returns the image for presenting.
 func (u *UI) Frame(stats FrameStats) *image.RGBA {
 	u.stats = stats
+	// Fresh waterfall copy: overlays from the previous frame are gone,
+	// so they can never trail into the history.
+	copy(u.img.Pix[:u.WaterfallRows*u.img.Stride], u.wf.Pix)
 	u.drawCenterLine()
 	u.drawSpanLabels()
 	u.drawBottomBar()

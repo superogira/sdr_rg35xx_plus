@@ -19,11 +19,10 @@ const (
 	IQRate    = 2_048_000
 	IF2Rate   = IQRate / 8
 	AudioRate = IF2Rate / 4
-	// DisplaySpanHz is the spectrum width the waterfall shows. It stays
-	// well inside the decimation filter's flat passband (cutoff 108 kHz):
-	// the transition band beyond that glows constantly and used to paint
-	// fake bright columns at the screen edges.
-	DisplaySpanHz = 100_000
+	// DisplaySpanHz is the half-width of spectrum shown. The full IF
+	// (±128 kHz) is displayed; the decimation filter's passband covers
+	// ±108 kHz, so the outermost columns are attenuated but genuine.
+	DisplaySpanHz = IF2Rate / 2
 )
 
 // Mode bundles the demodulation parameters for one receive mode.
