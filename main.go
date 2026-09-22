@@ -508,8 +508,8 @@ func main() {
 		fmt.Sscanf(digits[:4], "%d", &mhz)
 		fmt.Sscanf(digits[4:], "%d", &frac)
 		hz := int64(mhz)*1_000_000 + int64(frac)*10
-		if hz < 24_000_000 {
-			hz = 24_000_000
+		if hz < 500_000 {
+			hz = 500_000
 		}
 		if hz > 1_766_000_000 {
 			hz = 1_766_000_000
