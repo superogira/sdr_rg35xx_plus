@@ -292,6 +292,12 @@ func main() {
 	if v, ok := cfg["lang"]; ok {
 		i18n.SetLang(v)
 	}
+	sqlPref := 0.0
+	if v, ok := cfg["sql"]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 4 && f <= 40 {
+			sqlPref = f
+		}
+	}
 	agcOn := true
 	if v, ok := cfg["agc"]; ok && v == "off" {
 		agcOn = false
@@ -372,6 +378,9 @@ func main() {
 	}
 	if ds != -1 {
 		r.SetDirectSamplingMode(ds)
+	}
+	if sqlPref > 0 {
+		r.SetSquelchDb(sqlPref)
 	}
 	if bwv, ok := cfg[fmt.Sprintf("bw.%s", r.Mode().Name)]; ok {
 		if f, err := strconv.ParseFloat(bwv, 64); err == nil {
@@ -533,6 +542,7 @@ func main() {
 				db = 40
 			}
 			r.SetSquelchDb(db)
+			cfg["sql"] = fmt.Sprintf("%g", r.SquelchDb())
 		case menuSample:
 			// Verified rates only; the change reconnects with the new
 			// rate as the connection's first command.
@@ -642,6 +652,7 @@ func main() {
 			}
 		case input.X:
 			r.CycleSquelch()
+			cfg["sql"] = fmt.Sprintf("%g", r.SquelchDb())
 		case input.L1:
 			v := math.Round((r.Volume()-0.01)*100) / 100
 			if v < 0 {
@@ -1012,6 +1023,16 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	defer f.Close()
 	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\nagc=%s\nlang=%s\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref, agcPref, langPref)
+	// Squelch level from the live config map.
+	if v, ok := cfg["sql"]; ok {
+		fmt.Fprintf(f, "sql=%s\n", v)
+	}
+	if v, ok := cfg["update"]; ok {
+		fmt.Fprintf(f, "update=%s\n", v)
+	}
+	if v, ok := cfg["updateurl"]; ok && v != "" {
+		fmt.Fprintf(f, "updateurl=%s\n", v)
+	}
 	// Per-mode bandwidth entries from the live config map.
 	for _, m := range dsp.ModeList {
 		if v, ok := cfg[fmt.Sprintf("bw.%s", m.Name)]; ok {
