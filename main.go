@@ -375,7 +375,14 @@ func main() {
 		return 12_500
 	}
 	quit := func() {
-		saveConfig(*host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000)
+		dsPref := "auto"
+		switch r.DirectSamplingMode() {
+		case 2:
+			dsPref = "on"
+		case 0:
+			dsPref = "off"
+		}
+		saveConfig(*host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref)
 		stop()
 	}
 	// Screenshot support: the last presented frame and a transient status
@@ -858,11 +865,11 @@ func readIni(path string) map[string]string {
 	return cfg
 }
 
-func saveConfig(host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int) {
+func saveConfig(host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref string) {
 	f, err := os.Create(configPath())
 	if err != nil {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\n", host, freq, mode, vol, gainDb, rate)
+	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref)
 }
