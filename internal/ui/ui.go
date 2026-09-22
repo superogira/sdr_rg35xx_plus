@@ -1,0 +1,377 @@
+package ui
+
+import (
+	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"math"
+	"os"
+
+	"sdr35/internal/dsp"
+)
+
+// SavePNG writes a rendered frame to disk (the MENU capture button).
+func SavePNG(path string, img *image.RGBA) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return png.Encode(f, img)
+}
+
+// BarHeight is the bottom status bar; everything above it is waterfall.
+const BarHeight = 64
+
+// DisplaySpan is the half-width of spectrum shown, after cropping the
+// filter transition band at the edges (see dsp.DisplaySpanHz).
+const DisplaySpan = dsp.DisplaySpanHz
+
+// UI owns the frame buffer and draws one screen per present.
+type UI struct {
+	W, H          int
+	WaterfallRows int
+	img           *image.RGBA
+
+	lut [256]color.RGBA
+
+	// Spectrum state.
+	snap  []complex128
+	re    []float64
+	im    []float64
+	lastG uint64
+	// Auto black level: slow-tracking noise floor (dB) so weak signals
+	// still show color.
+	floor float64
+
+	stats FrameStats
+}
+
+// FrameStats is everything the bottom bar and overlays show.
+type FrameStats struct {
+	FreqHz     int64
+	Mode       string
+	StepHz     int64
+	Connected  bool
+	StatusText string // Thai or English, one line
+	PowerDb    float64
+	Squelch    bool
+	SquelchOpen bool
+	Volume     float64
+	GainText   string
+	Host       string
+}
+
+func New(w, h int) *UI {
+	u := &UI{W: w, H: h, WaterfallRows: h - BarHeight, floor: -95}
+	u.img = image.NewRGBA(image.Rect(0, 0, w, h))
+	u.snap = make([]complex128, dsp.TapLen)
+	u.re = make([]float64, dsp.TapLen)
+	u.im = make([]float64, dsp.TapLen)
+	u.initLUT()
+	u.clearAll()
+	return u
+}
+
+// initLUT builds a black→blue→red→yellow→white heat ramp.
+func (u *UI) initLUT() {
+	stops := []struct {
+		pos float64
+		c   [3]float64
+	}{
+		{0.00, [3]float64{0, 0, 8}},
+		{0.20, [3]float64{24, 12, 80}},
+		{0.45, [3]float64{64, 80, 200}},
+		{0.65, [3]float64{210, 72, 60}},
+		{0.82, [3]float64{250, 200, 70}},
+		{1.00, [3]float64{255, 255, 255}},
+	}
+	for i := 0; i < 256; i++ {
+		t := float64(i) / 255
+		j := 0
+		for j+1 < len(stops) && stops[j+1].pos < t {
+			j++
+		}
+		a, b := stops[j], stops[j+1]
+		f := (t - a.pos) / (b.pos - a.pos)
+		if f < 0 {
+			f = 0
+		}
+		u.lut[i] = color.RGBA{
+			R: uint8(a.c[0] + f*(b.c[0]-a.c[0])),
+			G: uint8(a.c[1] + f*(b.c[1]-a.c[1])),
+			B: uint8(a.c[2] + f*(b.c[2]-a.c[2])),
+			A: 255,
+		}
+	}
+}
+
+func (u *UI) clearAll() {
+	black := color.RGBA{0, 0, 0, 255}
+	for y := 0; y < u.H; y++ {
+		for x := 0; x < u.W; x++ {
+			u.img.SetRGBA(x, y, black)
+		}
+	}
+}
+
+// NewSpectrumRow scrolls the waterfall by one row if the tap has fresh
+// samples and draws the newest spectrum on top. Returns true when the
+// waterfall advanced.
+func (u *UI) NewSpectrumRow(tap *dsp.SpectrumTap) bool {
+	g := tap.Snapshot(u.snap)
+	if g == 0 || g == u.lastG {
+		return false
+	}
+	u.lastG = g
+
+	n := len(u.snap)
+	for i := 0; i < n; i++ {
+		u.re[i] = real(u.snap[i])
+		u.im[i] = imag(u.snap[i])
+	}
+	dsp.HannWindow(u.re, u.im)
+	dsp.FFT(u.re, u.im)
+
+	// Power per bin (fftshifted: index 0 = lowest frequency).
+	power := make([]float64, n)
+	for i := 0; i < n; i++ {
+		power[i] = 20 * math.Log10(math.Hypot(u.re[(i+n/2)%n], u.im[(i+n/2)%n]) + 1e-12)
+	}
+
+	// Track the noise floor as the 25th percentile and normalize to it.
+	sorted := append([]float64(nil), power...)
+	bins := sorted
+	for i := 1; i < len(bins); i++ { // tiny n, insertion sort is fine
+		for j := i; j > 0 && bins[j] < bins[j-1]; j-- {
+			bins[j], bins[j-1] = bins[j-1], bins[j]
+		}
+	}
+	noise := bins[len(bins)/4]
+	u.floor += 0.05 * (noise - u.floor)
+
+	// Scroll down one row.
+	pix := u.img.Pix
+	stride := u.img.Stride
+	copy(pix[stride:], pix[:stride*(u.WaterfallRows-1)])
+
+	// Draw the new row, stretching the displayed bin range across the
+	// width. The outermost bins (filter transition band) are cropped —
+	// they glow constantly and used to paint fake bright columns at the
+	// left/right screen edges.
+	nVis := n * DisplaySpan / dsp.IF2Rate // half-width in bins
+	if nVis < 1 || nVis > n/2 {
+		nVis = n / 2
+	}
+	lo := n/2 - nVis
+	hi := n/2 + nVis
+	for x := 0; x < u.W; x++ {
+		b0 := lo + x*(hi-lo)/u.W
+		b1 := lo + (x+1)*(hi-lo)/u.W
+		if b1 <= b0 {
+			b1 = b0 + 1
+		}
+		if b1 > hi {
+			b1 = hi
+		}
+		// Max-hold within the pixel.
+		v := power[b0]
+		for b := b0 + 1; b < b1 && b < hi; b++ {
+			if power[b] > v {
+				v = power[b]
+			}
+		}
+		t := (v - u.floor - 6) / 62 // 62 dB of color above floor
+		if t < 0 {
+			t = 0
+		} else if t > 1 {
+			t = 1
+		}
+		c := u.lut[int(t*255)]
+		o := x * 4
+		pix[o] = c.R
+		pix[o+1] = c.G
+		pix[o+2] = c.B
+		pix[o+3] = 255
+	}
+	return true
+}
+
+// Frame draws the overlays (center marker, span labels, bottom bar) and
+// returns the composited image for presenting.
+func (u *UI) Frame(stats FrameStats) *image.RGBA {
+	u.stats = stats
+	u.drawCenterLine()
+	u.drawSpanLabels()
+	u.drawBottomBar()
+	return u.img
+}
+
+func (u *UI) drawCenterLine() {
+	x := u.W / 2
+	for y := 0; y < u.WaterfallRows; y++ {
+		if y%6 < 4 {
+			u.img.SetRGBA(x, y, color.RGBA{255, 255, 255, 255})
+			u.img.SetRGBA(x+1, y, color.RGBA{255, 255, 255, 255})
+		}
+	}
+}
+
+func (u *UI) drawSpanLabels() {
+	tiny := Face(13, false)
+	white := color.RGBA{235, 235, 235, 255}
+	shadow := color.RGBA{0, 0, 0, 220}
+	centerMHz := float64(u.stats.FreqHz) / 1e6
+	span := formatSpan(float64(DisplaySpan))
+	center := fmt.Sprintf("%.4f MHz", centerMHz)
+	labels := []struct {
+		x int
+		s string
+	}{
+		{4, "−" + span},
+		{u.W/2 - tiny.TextWidth(center)/2, center},
+		{u.W - tiny.TextWidth("+"+span) - 4, "+" + span},
+	}
+	for _, l := range labels {
+		tiny.DrawString(u.img, shadow, l.x+1, 16, l.s)
+		tiny.DrawString(u.img, white, l.x, 15, l.s)
+	}
+}
+
+func formatSpan(hz float64) string {
+	if hz >= 1e6 {
+		return fmt.Sprintf("%.0fM", hz/1e6)
+	}
+	return fmt.Sprintf("%.0fk", hz/1e3)
+}
+
+func (u *UI) drawBottomBar() {
+	pix := u.img.Pix
+	stride := u.img.Stride
+	// Panel background with a subtle top border.
+	for y := u.WaterfallRows; y < u.H; y++ {
+		for x := 0; x < u.W; x++ {
+			var c color.RGBA
+			switch {
+			case y == u.WaterfallRows:
+				c = color.RGBA{70, 130, 180, 255}
+			case y == u.WaterfallRows+1:
+				c = color.RGBA{18, 26, 34, 255}
+			default:
+				c = color.RGBA{12, 16, 22, 255}
+			}
+			o := y*stride + x*4
+			pix[o], pix[o+1], pix[o+2], pix[o+3] = c.R, c.G, c.B, 255
+		}
+	}
+
+	s := u.stats
+	cyan := color.RGBA{80, 220, 255, 255}
+	white := color.RGBA{240, 240, 240, 255}
+	grey := color.RGBA{150, 160, 170, 255}
+
+	// Big frequency (left).
+	big := Face(38, true)
+	freqMHz := float64(s.FreqHz) / 1e6
+	dec := 3 // WFM shows kHz resolution, NFM 10 Hz
+	if s.Mode == "NFM" {
+		dec = 4
+	}
+	freqText := fmt.Sprintf("%.*f", dec, freqMHz)
+	big.DrawString(u.img, white, 12, u.WaterfallRows+46, freqText)
+	unitX := 16 + big.TextWidth(freqText)
+	unit := Face(15, false)
+	unit.DrawString(u.img, grey, unitX, u.WaterfallRows+44, "MHz")
+
+	// Mode chip.
+	chip := Face(16, true)
+	chipText := s.Mode
+	cw := chip.TextWidth(chipText) + 16
+	cx := unitX + 44
+	for y := u.WaterfallRows + 14; y < u.WaterfallRows+38; y++ {
+		for x := cx; x < cx+cw; x++ {
+			var c color.RGBA
+			if s.Squelch && !s.SquelchOpen {
+				c = color.RGBA{60, 40, 20, 255} // squelched: dim
+			} else {
+				c = color.RGBA{20, 70, 90, 255}
+			}
+			if x == cx || x == cx+cw-1 || y == u.WaterfallRows+14 || y == u.WaterfallRows+37 {
+				c = color.RGBA{80, 200, 240, 255}
+			}
+			o := y*u.img.Stride + x*4
+			u.img.Pix[o], u.img.Pix[o+1], u.img.Pix[o+2], u.img.Pix[o+3] = c.R, c.G, c.B, 255
+		}
+	}
+	chip.DrawString(u.img, cyan, cx+8, u.WaterfallRows+31, chipText)
+
+	// Signal strength bar with dB scale.
+	barX, barW := cx+cw+16, 150
+	barY, barH := u.WaterfallRows+18, 14
+	label := Face(11, false)
+	label.DrawString(u.img, grey, barX, barY-4, "SIGNAL dBFS")
+	for x := 0; x < barW; x++ {
+		t := float64(x) / float64(barW)
+		db := -100 + t*80 // bar spans -100..-20 dBFS
+		var c color.RGBA
+		if db < s.PowerDb {
+			c = color.RGBA{70, 200, 120, 255}
+			if db > -45 {
+				c = color.RGBA{255, 210, 80, 255}
+			}
+			if db > -32 {
+				c = color.RGBA{255, 90, 70, 255}
+			}
+		} else {
+			c = color.RGBA{35, 45, 55, 255}
+		}
+		o := barY*u.img.Stride + (barX+x)*4
+		for y := 0; y < barH; y++ {
+			oo := o + y*u.img.Stride
+			u.img.Pix[oo], u.img.Pix[oo+1], u.img.Pix[oo+2], u.img.Pix[oo+3] = c.R, c.G, c.B, 255
+		}
+	}
+	label.DrawString(u.img, grey, barX+barW+8, barY+12, fmt.Sprintf("%.0f", s.PowerDb))
+
+	// Volume + gain (right side).
+	right := Face(14, false)
+	volX := u.W - 150
+	volText := fmt.Sprintf("VOL %5.1f%%", s.Volume*100)
+	right.DrawString(u.img, white, volX, u.WaterfallRows+18, volText)
+	right.DrawString(u.img, grey, volX, u.WaterfallRows+38, s.GainText)
+
+	// Status line (bottom).
+	status := Face(13, false)
+	col := grey
+	if s.Connected {
+		col = color.RGBA{120, 230, 140, 255}
+	}
+	statusText := s.StatusText
+	if statusText == "" {
+		if s.Connected {
+			statusText = "กำลังฟัง " + s.Host
+		} else {
+			statusText = "ไม่ได้เชื่อมต่อ " + s.Host
+		}
+	}
+	status.DrawString(u.img, col, 12, u.H-8, statusText)
+
+	// Step + button hints (bottom right).
+	hint := Face(12, false)
+	hintText := "←→ จูน · SELECT โหมด · X sql · MENU ภาพ · VOL± วอลุ่ม · START ออก"
+	hint.DrawString(u.img, grey, u.W-hint.TextWidth(hintText)-8, u.H-8, hintText)
+}
+
+func formatHz(hz int64) string {
+	switch {
+	case hz%1_000_000 == 0:
+		return fmt.Sprintf("%dM", hz/1_000_000)
+	case hz%100_000 == 0:
+		return fmt.Sprintf("%dk", hz/1000)
+	default:
+		return fmt.Sprintf("%dk", hz/1000)
+	}
+}
+
+var _ = fmt.Sprintf
