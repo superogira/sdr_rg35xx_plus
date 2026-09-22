@@ -112,7 +112,7 @@ rtl-sdr-web-monitor ที่ใช้ server นี้อยู่แล้ว:
   กลางสตรีม** (เคยทำให้สตรีมกลายเป็น 0x00 ทั้งหมด)
 - แอปมี dead-stream detector (ข้อมูลคงที่ ~3 วิ = ตัดแล้วต่อใหม่เอง)
   และ reconnect อัตโนมัติพร้อม backoff
-- dongle เป็น RTL-SDR Blog V4 (R828D, gain 0–49.6 dB); default ของแอป
+- dongle เป็น RTL-SDR Blog V4 (R828D, gain 0–49.6 dB); ช่วงรับ **500 kHz – 1766 MHz** — ต่ำกว่า 24 MHz สลับเข้าโหมด HF direct sampling (Q branch) อัตโนมัติ แล้วสลับกลับตัวจัดเมื่อกลับขึ้น VHF (FM/NFM เท่านั้น อ่าน SSB/CW ยังไม่รองรับ); default ของแอป
   ใช้ gain 40 dB แก้ได้ที่ `sdrg35xx.ini` (`gain=49.6` สูงสุด, `gain=-1`
   = AGC)
 

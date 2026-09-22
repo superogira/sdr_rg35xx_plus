@@ -19,6 +19,7 @@ const (
 	CmdSetGainMode       = 0x03 // 0 = manual, 1 = tuner AGC
 	CmdSetGain           = 0x04 // gain in tenths of dB (manual mode)
 	CmdSetFreqCorrection = 0x05
+	CmdSetDirectSampling = 0x09 // 0 = off, 1 = I branch, 2 = Q branch (HF)
 	CmdSetAGCMode        = 0x08 // RTL2832 IF AGC
 	CmdSetGainByIndex    = 0x0d
 )
@@ -142,6 +143,12 @@ func (c *Client) SetGainTenthsDB(tenths int32) error {
 }
 func (c *Client) SetGainByIndex(idx int) error {
 	return c.send(CmdSetGainByIndex, uint32(idx))
+}
+
+// SetDirectSampling switches HF direct sampling: 0 = tuner (VHF/UHF),
+// 1 = I branch, 2 = Q branch (the RTL-SDR Blog V3/V4 HF path).
+func (c *Client) SetDirectSampling(mode int) error {
+	return c.send(CmdSetDirectSampling, uint32(mode))
 }
 
 // ReadIQ fills buf with the raw interleaved-uint8 IQ byte stream. It blocks
