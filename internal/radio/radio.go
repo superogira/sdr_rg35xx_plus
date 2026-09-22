@@ -63,12 +63,12 @@ type Radio struct {
 	out  *audio.Output // nil = waterfall only
 	name string        // audio backend name for status
 
-	mu      sync.Mutex
-	freqHz  int64
-	mode    dsp.Mode
+	mu     sync.Mutex
+	freqHz int64
+	mode   dsp.Mode
 	gainDb float64 // tuner gain in dB at connect; negative = AGC
-	vol     float64
-	sqlDb   float64 // NFM squelch threshold above floor (40 = off)
+	vol    float64
+	sqlDb  float64 // NFM squelch threshold above floor (40 = off)
 
 	client  *rtltcp.Client
 	gains   int32
@@ -101,15 +101,15 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		gainDb = 49.6
 	}
 	return &Radio{
-		Host:    host,
-		tap:     dsp.NewSpectrumTap(),
-		out:     out,
-		freqHz:  freqHz,
-		mode:    mode,
-		gainDb:  gainDb,
-		vol:     1,
-		sqlDb:   8,
-		chain:   dsp.NewChain(mode, nil),
+		Host:   host,
+		tap:    dsp.NewSpectrumTap(),
+		out:    out,
+		freqHz: freqHz,
+		mode:   mode,
+		gainDb: gainDb,
+		vol:    1,
+		sqlDb:  8,
+		chain:  dsp.NewChain(mode, nil),
 	}
 }
 

@@ -7,12 +7,12 @@ func TestGainDbMapping(t *testing.T) {
 		db   float64
 		want int
 	}{
-		{0, 0},       // 0.0 dB
-		{40, 22},     // 40 → 40.2 dB (the value from the user's ini)
-		{30, 16},     // 30 → 29.7 dB (web project default)
-		{49.6, 28},   // max of the table
-		{99, 28},     // over the top → clamped to max index
-		{-5, 28},     // handled as AGC upstream; mapping itself clamps low→0? no:
+		{0, 0},     // 0.0 dB
+		{40, 22},   // 40 → 40.2 dB (the value from the user's ini)
+		{30, 16},   // 30 → 29.7 dB (web project default)
+		{49.6, 28}, // max of the table
+		{99, 28},   // over the top → clamped to max index
+		{-5, 28},   // handled as AGC upstream; mapping itself clamps low→0? no:
 	}
 	// -5 dB maps to nearest (0.0) — the AGC decision happens in New.
 	cases[len(cases)-1] = struct {

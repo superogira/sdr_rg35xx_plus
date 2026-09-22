@@ -162,17 +162,17 @@ type UI struct {
 
 // FrameStats is everything the bottom bar and overlays show.
 type FrameStats struct {
-	FreqHz     int64
-	Mode       string
-	StepHz     int64
-	Connected  bool
-	StatusText string // Thai or English, one line
-	PowerDb    float64
-	Squelch    bool
+	FreqHz      int64
+	Mode        string
+	StepHz      int64
+	Connected   bool
+	StatusText  string // Thai or English, one line
+	PowerDb     float64
+	Squelch     bool
 	SquelchOpen bool
-	Volume     float64
-	GainText   string
-	Host       string
+	Volume      float64
+	GainText    string
+	Host        string
 }
 
 func New(w, h int) *UI {
@@ -255,7 +255,7 @@ func (u *UI) NewSpectrumRow(tap *dsp.SpectrumTap) bool {
 	// Power per bin (fftshifted: index 0 = lowest frequency).
 	power := make([]float64, n)
 	for i := 0; i < n; i++ {
-		power[i] = 20 * math.Log10(math.Hypot(u.re[(i+n/2)%n], u.im[(i+n/2)%n]) + 1e-12)
+		power[i] = 20 * math.Log10(math.Hypot(u.re[(i+n/2)%n], u.im[(i+n/2)%n])+1e-12)
 	}
 
 	// Track the noise floor as the 25th percentile and normalize to it.

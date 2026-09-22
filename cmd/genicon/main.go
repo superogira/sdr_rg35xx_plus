@@ -36,7 +36,7 @@ func main() {
 			case x > 120:
 				c = color.RGBA{70, 80, 160, 255}
 			default:
-				v := uint8(20 + ((x*7+y*3)/4%40))
+				v := uint8(20 + ((x*7 + y*3) / 4 % 40))
 				c = color.RGBA{v / 3, v / 2, v, 255}
 			}
 			img.SetRGBA(x, y, c)

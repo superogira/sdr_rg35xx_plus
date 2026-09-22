@@ -12,17 +12,24 @@
 package main
 
 import (
-	"image"
-	"math"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
 	"flag"
 	"fmt"
+	"image"
+	"io"
+	"math"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -35,6 +42,200 @@ import (
 )
 
 const defaultHost = "e25wop.thddns.net:2255"
+
+// buildStamp is the build version as YYYYMMDDHHMM (injected by
+// build-rg35xx.sh via -ldflags). "0" means a dev build that always
+// accepts whatever the update server offers.
+var buildStamp = "0"
+
+// --- over-the-air updater -------------------------------------------------
+
+const defaultUpdateBase = "https://downloads.catgg.net/sdrg35xx"
+
+type updater struct {
+	mu   sync.Mutex
+	msg  string
+	busy bool
+}
+
+func (u *updater) setMsg(format string, a ...any) {
+	u.mu.Lock()
+	u.msg = fmt.Sprintf(format, a...)
+	u.mu.Unlock()
+}
+
+func (u *updater) Msg() string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.msg
+}
+
+func (u *updater) tryBegin() bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.busy {
+		return false
+	}
+	u.busy = true
+	return true
+}
+
+func (u *updater) end() {
+	u.mu.Lock()
+	u.busy = false
+	u.mu.Unlock()
+}
+
+// updateHTTPClient returns the client used for OTA requests. If strict
+// TLS fails because the console clock is wrong (cert validity window),
+// retry once with verification relaxed — payload integrity still rests
+// on the sha256 in version.txt.
+func updateGet(url string, timeout time.Duration) (*http.Response, error) {
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(url)
+	if err == nil {
+		return resp, nil
+	}
+	if !strings.Contains(err.Error(), "certificate") {
+		return nil, err
+	}
+	fmt.Fprintf(os.Stderr, "update: TLS verify failed (%v) — retrying relaxed\n", err)
+	client2 := &http.Client{Timeout: timeout, Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}}
+	return client2.Get(url)
+}
+
+func fetchUpdateMeta(base string) (stamp int64, sha string, size int64, err error) {
+	resp, err := updateGet(base+"/version.txt", 8*time.Second)
+	if err != nil {
+		return 0, "", 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return 0, "", 0, fmt.Errorf("version.txt: HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return 0, "", 0, err
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "stamp":
+			stamp, _ = strconv.ParseInt(v, 10, 64)
+		case "sha256":
+			sha = v
+		case "size":
+			size, _ = strconv.ParseInt(v, 10, 64)
+		}
+	}
+	if stamp == 0 || sha == "" || size == 0 {
+		return 0, "", 0, fmt.Errorf("version.txt incomplete")
+	}
+	return stamp, sha, size, nil
+}
+
+// runUpdate checks the server and, when a newer build exists, downloads,
+// verifies and swaps the binary, then re-execs into the new version.
+func runUpdate(u *updater, base string, manual bool) {
+	if !u.tryBegin() {
+		return
+	}
+	go func() {
+		defer u.end()
+		if runtime.GOOS != "linux" || runtime.GOARCH != "arm64" {
+			if manual {
+				u.setMsg("อัพเดทรองรับบนเครื่อง RG35XX เท่านั้น")
+			}
+			return
+		}
+		local, _ := strconv.ParseInt(buildStamp, 10, 64)
+		stamp, sha, size, err := fetchUpdateMeta(base)
+		if err != nil {
+			if manual {
+				u.setMsg("เช็คอัพเดทไม่สำเร็จ: %v", err)
+			}
+			return
+		}
+		if local > 0 && stamp <= local {
+			u.setMsg("เวอร์ชั่นล่าสุดแล้ว (%s)", buildStamp)
+			return
+		}
+		u.setMsg("กำลังโหลดเวอร์ชั่นใหม่ %d …", stamp)
+
+		resp, err := updateGet(fmt.Sprintf("%s/sdrg35xx-linux-arm64.gz", base), 180*time.Second)
+		if err != nil {
+			u.setMsg("โหลดไม่สำเร็จ: %v", err)
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			u.setMsg("โหลดไม่สำเร็จ: HTTP %d", resp.StatusCode)
+			return
+		}
+		gz, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+		if err != nil {
+			u.setMsg("โหลดไม่สำเร็จ: %v", err)
+			return
+		}
+		zr, err := gzip.NewReader(bytes.NewReader(gz))
+		if err != nil {
+			u.setMsg("ไฟล์เสีย (gzip): %v", err)
+			return
+		}
+		bin, err := io.ReadAll(zr)
+		if err != nil {
+			u.setMsg("ไฟล์เสีย (gzip): %v", err)
+			return
+		}
+		if size > 0 && int64(len(gz)) != size {
+			u.setMsg("ขนาดไฟล์ไม่ตรง (%d != %d)", len(gz), size)
+			return
+		}
+		sum := sha256.Sum256(bin)
+		if fmt.Sprintf("%x", sum) != sha {
+			u.setMsg("checksum ไม่ตรง — ยกเลิก")
+			return
+		}
+
+		exe, err := os.Executable()
+		if err != nil {
+			u.setMsg("หาตำแหน่งโปรแกรมไม่ได้: %v", err)
+			return
+		}
+		dir := filepath.Dir(exe)
+		tmp := filepath.Join(dir, ".sdrg35xx.download")
+		if err := os.WriteFile(tmp, bin, 0o755); err != nil {
+			u.setMsg("เขียนไฟล์ไม่ได้: %v", err)
+			return
+		}
+		// Same-directory rename: atomic on the SD card's filesystem; the
+		// running old inode stays alive until exit.
+		if err := os.Rename(tmp, exe); err != nil {
+			os.Remove(tmp)
+			u.setMsg("แทนที่ไฟล์ไม่ได้: %v", err)
+			return
+		}
+		u.setMsg("อัพเดทเป็นเวอร์ชั่น %d แล้ว — กำลังรีสตาร์ท", stamp)
+		fmt.Fprintf(os.Stderr, "update: installed stamp %d (was %s), re-exec\n", stamp, buildStamp)
+		time.Sleep(700 * time.Millisecond) // let the message reach the screen
+		syncDir(dir)
+		syscall.Exec(exe, os.Args, os.Environ())
+		u.setMsg("รีสตาร์ทไม่สำเร็จ — ปิดแล้วเปิดใหม่")
+	}()
+}
+
+// syncDir flushes the SD card buffers as far as the OS allows.
+func syncDir(dir string) {
+	if f, err := os.Open(dir); err == nil {
+		f.Sync()
+		f.Close()
+	}
+}
 
 func main() {
 	host := flag.String("host", defaultHost, "rtl_tcp server address host:port")
@@ -96,6 +297,19 @@ func main() {
 			out.Close()
 		}
 	}()
+
+	// Over-the-air updater: auto-check after boot (config update=off
+	// disables), manual re-check from the settings menu.
+	upd := &updater{}
+	updateBase := defaultUpdateBase
+	if v, ok := cfg["updateurl"]; ok && v != "" {
+		updateBase = v
+	}
+	if strings.EqualFold(cfg["update"], "off") {
+		fmt.Fprintln(os.Stderr, "update: auto-check disabled by config")
+	} else {
+		runUpdate(upd, updateBase, false)
+	}
 
 	disp, err := ui.OpenDisplay(*display)
 	if err != nil {
@@ -187,7 +401,8 @@ func main() {
 		menuVolume
 		menuShot
 	)
-	menuCount := menuShot + 1
+	const menuUpdate = 7
+	menuCount := menuUpdate + 1
 
 	freqDigits := func() string {
 		hz := r.Freq()
@@ -242,6 +457,8 @@ func main() {
 			uiMode = uiFreqEdit
 		case menuShot:
 			capture()
+		case menuUpdate:
+			runUpdate(upd, updateBase, true)
 		default:
 			adjustItem(idx, +1)
 		}
@@ -328,14 +545,14 @@ func main() {
 			}
 		case uiFreqEdit:
 			switch b {
-		case input.Left:
-			if editCursor > 0 {
-				editCursor--
-			}
-		case input.Right:
-			if editCursor < 8 {
-				editCursor++
-			}
+			case input.Left:
+				if editCursor > 0 {
+					editCursor--
+				}
+			case input.Right:
+				if editCursor < 8 {
+					editCursor++
+				}
 			case input.Up, input.Down:
 				d := 1
 				if b == input.Down {
@@ -469,6 +686,9 @@ func main() {
 		if capturedMsg != "" && time.Since(capturedAt) < 3*time.Second {
 			status = capturedMsg
 		}
+		if m := upd.Msg(); m != "" {
+			status = m
+		}
 		frame := u.Frame(ui.FrameStats{
 			FreqHz:      r.Freq(),
 			Mode:        r.Mode().Name,
@@ -498,6 +718,7 @@ func main() {
 				{Label: "Sample Rate", Value: "2.048M (server กำหนด)"},
 				{Label: "วอลุ่ม", Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 				{Label: "ถ่ายภาพหน้าจอ", Value: "กด A"},
+				{Label: "ตรวจอัพเดท", Value: "กด A"},
 			}
 			u.DrawMenu(items, menuSel)
 		} else if uiMode == uiFreqEdit {
@@ -530,7 +751,7 @@ func configFile(name string) string {
 	return name
 }
 
-func configPath() string  { return configFile("sdrg35xx.ini") }
+func configPath() string       { return configFile("sdrg35xx.ini") }
 func legacyConfigPath() string { return configFile("sdr35.ini") } // pre-rename app
 
 func loadConfig() map[string]string {

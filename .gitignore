@@ -13,3 +13,6 @@ thai_test.png
 
 # Go
 *.test
+
+# FTP credentials for upload.sh (never commit)
+ftp.env

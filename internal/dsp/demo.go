@@ -33,8 +33,8 @@ func RunDemo(ctx context.Context, getChain func() *Chain, sink func([]float32)) 
 			m := math.Sin(2 * math.Pi * 1000 * float64(t) / IQRate)
 			phaseMain += 2 * math.Pi * dev * 0.6 * m / IQRate
 			amp := 0.42
-			re := amp*math.Cos(phaseMain)
-			im := amp*math.Sin(phaseMain)
+			re := amp * math.Cos(phaseMain)
+			im := amp * math.Sin(phaseMain)
 
 			// Two drifting carriers ±60-90 kHz off center.
 			fA := 65e3 + 8e3*math.Sin(2*math.Pi*0.05*float64(t)/IQRate)
