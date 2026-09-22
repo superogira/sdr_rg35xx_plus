@@ -39,6 +39,12 @@ type Output struct {
 
 	// pending accumulates s16le bytes until a full chunk is ready.
 	pending []byte
+	// diagnostics
+	frames     int64
+	maxStallMs int64
+	backend    string
+	userClosed bool
+
 	// resampler state between WriteAudio calls.
 	prevIn float32
 	pos    float64 // input-step position of the next output sample
@@ -79,7 +85,7 @@ func startNamed(name, path string) (*Output, error) {
 		// ~85 ms buffer: rides out TCP jitter without audible latency.
 		args = []string{"-q", "-f", "S16_LE",
 			"-r", fmt.Sprint(SampleRate), "-c", fmt.Sprint(Channels),
-			"--buffer-size=4096", "--period-size=1024"}
+			"--buffer-size=16384", "--period-size=2048"}
 	case "mpv":
 		args = []string{"--no-video", "--really-quiet", "--ao=alsa",
 			"--demuxer=rawaudio", "--demuxer-rawaudio-format=s16le",
@@ -89,7 +95,7 @@ func startNamed(name, path string) (*Output, error) {
 		return nil, fmt.Errorf("unknown backend %q", name)
 	}
 
-	o := &Output{name: name, pending: make([]byte, 0, chunkFrames*frameBytes), die: make(chan struct{})}
+	o := &Output{name: name, backend: name, pending: make([]byte, 0, chunkFrames*frameBytes), die: make(chan struct{})}
 	o.inRate = float64(dsp.AudioRate)
 	o.step = o.inRate / SampleRate
 	cmd := exec.Command(path, append(args, "-")...)
@@ -97,6 +103,9 @@ func startNamed(name, path string) (*Output, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Surface player diagnostics (aplay prints "underrun!!!" on every
+	// buffer gap — the key signal when debugging choppy audio).
+	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
@@ -107,6 +116,7 @@ func startNamed(name, path string) (*Output, error) {
 		o.mu.Lock()
 		o.closed = true
 		o.mu.Unlock()
+		o.selfHeal(err)
 	}()
 	return o, nil
 }
@@ -141,6 +151,87 @@ func (o *Output) WriteAudio(mono []float32) {
 	}
 }
 
+// selfHeal re-opens the backend when the player died unexpectedly (most
+// commonly "Device or resource busy": the console menu holds the speaker
+// briefly around app launch). Retries with backoff until it stays up.
+func (o *Output) selfHeal(reason error) {
+	if o.userClosed || reason == nil {
+		return
+	}
+	go func() {
+		for delay := 3 * time.Second; ; delay *= 2 {
+			if delay > 15*time.Second {
+				delay = 15 * time.Second
+			}
+			time.Sleep(delay)
+			o.mu.Lock()
+			if o.userClosed || !o.closed {
+				o.mu.Unlock()
+				return
+			}
+			o.mu.Unlock()
+			if err := o.reopen(); err == nil {
+				fmt.Fprintf(os.Stderr, "audio: %s recovered\n", o.backend)
+				return
+			}
+		}
+	}()
+}
+
+func (o *Output) reopen() error {
+	name := o.backend
+	var args []string
+	switch name {
+	case "aplay":
+		args = []string{"-q", "-f", "S16_LE",
+			"-r", fmt.Sprint(SampleRate), "-c", fmt.Sprint(Channels),
+			"--buffer-size=16384", "--period-size=2048"}
+	case "mpv":
+		args = []string{"--no-video", "--really-quiet", "--ao=alsa",
+			"--demuxer=rawaudio", "--demuxer-rawaudio-format=s16le",
+			fmt.Sprintf("--demuxer-rawaudio-rate=%d", SampleRate),
+			fmt.Sprintf("--demuxer-rawaudio-channels=%d", Channels)}
+	default:
+		return fmt.Errorf("unknown backend %q", name)
+	}
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(path, append(args, "-")...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	o.mu.Lock()
+	o.stdin = stdin
+	o.cmd = cmd
+	o.closed = false
+	o.pending = o.pending[:0]
+	o.mu.Unlock()
+	go func() {
+		waitErr := cmd.Wait()
+		fmt.Fprintf(os.Stderr, "audio: %s exited: %v\n", name, waitErr)
+		o.mu.Lock()
+		o.closed = true
+		o.mu.Unlock()
+		o.selfHeal(waitErr)
+	}()
+	return nil
+}
+
+// Stats returns total frames handed to the player and the longest pipe
+// write stall observed (milliseconds) — printed in the app heartbeat.
+func (o *Output) Stats() (frames int64, maxStallMs int64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.frames, o.maxStallMs
+}
+
 // Silence writes ms milliseconds of silence (disconnected state).
 func (o *Output) Silence(ms int) {
 	frames := SampleRate * ms / 1000
@@ -155,8 +246,15 @@ func (o *Output) Silence(ms int) {
 
 func (o *Output) writePending() {
 	if o.stdin != nil {
+		t0 := time.Now()
 		if _, err := o.stdin.Write(o.pending); err != nil {
 			o.closed = true
+		} else {
+			ms := time.Since(t0).Milliseconds()
+			if ms > o.maxStallMs {
+				o.maxStallMs = ms
+			}
+			o.frames += int64(len(o.pending) / frameBytes)
 		}
 	}
 	o.pending = o.pending[:0]
@@ -166,6 +264,7 @@ func (o *Output) writePending() {
 func (o *Output) Close() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	o.userClosed = true
 	if o.closed {
 		return
 	}
