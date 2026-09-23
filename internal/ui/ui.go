@@ -166,6 +166,18 @@ func (u *UI) fillBlend(x, y, w, h int, r, g, b, a uint8) {
 // DrawMenu renders the settings overlay on top of the composed frame.
 func (u *UI) DrawMenu(items []MenuItem, sel int, footer string) {
 	rowH := 28
+	// Shrink row spacing so the whole panel (header AND footer) fits
+	// the screen: at a fixed 28 px and 16 rows the panel grew to 564 px
+	// on the 480 px display and drew its title above / footer below
+	// the framebuffer — only the item rows stayed visible.
+	if len(items) > 0 {
+		if maxRow := (u.H - 8 - 64 - 30 - 22) / len(items); maxRow < rowH {
+			rowH = maxRow
+		}
+	}
+	if rowH < 20 {
+		rowH = 20
+	}
 	pw := 440
 	ph := 64 + rowH*len(items) + 30
 	if footer != "" {
