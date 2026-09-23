@@ -139,6 +139,64 @@ type MenuItem struct {
 	Value string
 }
 
+// DrawFreqScale draws a tick ruler across the top of the waterfall:
+// ticks step out from the centre at a "nice" Hz spacing (at least five
+// per side); the 3rd and 5th ticks carry absolute-frequency labels
+// (kHz precision, 100 Hz on narrow spans). Drawn on the composed frame
+// only — never into the waterfall history.
+func (u *UI) DrawFreqScale(dialHz int64) {
+	if u.SpanFull <= 0 || u.W < 100 {
+		return
+	}
+	half := float64(u.SpanFull) / 2
+	step := uiNiceStep(half / 5)
+	pxPerHz := float64(u.W) / float64(u.SpanFull)
+	cx := u.W / 2
+	white := color.RGBA{220, 220, 220, 255}
+	tf := Face(11, false)
+	for n := 1; n <= 8; n++ {
+		for _, s := range []float64{1, -1} {
+			x := cx + int(float64(n)*step*s*pxPerHz)
+			if x < 2 || x > u.W-3 {
+				continue
+			}
+			tickH := 9
+			if n == 3 || n == 5 {
+				tickH = 16
+			}
+			u.fillBlend(x-1, 0, 2, tickH, 220, 220, 220, 170)
+			if n == 3 || n == 5 {
+				f := float64(dialHz) + float64(n)*step*s
+				lbl := fmt.Sprintf("%.3f", f/1e6)
+				if step < 10000 {
+					lbl = fmt.Sprintf("%.4f", f/1e6)
+				}
+				w := tf.TextWidth(lbl)
+				lx := x - w/2
+				if lx < 2 {
+					lx = 2
+				}
+				if lx+w > u.W-2 {
+					lx = u.W - 2 - w
+				}
+				u.fillBlend(lx-1, 20, w+2, 13, 0, 0, 0, 150)
+				tf.DrawString(u.img, white, lx, 31, lbl)
+			}
+		}
+	}
+}
+
+// uiNiceStep returns the largest 1/2/2.5/5-ladder value ≤ v, so a
+// scale always shows round numbers with at least the requested ticks.
+func uiNiceStep(v float64) float64 {
+	for _, s := range []float64{1e9, 5e8, 2.5e8, 1e8, 5e7, 2.5e7, 1e7, 5e6, 2.5e6, 1e6, 5e5, 2.5e5, 1e5, 5e4, 2.5e4, 1e4, 5e3, 2.5e3, 1e3, 500, 250, 200, 100, 50} {
+		if s <= v {
+			return s
+		}
+	}
+	return 50
+}
+
 // blendByte mixes c into dst with alpha a (0-255).
 func blendByte(dst, c uint8, a int) uint8 {
 	return uint8((int(dst)*(255-a) + int(c)*a) / 255)

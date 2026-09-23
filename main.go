@@ -1072,6 +1072,11 @@ func main() {
 			MemPct:      mem,
 			SwpPct:      swp,
 		})
+		// Frequency tick ruler on the waterfall (main screen only —
+		// the menu/FT8 windows cover it anyway).
+		if uiMode == uiMain {
+			u.DrawFreqScale(r.Freq())
+		}
 		// Settings overlays on top of the composed frame.
 		if uiMode == uiMenu {
 			sq := r.SquelchLabel()
