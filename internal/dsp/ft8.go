@@ -36,9 +36,25 @@ type FT8Detector struct {
 	written int
 	results []FT8Detection
 	enabled bool
+	linear  []float64 // reusable analysis buffer (~1 MB, avoids GC churn)
 }
 
 const ft8RingSamples = 8000 * 15 // full 15-second cycle
+
+// Package-level FFT scratch buffers (reused across Process calls).
+var (
+	ft8FFTRe   []float64
+	ft8FFTIm   []float64
+	ft8Mags    []float64
+	ft8SortBuf []float64
+)
+
+func growF(s []float64, n int) []float64 {
+	if cap(s) >= n {
+		return s[:n]
+	}
+	return make([]float64, n)
+}
 
 func NewFT8Detector() *FT8Detector {
 	return &FT8Detector{
@@ -91,7 +107,10 @@ func (d *FT8Detector) Process() {
 		d.mu.Unlock()
 		return
 	}
-	linear := make([]float64, ft8RingSamples)
+	if d.linear == nil {
+		d.linear = make([]float64, ft8RingSamples)
+	}
+	linear := d.linear
 	start := d.written % ft8RingSamples
 	copy(linear, d.audio[start:])
 	copy(linear[ft8RingSamples-start:], d.audio[:start])
@@ -125,12 +144,17 @@ type ft8DetInternal struct {
 // 50 Hz-wide clusters.
 func (d *FT8Detector) findCandidates(audio []float64) []float64 {
 	// Use a short FFT over 512 ms (4096 samples) to find energy clusters.
+	// Buffers are package-level and reused (the A53 chokes on repeated
+	// 64 KB allocations every second).
 	nfft := 4096
 	seg := audio[len(audio)-nfft:]
-	re := make([]float64, nfft)
-	im := make([]float64, nfft)
+	ft8FFTRe = growF(ft8FFTRe, nfft)
+	ft8FFTIm = growF(ft8FFTIm, nfft)
+	re := ft8FFTRe[:nfft]
+	im := ft8FFTIm[:nfft]
 	for i := range seg {
 		re[i] = seg[i]
+		im[i] = 0
 	}
 	HannWindow(re, im)
 	FFT(re, im)
@@ -147,12 +171,13 @@ func (d *FT8Detector) findCandidates(audio []float64) []float64 {
 	var clusters []cluster
 	inCluster := false
 	noiseFloor := 0.0
-	// Estimate noise floor as median
-	var mags []float64
+	// Estimate noise floor as median — reusable buffers.
+	ft8Mags = growF(ft8Mags, nfft/2)[:0]
 	for i := 1; i < nfft/2; i++ {
-		mags = append(mags, 20*math.Log10(math.Hypot(re[i], im[i])+1e-12))
+		ft8Mags = append(ft8Mags, 20*math.Log10(math.Hypot(re[i], im[i])+1e-12))
 	}
-	sorted := append([]float64(nil), mags...)
+	sorted := append(ft8SortBuf[:0], ft8Mags...)
+	ft8SortBuf = sorted
 	for i := 1; i < len(sorted); i++ {
 		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
 			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
@@ -193,6 +218,9 @@ func (d *FT8Detector) findCandidates(audio []float64) []float64 {
 		// Snap to 6.25 Hz grid
 		hz = math.Round(hz/6.25) * 6.25
 		result = append(result, hz)
+		if len(result) >= 3 {
+			break // at most 3 candidates — Goertzel scan is expensive
+		}
 	}
 	return result
 }
@@ -203,7 +231,7 @@ func (d *FT8Detector) detectAt(audio []float64, centerHz float64) (ft8DetInterna
 	// Try sync at multiple time offsets: scan in 128-sample steps over
 	// the first 3 seconds (the sync region is at the start of the 12.64s
 	// transmission, which could be anywhere in our 15s buffer).
-	step := FT8SymSamples // one symbol period (1280 samples)
+	step := FT8SymSamples * 4 // every 4th symbol — 4x faster, still finds sync
 	bestSync := 0
 	bestOffset := 0
 	bestSNR := -999.0

@@ -394,9 +394,10 @@ func main() {
 	if !agcOn {
 		r.SetAGCEnabled(false)
 	}
-	if ft8On {
-		r.SetFT8Enabled(true)
-	}
+	// FT8 stays OFF at boot even if the config says on — the scan is
+	// expensive on the A53 and a surprise enable at startup made the
+	// app unresponsive. Enable from the menu after boot.
+	_ = ft8On
 	fmt.Fprintf(os.Stderr, "step: ui created\n")
 
 	// Boot frame right away: a solid color on screen proves the whole
@@ -890,9 +891,9 @@ func main() {
 		}
 
 		r.FT8Process()
-		// Poll results once per second; deduplicate by freq (one entry
-		// per frequency per cycle).
-		if r.FT8Enabled() && time.Since(lastFT8Check) >= time.Second {
+		// Poll results once per 15 s cycle (aligned with FT8 slots);
+		// the detector itself only processes when it has enough data.
+		if r.FT8Enabled() && time.Since(lastFT8Check) >= 15*time.Second {
 			lastFT8Check = time.Now()
 			for _, det := range r.FT8Results() {
 				text := fmt.Sprintf("%.0f Hz %.0f dB", det.FreqHz, det.SNRDb)
