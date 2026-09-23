@@ -18,7 +18,20 @@ const (
 )
 
 var ft8SyncCostas = [7]int{3, 1, 4, 0, 6, 5, 2}
-var ft8SyncPositions = [7]int{0, 36, 37, 38, 72, 73, 74}
+
+// ft8SyncPos lists all 21 Costas symbol positions: three blocks of 7
+// at 0-6, 36-42 and 72-78 (FT8_SYNC_OFFSET = 36), each block repeating
+// the same pattern. (The old {0,36,37,38,72,73,74} map was wrong and
+// could never reliably pass a sync check.)
+func ft8SyncPos(i int) int {
+	if i < 7 {
+		return i
+	}
+	if i < 14 {
+		return 36 + i - 7
+	}
+	return 72 + i - 14
+}
 
 // FT8Detection is one detected FT8 signal.
 type FT8Detection struct {
@@ -116,12 +129,18 @@ func (d *FT8Detector) Process() {
 	var newResults []FT8Detection
 	candidates := d.findCandidates(linear)
 	for _, ch := range candidates {
-		for _, off := range []float64{0, -3.125, 3.125} {
-			if det, ok := d.detectAt(linear, ch+off); ok {
-				det.Message = DecodeFT8At(linear, ch+off)
-				newResults = append(newResults, det)
-				break
+		// The FFT window (~0.5 s) sees only a few tones of the group,
+		// so the cluster midpoint can sit a whole tone step or two off
+		// the true grid centre. Sync only matches at the right shift,
+		// so sweep whole 6.25 Hz steps around the estimate.
+		for _, off := range []float64{0, 6.25, -6.25, 12.5, -12.5, 18.75, -18.75} {
+			det, ok, at := d.detectAt(linear, ch+off)
+			if !ok {
+				continue
 			}
+			det.Message = ft8DecodeAt(linear, at, ch+off)
+			newResults = append(newResults, det)
+			break
 		}
 	}
 	if len(newResults) > 5 {
@@ -141,7 +160,7 @@ func (d *FT8Detector) Process() {
 	for _, r := range newResults {
 		dStr += fmt.Sprintf(" %.0fHz/%.0fdB", r.FreqHz, r.SNRDb)
 		if r.Message != nil && r.Message.Valid {
-			dStr += fmt.Sprintf(" [%s>%s %s]", r.Message.CallsignFrom, r.Message.CallsignTo, r.Message.Grid)
+			dStr += fmt.Sprintf(" \"%s\"", r.Message.Text)
 		}
 	}
 	fmt.Fprintf(os.Stderr, "ft8: amp=%.3f cand=%d det=%d%s\n", maxAmp, len(candidates), len(newResults), dStr)
@@ -202,7 +221,13 @@ func (d *FT8Detector) findCandidates(audio []float64) []float64 {
 		if !inC && cPeak > 0 {
 			w := float64(i-cStart) * binHz
 			if w >= 15 && w <= 300 {
-				hz := math.Round(float64(cPeak)*binHz/6.25) * 6.25
+				// The cluster MIDPOINT estimates the centre of the
+				// 8-tone group (50 Hz wide). Using the peak bin
+				// instead picks whichever single tone happens to be
+				// strongest, which can land a full 6.25 Hz tone step
+				// away from the true grid centre.
+				mid := float64(cStart+i-1) / 2
+				hz := math.Round(mid*binHz/6.25) * 6.25
 				result = append(result, hz)
 				if len(result) >= 3 {
 					break
@@ -214,18 +239,21 @@ func (d *FT8Detector) findCandidates(audio []float64) []float64 {
 	return result
 }
 
-// detectAt checks Costas sync (sliding, 4-symbol steps).
-func (d *FT8Detector) detectAt(audio []float64, centerHz float64) (FT8Detection, bool) {
-	step := FT8SymSamples // every symbol for fine sync resolution
+// detectAt slides the proper 3-block Costas pattern over the buffer
+// and returns the best symbol-aligned offset plus a sub-symbol
+// refinement. Tone t sits at centerHz+(t-3.5)*6.25 by convention, so
+// centerHz is the middle of the 8-tone group (50 Hz wide). The wide
+// scans rank offsets with the first Costas block only (7 positions);
+// the winner is confirmed against all 21 sync positions.
+func (d *FT8Detector) detectAt(audio []float64, centerHz float64) (FT8Detection, bool, int) {
 	maxOff := len(audio) - FT8FrameSamp
 	if maxOff < 0 {
-		return FT8Detection{}, false
+		return FT8Detection{}, false, 0
 	}
-	bestSync, bestSNR := 0, -999.0
-	for off := 0; off <= maxOff; off += step {
-		sc, snr := 0, 0.0
+	quickScore := func(off int) (int, float64) {
+		sc, soft := 0, 0.0
 		for i := 0; i < 7; i++ {
-			s := off + ft8SyncPositions[i]*FT8SymSamples
+			s := off + i*FT8SymSamples
 			if s+FT8SymSamples > len(audio) {
 				break
 			}
@@ -238,22 +266,105 @@ func (d *FT8Detector) detectAt(audio []float64, centerHz float64) (FT8Detection,
 					bm, bt = m, t
 				}
 			}
-			snr += bm / (tm/8 + 1e-12)
 			if bt == ft8SyncCostas[i] {
 				sc++
+				soft += bm / (tm/8 + 1e-12)
 			}
 		}
-		if sc > bestSync {
-			bestSync, bestSNR = sc, 10*math.Log10(snr/7+1e-12)
+		return sc, soft
+	}
+	scoreAt := func(off int) (int, float64) {
+		sc, soft := 0, 0.0
+		for i := 0; i < 21; i++ {
+			s := off + ft8SyncPos(i)*FT8SymSamples
+			if s+FT8SymSamples > len(audio) {
+				break
+			}
+			sym := audio[s : s+FT8SymSamples]
+			exp := ft8SyncCostas[i%7]
+			bt, bm, tm := 0, 0.0, 0.0
+			for t := 0; t < 8; t++ {
+				m := goertzelMag(sym, centerHz+(float64(t)-3.5)*FT8ToneHz, float64(FT8AudioRate))
+				tm += m
+				if m > bm {
+					bm, bt = m, t
+				}
+			}
+			if bt == exp {
+				sc++
+				soft += bm / (tm/8 + 1e-12)
+			}
 		}
-		if bestSync == 7 {
-			break
+		return sc, soft
+	}
+	bestQ, bestQS, bestOff := 0, -1.0, 0
+	for off := 0; off <= maxOff; off += FT8SymSamples {
+		sc, soft := quickScore(off)
+		if sc > bestQ || (sc == bestQ && soft > bestQS) {
+			bestQ, bestQS, bestOff = sc, soft, off
 		}
 	}
-	if bestSync < 6 {
-		return FT8Detection{}, false
+	// Sub-symbol refinement in two stages (eighth-symbol, then ~1.5 ms):
+	// a partial-symbol skew smears tone energy between neighbours and
+	// wrecks the soft decisions — LDPC can only fix so much of that.
+	for _, step := range []int{160, 20} {
+		span := step * 8
+		base := bestOff
+		for sub := -span; sub <= span; sub += step {
+			off := base + sub
+			if off < 0 || off > maxOff {
+				continue
+			}
+			sc, soft := quickScore(off)
+			if sc > bestQ || (sc == bestQ && soft > bestQS) {
+				bestQ, bestQS, bestOff = sc, soft, off
+			}
+		}
 	}
-	return FT8Detection{FreqHz: centerHz, SNRDb: bestSNR, Confidence: float64(bestSync) / 7}, true
+	// Confirm the candidate against all three Costas blocks.
+	bestSync, bestScore := scoreAt(bestOff)
+	if bestSync < 13 {
+		return FT8Detection{}, false, 0
+	}
+	return FT8Detection{
+		FreqHz:     centerHz,
+		SNRDb:      10 * math.Log10(bestScore/21+1e-12),
+		Confidence: float64(bestSync) / 21,
+	}, true, bestOff
+}
+
+// ft8DecodeAt extracts soft bit LLRs for the 58 data symbols at the
+// sync'd offset and runs the LDPC/CRC decode.
+func ft8DecodeAt(audio []float64, off int, centerHz float64) *FT8Message {
+	if off < 0 || off+FT8FrameSamp > len(audio) {
+		return nil
+	}
+	llr := make([]float64, 174)
+	mag := make([]float64, 8)
+	k := 0
+	for sym := 7; sym < 72; sym++ {
+		if sym >= 36 && sym < 43 { // second Costas block
+			continue
+		}
+		s := off + sym*FT8SymSamples
+		symAudio := audio[s : s+FT8SymSamples]
+		for t := 0; t < 8; t++ {
+			mag[t] = goertzelMag(symAudio, centerHz+(float64(t)-3.5)*FT8ToneHz, float64(FT8AudioRate))
+		}
+		// s2 indexed by 3-bit value; FT8GrayMap maps value → tone.
+		s2 := [8]float64{}
+		for j := 0; j < 8; j++ {
+			s2[j] = mag[FT8GrayMap[j]]
+		}
+		llr[3*k] = math.Max(math.Max(s2[4], s2[5]), math.Max(s2[6], s2[7])) -
+			math.Max(math.Max(s2[0], s2[1]), math.Max(s2[2], s2[3]))
+		llr[3*k+1] = math.Max(math.Max(s2[2], s2[3]), math.Max(s2[6], s2[7])) -
+			math.Max(math.Max(s2[0], s2[1]), math.Max(s2[4], s2[5]))
+		llr[3*k+2] = math.Max(math.Max(s2[1], s2[3]), math.Max(s2[5], s2[7])) -
+			math.Max(math.Max(s2[0], s2[2]), math.Max(s2[4], s2[6]))
+		k++
+	}
+	return ft8DecodeCodeword(llr)
 }
 
 func goertzelMag(samples []float64, freqHz, sampleRate float64) float64 {
