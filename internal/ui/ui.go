@@ -336,6 +336,11 @@ type UI struct {
 	// than the decimated IF are fed from the raw full-rate tap.
 	SpanFull int
 
+	// viewOffHz pans the spectrum view relative to the LO (passband
+	// tuning): the waterfall window follows the listening frequency so
+	// the bracket stays on screen; clamped to the real data.
+	viewOffHz float64
+
 	lut [256]color.RGBA
 
 	// Spectrum state.
@@ -363,6 +368,12 @@ type FrameStats struct {
 	Volume      float64
 	GainText    string
 	Host        string
+
+	// Passband tuning: the hardware LO (waterfall centre) and the
+	// receive bandwidth for the bracket marker.
+	LOHz        int64
+	BwHz        float64
+	SSBOneSided bool // USB/CW: bracket on the high side
 
 	// System diagnostics (updated ~1 Hz).
 	CpuPct float64
@@ -479,13 +490,21 @@ func (u *UI) NewSpectrumRow(tap, rawTap *dsp.SpectrumTap) bool {
 	copy(pix[stride:], pix[:stride*(u.WaterfallRows-1)])
 
 	// Draw the new row, stretching the displayed bin range across the
-	// width.
+	// width. The view may be panned (passband tuning): viewOffHz shifts
+	// the window relative to the LO, clamped to the real data.
 	nVis := n * (u.SpanFull / 2) / srcRate // half-width in bins
 	if nVis < 1 || nVis > n/2 {
 		nVis = n / 2
 	}
-	lo := n/2 - nVis
-	hi := n/2 + nVis
+	centerBin := n/2 + int(float64(u.viewOffHz)/float64(srcRate)*float64(n)/2+0.5)
+	if centerBin < nVis {
+		centerBin = nVis
+	}
+	if centerBin > n-nVis {
+		centerBin = n - nVis
+	}
+	lo := centerBin - nVis
+	hi := centerBin + nVis
 	for x := 0; x < u.W; x++ {
 		b0 := lo + x*(hi-lo)/u.W
 		b1 := lo + (x+1)*(hi-lo)/u.W
@@ -563,12 +582,47 @@ func (u *UI) Frame(stats FrameStats) *image.RGBA {
 	return u.img
 }
 
+// SetViewOff pans the spectrum view relative to the LO (passband
+// tuning); the caller passes the listening offset, already clamped.
+func (u *UI) SetViewOff(hz float64) {
+	u.viewOffHz = hz
+}
+
+// drawCenterLine draws the LISTENING bracket (the old fixed centre
+// line is gone — with passband tuning the centre is just the LO).
+// FM modes get a symmetric bracket around the listening frequency;
+// SSB/CW a one-sided bracket toward the sideband; width = bandwidth.
 func (u *UI) drawCenterLine() {
-	x := u.W / 2
+	s := u.stats
+	off := float64(s.FreqHz-s.LOHz) - u.viewOffHz // bracket position relative to the view centre
+	px := u.W/2 + int(off/float64(u.SpanFull)*float64(u.W)+0.5)
+	bwPx := int(float64(s.BwHz) / float64(u.SpanFull) * float64(u.W))
+	if bwPx < 3 {
+		bwPx = 3
+	}
+	var x0, x1 int
+	switch {
+	case s.Mode == "LSB":
+		x0, x1 = px-bwPx, px
+	case s.SSBOneSided: // USB / CW: passband above the beat
+		x0, x1 = px, px+bwPx
+	default: // FM: symmetric around the channel
+		x0, x1 = px-bwPx/2, px+bwPx/2
+	}
+	if x1 < 0 || x0 >= u.W {
+		return // bracket fully off-screen (shouldn't happen with panning)
+	}
+	cyan := color.RGBA{80, 220, 255, 255}
 	for y := 0; y < u.WaterfallRows; y++ {
-		if y%6 < 4 {
-			u.img.SetRGBA(x, y, color.RGBA{255, 255, 255, 255})
-			u.img.SetRGBA(x+1, y, color.RGBA{255, 255, 255, 255})
+		for x := x0; x <= x1; x++ {
+			if x < 0 || x >= u.W {
+				continue
+			}
+			edge := x == x0 || x == x1
+			capRow := y < 4 || y >= u.WaterfallRows-4
+			if edge || capRow {
+				u.img.SetRGBA(x, y, cyan)
+			}
 		}
 	}
 }
@@ -577,7 +631,7 @@ func (u *UI) drawSpanLabels() {
 	tiny := Face(13, false)
 	white := color.RGBA{235, 235, 235, 255}
 	shadow := color.RGBA{0, 0, 0, 220}
-	centerMHz := float64(u.stats.FreqHz) / 1e6
+	centerMHz := float64(u.stats.LOHz+int64(u.viewOffHz)) / 1e6
 	span := formatSpan(float64(u.SpanFull) / 2)
 	center := fmt.Sprintf("%.4f MHz", centerMHz)
 	labels := []struct {
@@ -969,4 +1023,37 @@ func (u *UI) DrawSysBadge(cpu, mem float64, batt int) {
 	y := u.WaterfallRows - h - 4
 	u.fillBlend(x, y, w, h, 0, 0, 0, 150)
 	tf.DrawString(u.img, color.RGBA{140, 210, 140, 255}, x+6, y+12, txt)
+}
+
+// viewOffHzSmooth computes the view pan for a listening offset: keep
+// the bracket at least 15% of the screen in from the edges, and never
+// pan beyond the data the tap actually provides (±(IF2/2 − span/2),
+// falling back to the raw-tap width for wide spans).
+// ViewOffHzSmooth computes the view pan for a listening offset.
+func (u *UI) ViewOffHzSmooth(listenOff float64) float64 {
+	margin := 0.3 * float64(u.SpanFull)
+	lo := listenOff - margin
+	hi := listenOff + margin
+	var v float64
+	switch {
+	case lo > 0:
+		v = lo
+	case hi < 0:
+		v = hi
+	}
+	srcRate := float64(dsp.IF2Rate)
+	if u.SpanFull > dsp.IF2Rate {
+		srcRate = float64(dsp.IQRate)
+	}
+	maxPan := srcRate/2 - float64(u.SpanFull)/2
+	if maxPan < 0 {
+		maxPan = 0
+	}
+	if v > maxPan {
+		v = maxPan
+	}
+	if v < -maxPan {
+		v = -maxPan
+	}
+	return v
 }

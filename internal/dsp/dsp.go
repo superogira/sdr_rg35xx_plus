@@ -172,6 +172,13 @@ type Chain struct {
 	ft8    *FT8Detector // nil = disabled
 	agcOn  bool         // AGC enable switch (menu)
 
+	// Passband tuning: rotate the IF by -offsetHz so the LISTENING
+	// frequency lands at DC for the demodulator while the LO (and the
+	// waterfall) stay put. ncoPhase advances 2π·offsetHz/IF2Rate per
+	// IF2 sample and is kept in [0, 2π).
+	offsetHz float64
+	ncoPhase float64
+
 	// Squelch + metering state.
 	sqlOpen  bool
 	sqlFloor float64 // slowly tracked noise floor, dBFS
@@ -341,6 +348,23 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 
 	if c.tap != nil {
 		c.tap.Push(c.fif2)
+	}
+
+	// Passband tuning: rotate the demod path (NOT the taps above —
+	// the waterfall shows the raw spectrum around the LO) so the
+	// listening frequency lands at DC for every demodulator.
+	if c.offsetHz != 0 {
+		incr := 2 * math.Pi * c.offsetHz / float64(IF2Rate)
+		for i, z := range c.fif2 {
+			w := -c.ncoPhase // rotate by -offset
+			c.fif2[i] = z * complex(math.Cos(w), math.Sin(w))
+			c.ncoPhase += incr
+			if c.ncoPhase >= 2*math.Pi {
+				c.ncoPhase -= 2 * math.Pi
+			} else if c.ncoPhase < 0 {
+				c.ncoPhase += 2 * math.Pi
+			}
+		}
 	}
 
 	if c.mode.SSB {
@@ -516,3 +540,13 @@ func growFloat(s []float64, n int) []float64 {
 	}
 	return make([]float64, n)
 }
+
+// SetOffsetHz sets the passband tuning offset (listening freq − LO).
+// Zero (the default) demodulates at the LO exactly as before.
+func (c *Chain) SetOffsetHz(hz float64) {
+	c.offsetHz = hz
+	c.ncoPhase = 0
+}
+
+// OffsetHz returns the passband tuning offset.
+func (c *Chain) OffsetHz() float64 { return c.offsetHz }
