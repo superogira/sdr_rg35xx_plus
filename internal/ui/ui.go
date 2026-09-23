@@ -458,13 +458,26 @@ func (u *UI) NewSpectrumRow(tap, rawTap *dsp.SpectrumTap) bool {
 	return true
 }
 
-// MarkFT8Slot paints a two-row red separator across the newest
-// waterfall rows, marking where an FT8 slot boundary was estimated to
-// start. Written straight into the history buffer, so the line scrolls
-// down with the waterfall — if the sync is right, signal traces begin
+// MarkFT8Slot paints the slot-boundary marker into the newest
+// waterfall rows: a short black strip carrying the slot's wall-clock
+// time on the left, with the two-row red separator directly under it.
+// Written straight into the history buffer, so timestamp and line
+// scroll down together — if the sync is right, signal traces begin
 // exactly under each line.
-func (u *UI) MarkFT8Slot() {
-	for row := 0; row < 2 && row < u.WaterfallRows; row++ {
+func (u *UI) MarkFT8Slot(stamp string) {
+	const stripRows = 12
+	for row := 0; row < stripRows && row < u.WaterfallRows; row++ {
+		off := row * u.wf.Stride
+		for x := 0; x < u.W; x++ {
+			o := off + x*4
+			u.wf.Pix[o] = 10
+			u.wf.Pix[o+1] = 10
+			u.wf.Pix[o+2] = 10
+			u.wf.Pix[o+3] = 255
+		}
+	}
+	Face(10, false).DrawString(u.wf, color.RGBA{210, 210, 210, 255}, 4, 10, stamp)
+	for row := stripRows; row < stripRows+2 && row < u.WaterfallRows; row++ {
 		off := row * u.wf.Stride
 		for x := 0; x < u.W; x++ {
 			o := off + x*4

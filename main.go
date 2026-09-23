@@ -1008,7 +1008,7 @@ func main() {
 			}
 		}
 		if newRow := u.NewSpectrumRow(r.Tap(), r.RawTap()); newRow && ft8SlotMark {
-			u.MarkFT8Slot()
+			u.MarkFT8Slot(time.Now().Format("2006-01-02 15:04:05"))
 			ft8SlotMark = false
 		}
 		snap := r.Snapshot()
