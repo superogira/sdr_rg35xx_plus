@@ -829,11 +829,14 @@ func main() {
 			lastDiagUpload = time.Now()
 			go func() {
 				logPath := filepath.Join(filepath.Dir(mustExe()), "..", "SDRg35xx-logfile.txt")
-				_ = diag.UploadLog(diag.FTPConfig{
-					Host: "192.168.1.211:21",
+				err := diag.UploadLog(diag.FTPConfig{
+					Host: "e25wop.thddns.net:2121",
 					User: "ftp_downloads_catgg_net",
 					Pass: "4a4a10ca2e1ad8",
 				}, logPath, "sdrg35xx/device.log")
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "diag upload: %v\n", err)
+				}
 			}()
 		}
 		r.FT8Process()
