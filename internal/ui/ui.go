@@ -380,6 +380,24 @@ func (u *UI) NewSpectrumRow(tap, rawTap *dsp.SpectrumTap) bool {
 	return true
 }
 
+// MarkFT8Slot paints a two-row red separator across the newest
+// waterfall rows, marking where an FT8 slot boundary was estimated to
+// start. Written straight into the history buffer, so the line scrolls
+// down with the waterfall — if the sync is right, signal traces begin
+// exactly under each line.
+func (u *UI) MarkFT8Slot() {
+	for row := 0; row < 2 && row < u.WaterfallRows; row++ {
+		off := row * u.wf.Stride
+		for x := 0; x < u.W; x++ {
+			o := off + x*4
+			u.wf.Pix[o] = 220
+			u.wf.Pix[o+1] = 40
+			u.wf.Pix[o+2] = 40
+			u.wf.Pix[o+3] = 255
+		}
+	}
+}
+
 // Frame composes one screen: a fresh copy of the waterfall history with
 // the overlays (center line, span labels) and the bottom bar drawn on top,
 // then returns the image for presenting.

@@ -183,7 +183,7 @@ func runDetectDecode(t *testing.T, ring []float64, centerHz float64) (FT8Detecti
 		t.Fatalf("sync not found at %.4f Hz", centerHz)
 	}
 	t.Logf("sync ok: off=%d conf=%.2f snr=%.1f dB", at, det.Confidence, det.SNRDb)
-	msg := ft8DecodeAt(ring, at, centerHz)
+	msg, _ := ft8DecodeAt(ring, at, centerHz)
 	return det, msg
 }
 
