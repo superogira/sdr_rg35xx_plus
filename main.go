@@ -169,7 +169,7 @@ func runUpdate(u *updater, base string, manual bool) {
 		defer u.end()
 		if runtime.GOOS != "linux" || runtime.GOARCH != "arm64" {
 			if manual {
-				u.setMsg("อัพเดทรองรับบนเครื่อง RG35XX เท่านั้น")
+				u.setMsg("%s", i18n.T("upd_only"))
 			}
 			return
 		}
@@ -177,7 +177,7 @@ func runUpdate(u *updater, base string, manual bool) {
 		stamp, sha, size, err := fetchUpdateMeta(base)
 		if err != nil {
 			if manual {
-				u.setMsg("เช็คอัพเดทไม่สำเร็จ: %v", err)
+				u.setMsg("%s", fmt.Sprintf(i18n.T("upd_check_fail"), err))
 			}
 			return
 		}
@@ -189,23 +189,23 @@ func runUpdate(u *updater, base string, manual bool) {
 
 		resp, err := updateGet(fmt.Sprintf("%s/sdrg35xx-linux-arm64.gz", base), 180*time.Second)
 		if err != nil {
-			u.setMsg("โหลดไม่สำเร็จ: %v", err)
+			u.setMsg("%s", fmt.Sprintf(i18n.T("upd_dl_fail"), err))
 			return
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != 200 {
-			u.setMsg("โหลดไม่สำเร็จ: HTTP %d", resp.StatusCode)
+			u.setMsg("%s", fmt.Sprintf(i18n.T("upd_http"), resp.StatusCode))
 			return
 		}
 		gz, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 		if err != nil {
-			u.setMsg("โหลดไม่สำเร็จ: %v", err)
+			u.setMsg("%s", fmt.Sprintf(i18n.T("upd_dl_fail"), err))
 			return
 		}
 		// version.txt carries the sha256 of the GZIPPED package (what
 		// upload.sh hashes) — verify both before touching the disk.
 		if size > 0 && int64(len(gz)) != size {
-			u.setMsg("ขนาดไฟล์ไม่ตรง (%d != %d)", len(gz), size)
+			u.setMsg("%s", fmt.Sprintf(i18n.T("upd_size"), len(gz), size))
 			return
 		}
 		sum := sha256.Sum256(gz)
@@ -215,31 +215,31 @@ func runUpdate(u *updater, base string, manual bool) {
 		}
 		zr, err := gzip.NewReader(bytes.NewReader(gz))
 		if err != nil {
-			u.setMsg("ไฟล์เสีย (gzip): %v", err)
+			u.setMsg("%s", fmt.Sprintf(i18n.T("upd_gzip"), err))
 			return
 		}
 		bin, err := io.ReadAll(zr)
 		if err != nil {
-			u.setMsg("ไฟล์เสีย (gzip): %v", err)
+			u.setMsg("%s", fmt.Sprintf(i18n.T("upd_gzip"), err))
 			return
 		}
 
 		exe, err := os.Executable()
 		if err != nil {
-			u.setMsg("หาตำแหน่งโปรแกรมไม่ได้: %v", err)
+			u.setMsg("%s", fmt.Sprintf(i18n.T("upd_nopath"), err))
 			return
 		}
 		dir := filepath.Dir(exe)
 		tmp := filepath.Join(dir, ".sdrg35xx.download")
 		if err := os.WriteFile(tmp, bin, 0o755); err != nil {
-			u.setMsg("เขียนไฟล์ไม่ได้: %v", err)
+			u.setMsg("%s", fmt.Sprintf(i18n.T("upd_write"), err))
 			return
 		}
 		// Same-directory rename: atomic on the SD card's filesystem; the
 		// running old inode stays alive until exit.
 		if err := os.Rename(tmp, exe); err != nil {
 			os.Remove(tmp)
-			u.setMsg("แทนที่ไฟล์ไม่ได้: %v", err)
+			u.setMsg("%s", fmt.Sprintf(i18n.T("upd_swap"), err))
 			return
 		}
 		u.setMsg("%s", fmt.Sprintf(i18n.T("updated"), stamp))
@@ -247,7 +247,7 @@ func runUpdate(u *updater, base string, manual bool) {
 		time.Sleep(700 * time.Millisecond) // let the message reach the screen
 		syncDir(dir)
 		syscall.Exec(exe, os.Args, os.Environ())
-		u.setMsg("รีสตาร์ทไม่สำเร็จ — ปิดแล้วเปิดใหม่")
+		u.setMsg("%s", i18n.T("upd_restart"))
 	}()
 }
 
@@ -1093,9 +1093,9 @@ func main() {
 				{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
 				{Label: i18n.T("m_bw"), Value: bwLabel(r.Bandwidth())},
 				{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
-				{Label: "FT8 Decode", Value: ft8Label(r.FT8Enabled())},
+				{Label: i18n.T("m_ft8"), Value: ft8Label(r.FT8Enabled())},
 				{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
-				{Label: "Host / IP", Value: r.Hostname()},
+				{Label: i18n.T("m_host"), Value: r.Hostname()},
 				{Label: i18n.T("m_lang"), Value: langLabel()},
 				{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
 				{Label: i18n.T("m_step"), Value: stepLabel(stepHz)},
@@ -1103,7 +1103,7 @@ func main() {
 				{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
 				{Label: i18n.T("m_update"), Value: i18n.T("press_a")},
 			}
-			u.DrawMenu(items, menuSel, fmt.Sprintf("รุ่น %s · %s", buildStamp, strings.ReplaceAll(buildTime, "_", " ")))
+			u.DrawMenu(items, menuSel, fmt.Sprintf(i18n.T("menu_ver"), buildStamp, strings.ReplaceAll(buildTime, "_", " ")))
 		} else if uiMode == uiFreqEdit {
 			u.DrawFreqEditor(editDigits, editCursor)
 		} else if uiMode == uiHostEdit {
@@ -1150,9 +1150,9 @@ var kbRows = []string{
 
 func ft8Label(on bool) string {
 	if on {
-		return "เปิด"
+		return i18n.T("on")
 	}
-	return "ปิด"
+	return i18n.T("off")
 }
 
 func langLabel() string {
