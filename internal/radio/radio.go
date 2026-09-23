@@ -576,6 +576,11 @@ func (r *Radio) SetMode(mode dsp.Mode) {
 	if r.ft8On {
 		r.chain.SetFT8Detector(r.ft8)
 	}
+	// The fresh chain starts at offset 0 — restore the passband offset
+	// so switching modes mid-scroll keeps listening where the dial says.
+	if off := r.freqHz - r.loHz; off != 0 {
+		r.chain.SetOffsetHz(float64(off))
+	}
 	r.mu.Unlock()
 	// SSB/CW chains produce 8 kHz audio; FM modes IF2/4.
 	if r.out != nil {
@@ -870,6 +875,10 @@ func (r *Radio) SetBandwidth(bw float64) {
 	r.chain.SetAGCEnabled(r.agcOn)
 	if r.ft8On {
 		r.chain.SetFT8Detector(r.ft8)
+	}
+	// Fresh chain = offset 0; keep listening where the dial says.
+	if off := r.freqHz - r.loHz; off != 0 {
+		r.chain.SetOffsetHz(float64(off))
 	}
 	r.mu.Unlock()
 	// Wide SSB bandwidths change the chain's audio rate (8k ↔ 16k).
