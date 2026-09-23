@@ -1,94 +1,96 @@
-// Package sysinfo reads CPU and memory utilization from /proc for the
-// on-screen diagnostic display.
+// Package sysinfo reads CPU and memory utilization from /proc.
+// Values are cached and updated at most once per second from a
+// background goroutine — the render loop just reads the cache.
 package sysinfo
 
 import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 )
 
 var (
-	mu       sync.Mutex
-	lastCPU  [10]uint64 // idle + total per CPU
-	curUtil  float64    // 0-100
-	curMemPc float64
-	curSwpPc float64
-	lastRead time.Time
+	cpuPct  atomic.Value // float64
+	memPct  atomic.Value // float64
+	swpPct  atomic.Value // float64
+	started bool
 )
 
-// Read updates the cached values (call every 1-2 seconds; reading
-// /proc/stat needs a delta between two reads to compute utilization).
-func Read() {
-	mu.Lock()
-	defer mu.Unlock()
-	if time.Since(lastRead) < time.Second {
+// Start begins the background /proc reader (1 Hz).
+func Start() {
+	if started {
 		return
 	}
-	lastRead = time.Now()
+	started = true
+	cpuPct.Store(0.0)
+	memPct.Store(0.0)
+	swpPct.Store(0.0)
+	go loop()
+}
 
-	// CPU: /proc/stat "cpu  user nice system idle iowait irq softirq steal"
-	b, err := os.ReadFile("/proc/stat")
-	if err == nil {
-		for _, line := range strings.Split(string(b), "\n") {
-			if strings.HasPrefix(line, "cpu ") {
-				fields := strings.Fields(line)[1:]
-				var total, idle uint64
-				for i, f := range fields {
-					v, _ := strconv.ParseUint(f, 10, 64)
-					total += v
-					if i == 3 || i == 4 { // idle + iowait
-						idle += v
+func loop() {
+	var lastIdle, lastTotal uint64
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for range tick.C {
+		// CPU: /proc/stat first line
+		if b, err := os.ReadFile("/proc/stat"); err == nil {
+			for _, line := range strings.Split(string(b), "\n") {
+				if strings.HasPrefix(line, "cpu ") {
+					f := strings.Fields(line)[1:]
+					var total, idle uint64
+					for i, v := range f {
+						n, _ := strconv.ParseUint(v, 10, 64)
+						total += n
+						if i == 3 || i == 4 {
+							idle += n
+						}
 					}
+					if total > lastTotal {
+						pct := 100 * float64(total-lastTotal-(idle-lastIdle)) / float64(total-lastTotal)
+						cpuPct.Store(pct)
+					}
+					lastIdle, lastTotal = idle, total
+					break
 				}
-				prevTotal := lastCPU[0] + lastCPU[1]
-				prevIdle := lastCPU[0]
-				if total > prevTotal {
-					util := 100 * float64(total-prevTotal-(idle-prevIdle)) / float64(total-prevTotal)
-					curUtil = util
+			}
+		}
+		// Memory + swap
+		if b, err := os.ReadFile("/proc/meminfo"); err == nil {
+			var memT, memA, swpT, swpF uint64
+			for _, line := range strings.Split(string(b), "\n") {
+				f := strings.Fields(line)
+				if len(f) < 2 {
+					continue
 				}
-				lastCPU[0] = idle
-				lastCPU[1] = total
-				break
+				v, _ := strconv.ParseUint(f[1], 10, 64)
+				switch {
+				case strings.HasPrefix(line, "MemTotal:"):
+					memT = v
+				case strings.HasPrefix(line, "MemAvailable:"):
+					memA = v
+				case strings.HasPrefix(line, "SwapTotal:"):
+					swpT = v
+				case strings.HasPrefix(line, "SwapFree:"):
+					swpF = v
+				}
 			}
-		}
-	}
-
-	// Memory + swap: /proc/meminfo
-	mb, err := os.ReadFile("/proc/meminfo")
-	if err == nil {
-		var memTotal, memAvail, swpTotal, swpFree uint64
-		for _, line := range strings.Split(string(mb), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) < 2 {
-				continue
+			if memT > 0 {
+				memPct.Store(100 * float64(memT-memA) / float64(memT))
 			}
-			v, _ := strconv.ParseUint(fields[1], 10, 64)
-			switch {
-			case strings.HasPrefix(line, "MemTotal:"):
-				memTotal = v
-			case strings.HasPrefix(line, "MemAvailable:"):
-				memAvail = v
-			case strings.HasPrefix(line, "SwapTotal:"):
-				swpTotal = v
-			case strings.HasPrefix(line, "SwapFree:"):
-				swpFree = v
+			if swpT > 0 {
+				swpPct.Store(100 * float64(swpT-swpF) / float64(swpT))
 			}
-		}
-		if memTotal > 0 {
-			curMemPc = 100 * float64(memTotal-memAvail) / float64(memTotal)
-		}
-		if swpTotal > 0 {
-			curSwpPc = 100 * float64(swpTotal-swpFree) / float64(swpTotal)
 		}
 	}
 }
 
-// Snapshot returns the latest readings.
+// Snapshot returns the cached CPU%, MEM%, SWAP%.
 func Snapshot() (cpu, mem, swap float64) {
-	mu.Lock()
-	defer mu.Unlock()
-	return curUtil, curMemPc, curSwpPc
+	c, _ := cpuPct.Load().(float64)
+	m, _ := memPct.Load().(float64)
+	s, _ := swpPct.Load().(float64)
+	return c, m, s
 }
