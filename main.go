@@ -1267,7 +1267,7 @@ func main() {
 			if len(recentFT8) > 40 {
 				recentFT8 = recentFT8[len(recentFT8)-40:]
 			}
-			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, Text: m.Text})
+			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: m.Text})
 			if len(ft8Log) > 100 {
 				ft8Log = ft8Log[len(ft8Log)-100:]
 			}

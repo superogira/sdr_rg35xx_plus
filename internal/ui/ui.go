@@ -40,9 +40,10 @@ func (u *UI) SetSpanKHz(khz int) {
 
 // FT8Entry is one line in the FT8 message log overlay.
 type FT8Entry struct {
-	Time  string
-	SNRDb float64
-	Text  string
+	Time   string
+	SNRDb  float64
+	FreqHz float64 // audio offset from the listening frequency
+	Text   string
 }
 
 // DrawFT8Log renders a semi-transparent log of the latest FT8 decodes
@@ -69,8 +70,9 @@ func (u *UI) DrawFT8Log(entries []FT8Entry) {
 	for i, e := range entries {
 		y := py + 14 + i*lh
 		tf.DrawString(u.img, color.RGBA{150, 180, 150, 255}, px+4, y, e.Time)
-		tf.DrawString(u.img, color.RGBA{120, 200, 255, 255}, px+56, y, fmt.Sprintf("%3.0f", e.SNRDb))
-		tf.DrawString(u.img, ft8TextColor(e.Text), px+86, y, e.Text)
+		tf.DrawString(u.img, color.RGBA{120, 200, 255, 255}, px+52, y, fmt.Sprintf("%3.0f", e.SNRDb))
+		tf.DrawString(u.img, color.RGBA{170, 200, 170, 255}, px+76, y, fmt.Sprintf("%4.0f", e.FreqHz))
+		tf.DrawString(u.img, ft8TextColor(e.Text), px+106, y, e.Text)
 	}
 }
 
@@ -131,7 +133,8 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int) {
 		yy := y + lh + 22 + (i-top)*lh
 		lineF.DrawString(u.img, gray, x+10, yy, e.Time)
 		lineF.DrawString(u.img, color.RGBA{120, 200, 255, 255}, x+78, yy, fmt.Sprintf("%4.0f dB", e.SNRDb))
-		lineF.DrawString(u.img, ft8TextColor(e.Text), x+140, yy, e.Text)
+		lineF.DrawString(u.img, color.RGBA{170, 200, 170, 255}, x+140, yy, fmt.Sprintf("%5.0f Hz", e.FreqHz))
+		lineF.DrawString(u.img, ft8TextColor(e.Text), x+210, yy, e.Text)
 	}
 	hintF.DrawString(u.img, gray, x+10, y+h-12, i18n.T("ft8_scroll"))
 }
