@@ -45,26 +45,87 @@ type FT8Entry struct {
 // DrawFT8Log renders a semi-transparent log of the latest FT8 decodes
 // in the bottom-left corner of the waterfall area.
 func (u *UI) DrawFT8Log(entries []FT8Entry) {
-	if len(entries) == 0 {
-		return
-	}
+	lh := 15
 	maxShow := 6
 	if len(entries) > maxShow {
 		entries = entries[len(entries)-maxShow:]
 	}
-	lh := 15
 	pw := 320
 	ph := len(entries)*lh + 8
+	if len(entries) == 0 {
+		ph = lh + 8 // keep a placeholder window while waiting
+	}
 	px := 4
 	py := u.WaterfallRows - ph - 4
 	u.fillBlend(px, py, pw, ph, 0, 0, 0, 180)
 	green := color.RGBA{100, 255, 100, 255}
 	tf := Face(11, false)
+	if len(entries) == 0 {
+		tf.DrawString(u.img, color.RGBA{150, 180, 150, 255}, px+4, py+14, "FT8 · · ·")
+		return
+	}
 	for i, e := range entries {
 		y := py + 14 + i*lh
 		tf.DrawString(u.img, color.RGBA{150, 180, 150, 255}, px+4, y, e.Time)
 		tf.DrawString(u.img, green, px+50, y, e.Text)
 	}
+}
+
+// DrawFT8LogFull renders the large, scrollable FT8 history window over
+// the waterfall. scroll is how far back from the newest entry the
+// bottom of the view sits (0 = latest at the bottom).
+func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int) {
+	lh := 16
+	x, y := 12, 8
+	w := u.W - 24
+	h := u.WaterfallRows - 16
+	if h < 4*lh {
+		return
+	}
+	u.fillBlend(x, y, w, h, 0, 0, 0, 215)
+	// Thin accent edges so the window reads as a panel.
+	u.fillBlend(x, y, w, 2, 200, 60, 60, 255)
+	u.fillBlend(x, y+h-2, w, 2, 200, 60, 60, 255)
+
+	titleF := Face(14, true)
+	lineF := Face(13, false)
+	hintF := Face(11, false)
+	white := color.RGBA{235, 235, 235, 255}
+	gray := color.RGBA{150, 180, 150, 255}
+	green := color.RGBA{100, 255, 100, 255}
+
+	vis := (h - 2*lh - 14) / lh
+	if vis < 1 {
+		vis = 1
+	}
+	bottom := len(entries) - scroll
+	if bottom > len(entries) {
+		bottom = len(entries)
+	}
+	if bottom < vis {
+		bottom = vis
+	}
+	top := bottom - vis
+	if top < 0 {
+		top = 0
+		bottom = vis
+		if bottom > len(entries) {
+			bottom = len(entries)
+		}
+	}
+
+	title := fmt.Sprintf("FT8  ·  %d", len(entries))
+	titleF.DrawString(u.img, white, x+10, y+20, title)
+	pos := fmt.Sprintf("%d–%d", top+1, bottom)
+	lineF.DrawString(u.img, gray, x+w-10-lineF.TextWidth(pos), y+20, pos)
+
+	for i := top; i < bottom; i++ {
+		e := entries[i]
+		yy := y + lh + 22 + (i-top)*lh
+		lineF.DrawString(u.img, gray, x+10, yy, e.Time)
+		lineF.DrawString(u.img, green, x+72, yy, e.Text)
+	}
+	hintF.DrawString(u.img, gray, x+10, y+h-12, "▲▼ line  ◀▶ page  ·  B/Select close")
 }
 
 // MenuItem is one row of the settings menu.

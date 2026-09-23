@@ -437,6 +437,9 @@ func main() {
 	ft8SyncWall := time.Time{}
 	ft8SlotIdx := -1
 	ft8SlotMark := false
+	// Scroll position of the big FT8 history window (entries hidden
+	// below the bottom of the view; 0 = newest at the bottom).
+	ft8Scroll := 0
 	// Tuning step for left/right (up/down is ×10), settable in the menu.
 	stepSteps := []int64{10, 50, 100, 500, 1_000, 5_000, 10_000, 12_500, 25_000, 100_000}
 	stepHz := int64(12_500)
@@ -477,7 +480,7 @@ func main() {
 	}
 	// Screenshot support: the last presented frame and a transient status
 	// message pointing at the saved file (triggered from the menu).
-	ft8Log := make([]ui.FT8Entry, 0, 12)
+	ft8Log := make([]ui.FT8Entry, 0, 100)
 	var lastFT8Poll time.Time
 
 	var lastFrame *image.RGBA
@@ -508,6 +511,7 @@ func main() {
 		uiMenu
 		uiFreqEdit
 		uiHostEdit
+		uiFT8Log
 	)
 	uiMode := uiMain
 	// Dev aid for PNG screenshot testing of the overlays.
@@ -698,7 +702,7 @@ func main() {
 			r.SetFreq(r.Freq() + 10*stepFor())
 		case input.Down:
 			r.SetFreq(r.Freq() - 10*stepFor())
-		case input.A, input.Select:
+		case input.A:
 			// Save current mode's bandwidth before switching.
 			saveBwNow(cfg, r)
 			m := dsp.NextMode(r.Mode())
@@ -714,6 +718,13 @@ func main() {
 				stepHz = 100_000
 			} else if m != dsp.ModeWFM && stepHz > 25_000 {
 				stepHz = 12_500
+			}
+		case input.Select:
+			// Big scrollable FT8 history window (mode cycling moved to
+			// A alone).
+			if r.FT8Enabled() {
+				ft8Scroll = 0
+				uiMode = uiFT8Log
 			}
 		case input.Y:
 			if r.FT8Enabled() {
@@ -775,6 +786,28 @@ func main() {
 				activateItem(menuSel)
 			case input.B, input.Start:
 				uiMode = uiMain
+			}
+		case uiFT8Log:
+			// D-pad scrolls the big FT8 history: up/down one line,
+			// left/right one page (8 lines).
+			page := 8
+			switch b {
+			case input.Up:
+				ft8Scroll += 1
+			case input.Down:
+				ft8Scroll -= 1
+			case input.Left:
+				ft8Scroll += page
+			case input.Right:
+				ft8Scroll -= page
+			case input.B, input.Start, input.Select:
+				uiMode = uiMain
+			}
+			if ft8Scroll > len(ft8Log) {
+				ft8Scroll = len(ft8Log)
+			}
+			if ft8Scroll < 0 {
+				ft8Scroll = 0
 			}
 		case uiHostEdit:
 			switch b {
@@ -914,7 +947,7 @@ func main() {
 							// Short tap: toggle the settings menu
 							// (or back out of the freq editor).
 							switch uiMode {
-							case uiFreqEdit, uiMenu:
+							case uiFreqEdit, uiMenu, uiFT8Log:
 								uiMode = uiMain
 							default:
 								uiMode = uiMenu
@@ -1018,8 +1051,8 @@ func main() {
 					continue
 				}
 				ft8Log = append(ft8Log, ui.FT8Entry{Time: time.Now().Format("15:04:05"), Text: text})
-				if len(ft8Log) > 12 {
-					ft8Log = ft8Log[len(ft8Log)-12:]
+				if len(ft8Log) > 100 {
+					ft8Log = ft8Log[len(ft8Log)-100:]
 				}
 			}
 		}
@@ -1071,8 +1104,10 @@ func main() {
 			u.DrawFreqEditor(editDigits, editCursor)
 		} else if uiMode == uiHostEdit {
 			u.DrawKeyboard(hostText, len(hostText), hostKbR, hostKbC)
+		} else if uiMode == uiFT8Log {
+			u.DrawFT8LogFull(ft8Log, ft8Scroll)
 		}
-		if r.FT8Enabled() && len(ft8Log) > 0 && uiMode == uiMain {
+		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Log(ft8Log)
 		}
 		lastFrame = frame
