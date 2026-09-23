@@ -872,6 +872,10 @@ func (r *Radio) SetBandwidth(bw float64) {
 		r.chain.SetFT8Detector(r.ft8)
 	}
 	r.mu.Unlock()
+	// Wide SSB bandwidths change the chain's audio rate (8k ↔ 16k).
+	if r.out != nil {
+		r.out.SetInputRate(m.AudioOutRate())
+	}
 	fmt.Fprintf(os.Stderr, "radio: bandwidth %.4g Hz (%s)\n", bw, m.Name)
 }
 

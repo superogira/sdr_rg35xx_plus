@@ -1025,21 +1025,18 @@ func (u *UI) DrawSysBadge(cpu, mem float64, batt int) {
 	tf.DrawString(u.img, color.RGBA{140, 210, 140, 255}, x+6, y+12, txt)
 }
 
-// viewOffHzSmooth computes the view pan for a listening offset: keep
-// the bracket at least 15% of the screen in from the edges, and never
-// pan beyond the data the tap actually provides (±(IF2/2 − span/2),
-// falling back to the raw-tap width for wide spans).
-// ViewOffHzSmooth computes the view pan for a listening offset.
+// ViewOffHzSmooth computes the view pan for a listening offset with
+// HYSTERESIS: the view moves only when the bracket would cross the
+// screen edge — scrolling back toward the view centre moves just the
+// bracket, so hunting for a signal on a static waterfall is easy.
+// The pan is clamped to the data the tap provides.
 func (u *UI) ViewOffHzSmooth(listenOff float64) float64 {
-	margin := 0.3 * float64(u.SpanFull)
-	lo := listenOff - margin
-	hi := listenOff + margin
-	var v float64
-	switch {
-	case lo > 0:
-		v = lo
-	case hi < 0:
-		v = hi
+	edge := 0.12 * float64(u.SpanFull)
+	v := u.viewOffHz
+	if listenOff-v > edge {
+		v = listenOff - edge
+	} else if listenOff-v < -edge {
+		v = listenOff + edge
 	}
 	srcRate := float64(dsp.IF2Rate)
 	if u.SpanFull > dsp.IF2Rate {

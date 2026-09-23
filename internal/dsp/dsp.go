@@ -68,7 +68,7 @@ func (m Mode) Bandwidths() []float64 {
 	case m.Name == "WFM":
 		return []float64{50000, 75000, 100000, 150000, 200000, 250000}
 	case m.SSB && m.Name != "CW":
-		return []float64{500, 1000, 1500, 2000, 2500, 3000}
+		return []float64{500, 1000, 1500, 2000, 2500, 3000, 5000, 6000}
 	case m.Name == "CW":
 		return []float64{50, 100, 150, 200, 250, 300, 400, 500}
 	}
@@ -107,10 +107,16 @@ func NextMode(m Mode) Mode {
 }
 
 // AudioOutRate is the audio sample rate this mode's chain produces
-// (used to re-configure the output resampler): 8 kHz for NFM/SSB/CW,
-// 32 kHz for WFM.
+// (used to re-configure the output resampler): 8 kHz for NFM/SSB/CW
+// (16 kHz for the wide 5/6 kHz SSB settings), 32 kHz for WFM.
 func (m Mode) AudioOutRate() int {
-	if m.SSB || m.Name == "NFM" {
+	if m.SSB {
+		if m.BwHz > 3400 {
+			return 2 * SSBRate
+		}
+		return SSBRate
+	}
+	if m.Name == "NFM" {
 		return SSBRate
 	}
 	return IF2Rate / 8
@@ -213,10 +219,17 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 	}
 	switch {
 	case mode.SSB:
+		// Wide-bandwidth SSB (5/6 kHz options) needs a 16 kHz audio
+		// branch — 8 kHz cannot carry more than ±4 kHz. FT8 stays on
+		// the 8 kHz branches (its detector assumes that rate).
 		c.outRate = SSBRate
-		// Wide lowpass, then decimate by 32 to 8 kHz.
-		c.ssbDecTaps = DesignLowpass(255, 3400, float64(IF2Rate))
-		c.ssbDecD = IF2Rate / SSBRate
+		if bw > 3400 {
+			c.outRate = 2 * SSBRate
+		}
+		// Wide lowpass covering the audio band, decimate to outRate.
+		decCutoff := float64(c.outRate)/2 - 400
+		c.ssbDecTaps = DesignLowpass(255, decCutoff, float64(IF2Rate))
+		c.ssbDecD = IF2Rate / c.outRate
 		// Sideband bandpass: a lowpass prototype rotated to the band
 		// centre. Narrow settings need longer filters; the transition is
 		// kept to about half the passband.
@@ -224,17 +237,29 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 		if half < 25 {
 			half = 25
 		}
-		taps := int(3.3 * float64(SSBRate) / half)
+		// Shift keeps the low edge at ~200 Hz for wide settings (the
+		// fixed per-mode ShiftHz only fits the narrow defaults) —
+		// WITHOUT flipping the sideband sign (a plain max() here
+		// turned LSB into USB).
+		shift := mode.ShiftHz
+		if shift >= 0 {
+			if half+200 > shift {
+				shift = half + 200
+			}
+		} else if -(half + 200) < shift {
+			shift = -(half + 200)
+		}
+		taps := int(3.3 * float64(c.outRate) / half)
 		if taps < 127 {
 			taps = 127
 		}
 		if taps > 2047 {
 			taps = 2047
 		}
-		lp := DesignLowpass(taps, half, float64(SSBRate))
+		lp := DesignLowpass(taps, half, float64(c.outRate))
 		c.ssbTaps = make([]complex128, len(lp))
 		for n, h := range lp {
-			ang := 2 * math.Pi * mode.ShiftHz * float64(n) / float64(SSBRate)
+			ang := 2 * math.Pi * shift * float64(n) / float64(c.outRate)
 			c.ssbTaps[n] = complex(h*math.Cos(ang), h*math.Sin(ang))
 		}
 		c.mode.HalfBwHz = half
@@ -420,7 +445,9 @@ func (c *Chain) processSSB(out *[]float32) {
 	complexCIFIR(c.ssbTaps, &c.ssbHist, slow, &side)
 	c.sbOut = side
 
-	if c.ft8 != nil {
+	// FT8 expects 8 kHz audio — the wide 16 kHz SSB branches cannot
+	// feed it (the detector's whole timing assumes 8 k).
+	if c.ft8 != nil && c.outRate == SSBRate {
 		ft8buf := make([]float64, 0, len(side))
 		for _, z := range side {
 			ft8buf = append(ft8buf, real(z)*3.0)
