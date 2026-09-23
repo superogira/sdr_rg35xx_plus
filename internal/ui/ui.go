@@ -957,3 +957,16 @@ func (u *UI) DrawSysMon(lines []string) {
 		yy += lh
 	}
 }
+
+// DrawSysBadge paints a compact live badge at the bottom-right of the
+// waterfall: CPU %, MEM % and battery level.
+func (u *UI) DrawSysBadge(cpu, mem float64, batt int) {
+	tf := Face(11, false)
+	txt := fmt.Sprintf("C%.0f  M%.0f  B%d%%", cpu, mem, batt)
+	w := tf.TextWidth(txt) + 12
+	h := 16
+	x := u.W - w - 6
+	y := u.WaterfallRows - h - 4
+	u.fillBlend(x, y, w, h, 0, 0, 0, 150)
+	tf.DrawString(u.img, color.RGBA{140, 210, 140, 255}, x+6, y+12, txt)
+}

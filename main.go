@@ -1396,6 +1396,7 @@ func main() {
 		} else if uiMode == uiSysMon {
 			sn := sysinfo.SensorSnapshot()
 			cpu, mem, swp := sysinfo.Snapshot()
+			memUsed, memTot := sysinfo.MemAbsolute()
 			fDeg := func(v float64) string {
 				if v == 0 {
 					return "—"
@@ -1417,7 +1418,7 @@ func main() {
 				i18n.T("sm_batt_v") + "\t" + fmt.Sprintf("%.2f V", sn.BattVolt),
 				i18n.T("sm_batt_st") + "\t" + sn.BattStatus,
 				i18n.T("sm_cpu_use") + "\t" + fmt.Sprintf("%.0f %%", cpu),
-				i18n.T("sm_mem_use") + "\t" + fmt.Sprintf("%.0f %%", mem),
+				i18n.T("sm_mem_use") + "\t" + fmt.Sprintf("%.0f %%  ·  %.2f/%.2f GB", mem, memUsed/1024, memTot/1024),
 				i18n.T("sm_swap_use") + "\t" + swapStr,
 			}
 			for i := range rows {
@@ -1429,6 +1430,9 @@ func main() {
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Log(ft8Log)
+		}
+		if uiMode == uiMain {
+			u.DrawSysBadge(cpu, mem, sysinfo.SensorSnapshot().BattPct)
 		}
 		lastFrame = frame
 		if err := disp.Present(frame); err != nil {
