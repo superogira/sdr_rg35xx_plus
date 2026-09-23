@@ -300,7 +300,10 @@ func main() {
 	}
 	rate := 2_048_000
 	if v, ok := cfg["rate"]; ok {
-		if n, err := strconv.Atoi(v); err == nil && (n == 2_048_000 || n == 1_024_000 || n == 512_000) {
+		// Only server-verified rates; a stale 512000 from an old build
+		// falls through to the default instead of requesting a rate the
+		// server cannot stream cleanly.
+		if n, err := strconv.Atoi(v); err == nil && (n == 2_048_000 || n == 1_024_000) {
 			rate = n
 		}
 	}
@@ -563,15 +566,14 @@ func main() {
 			r.SetSquelchDb(db)
 			cfg["sql"] = fmt.Sprintf("%g", r.SquelchDb())
 		case menuSample:
-			// Verified rates only; the change reconnects with the new
-			// rate as the connection's first command.
+			// Verified rates only (512 kHz removed — the server cannot
+			// stream it cleanly, audio ran time-stretched); the change
+			// reconnects with the new rate as the connection's first
+			// command.
 			var next int
-			switch r.IQRate() {
-			case 2_048_000:
+			if r.IQRate() == 2_048_000 {
 				next = 1_024_000
-			case 1_024_000:
-				next = 512_000
-			default:
+			} else {
 				next = 2_048_000
 			}
 			r.SetCaptureRate(next)

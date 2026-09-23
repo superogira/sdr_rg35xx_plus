@@ -136,12 +136,14 @@ func (r *Radio) IQRate() int {
 }
 
 // SetCaptureRate switches the capture sample rate (supported: 2.048M and
-// 1.024M — both verified against the server). The whole DSP chain is
+// 1.024M — both verified against the server; 512 kHz was never a real
+// server rate and made the stream run at an unsupported speed, heard as
+// time-stretched audio). The whole DSP chain is
 // re-dimensioned and the client dropped, so the next session opens with
 // a SetSampleRate as its very first command — the only rate-change
 // pattern the server tolerates (mid-stream changes destabilize it).
 func (r *Radio) SetCaptureRate(hz int) {
-	if hz != 2_048_000 && hz != 1_024_000 && hz != 512_000 {
+	if hz != 2_048_000 && hz != 1_024_000 {
 		return
 	}
 	r.mu.Lock()
@@ -374,38 +376,34 @@ func (r *Radio) session(ctx context.Context) error {
 				if rateT0.IsZero() && total >= 512*1024 {
 					rateT0 = time.Now()
 					rateB0 = total
-				} else if !rateT0.IsZero() && time.Since(rateT0) >= 2*time.Second {
+				} else if !rateT0.IsZero() && time.Since(rateT0) >= 6*time.Second {
 					actual := float64(total-rateB0) / time.Since(rateT0).Seconds() / 2
-					snap := int(math.Round(actual/32000) * 32000)
-					if snap < 512_000 {
-						snap = 512_000
+					// Snap only to rates the server actually supports.
+					// Quantizing one burst measurement to an arbitrary
+					// 32 kHz multiple once re-dimensioned the DSP to
+					// 576 kHz for a whole session while the stream ran
+					// slower — every mode then played time-stretched
+					// by the mismatch (FT8 slots audibly >15 s).
+					snap := 0
+					for _, known := range []int{1_024_000, 2_048_000} {
+						if actual >= float64(known)*0.85 && actual <= float64(known)*1.15 {
+							snap = known
+							break
+						}
 					}
-					if snap > 3_200_000 {
-						snap = 3_200_000
-					}
-					// A just-reconnected server ramps up slowly; if
-					// the measurement is wildly below the configured
-					// rate, it is a startup transient — trust the
-					// config and re-measure later instead of
-					// re-dimensioning to a nonsense rate.
-					if float64(snap) < float64(dsp.IQRate)*0.7 || float64(snap) > float64(dsp.IQRate)*1.3 {
-						fmt.Fprintf(os.Stderr, "radio: measured %.3f Msps vs configured %d — transient, keeping config\n", actual, dsp.IQRate)
-						rateDone = true
-						sessT0 = rateT0
-						lastDropChk = time.Now()
-						break
-					}
-					r.mu.Lock()
-					configured := r.iqRate
-					r.mu.Unlock()
-					if dsp.IQRate != snap {
+					if snap == 0 {
+						// Matches neither supported rate (server ramp-up
+						// or TCP burst skew). Keep the configured chain —
+						// connect already requested a supported rate — and
+						// never kill the session over one bad measurement.
+						fmt.Fprintf(os.Stderr, "radio: measured %.3f Msps matches no supported rate — keeping %d Hz\n", actual/1e6, dsp.IQRate)
+					} else if snap != dsp.IQRate {
 						fmt.Fprintf(os.Stderr, "radio: stream measures %.3f Msps — re-dimensioning DSP from %d to %d Hz\n", actual/1e6, dsp.IQRate, snap)
 						dsp.SetIQRate(snap)
 						r.SetMode(r.Mode()) // rebuilds the chain + resampler rate
 					} else {
 						fmt.Fprintf(os.Stderr, "radio: stream rate confirmed %d Hz (%.3f Msps measured)\n", snap, actual/1e6)
 					}
-					_ = configured
 					rateDone = true
 					sessT0 = rateT0
 					lastDropChk = time.Now()
