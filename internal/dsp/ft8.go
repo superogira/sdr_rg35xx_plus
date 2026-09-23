@@ -157,12 +157,15 @@ func (d *FT8Detector) Process() {
 		// may be a neighbour of the true one).
 		var first FT8Detection
 		haveFirst := false
-		for _, off := range []float64{0, 6.25, -6.25, 12.5, -12.5, 18.75, -18.75} {
+		for _, off := range []float64{0, 6.25, -6.25, 12.5, -12.5, 18.75, -18.75, 25, -25} {
 			det, ok, at := d.detectAt(linear, ch+off)
 			if !ok {
 				continue
 			}
-			msg, diag := ft8DecodeAt(linear, at, ch+off)
+			// det.FreqHz carries the refined (sub-grid) centre —
+			// decoding at the raw grid estimate loses 1-3 dB to
+			// between-bin straddle.
+			msg, diag := ft8DecodeAt(linear, at, det.FreqHz)
 			if msg != nil && msg.Valid {
 				det.Message = msg
 				newResults = append(newResults, det)
@@ -264,16 +267,18 @@ func (d *FT8Detector) findCandidates(audio []float64) []float64 {
 		}
 		if !inC && cPeak > 0 {
 			w := float64(i-cStart) * binHz
-			if w >= 15 && w <= 300 {
+			// A 0.5 s window spans ~3 symbols, so often only ONE tone
+			// of the group is visible — a 6-12 Hz "cluster". Accept
+			// from 6 Hz and let sync + LDPC + CRC reject false leads.
+			if w >= 6 && w <= 300 {
 				// The cluster MIDPOINT estimates the centre of the
-				// 8-tone group (50 Hz wide). Using the peak bin
-				// instead picks whichever single tone happens to be
-				// strongest, which can land a full 6.25 Hz tone step
-				// away from the true grid centre.
+				// 8-tone group (50 Hz wide); with a partial view it
+				// can sit a few tone steps off, which the caller's
+				// grid-shift sweep corrects.
 				mid := float64(cStart+i-1) / 2
 				hz := math.Round(mid*binHz/6.25) * 6.25
 				result = append(result, hz)
-				if len(result) >= 3 {
+				if len(result) >= 5 {
 					break
 				}
 			}
@@ -294,7 +299,7 @@ func (d *FT8Detector) detectAt(audio []float64, centerHz float64) (FT8Detection,
 	if maxOff < 0 {
 		return FT8Detection{}, false, 0
 	}
-	quickScore := func(off int) (int, float64) {
+	quickScoreAt := func(off int, freq float64) (int, float64) {
 		sc, soft := 0, 0.0
 		for i := 0; i < 7; i++ {
 			s := off + i*FT8SymSamples
@@ -304,7 +309,7 @@ func (d *FT8Detector) detectAt(audio []float64, centerHz float64) (FT8Detection,
 			sym := audio[s : s+FT8SymSamples]
 			bt, bm, tm := 0, 0.0, 0.0
 			for t := 0; t < 8; t++ {
-				m := goertzelMag(sym, centerHz+(float64(t)-3.5)*FT8ToneHz, float64(FT8AudioRate))
+				m := goertzelMag(sym, freq+(float64(t)-3.5)*FT8ToneHz, float64(FT8AudioRate))
 				tm += m
 				if m > bm {
 					bm, bt = m, t
@@ -317,7 +322,7 @@ func (d *FT8Detector) detectAt(audio []float64, centerHz float64) (FT8Detection,
 		}
 		return sc, soft
 	}
-	scoreAt := func(off int) (int, float64) {
+	scoreAt := func(off int, freq float64) (int, float64) {
 		sc, soft := 0, 0.0
 		for i := 0; i < 21; i++ {
 			s := off + ft8SyncPos(i)*FT8SymSamples
@@ -328,7 +333,7 @@ func (d *FT8Detector) detectAt(audio []float64, centerHz float64) (FT8Detection,
 			exp := ft8SyncCostas[i%7]
 			bt, bm, tm := 0, 0.0, 0.0
 			for t := 0; t < 8; t++ {
-				m := goertzelMag(sym, centerHz+(float64(t)-3.5)*FT8ToneHz, float64(FT8AudioRate))
+				m := goertzelMag(sym, freq+(float64(t)-3.5)*FT8ToneHz, float64(FT8AudioRate))
 				tm += m
 				if m > bm {
 					bm, bt = m, t
@@ -343,7 +348,7 @@ func (d *FT8Detector) detectAt(audio []float64, centerHz float64) (FT8Detection,
 	}
 	bestQ, bestQS, bestOff := 0, -1.0, 0
 	for off := 0; off <= maxOff; off += FT8SymSamples {
-		sc, soft := quickScore(off)
+		sc, soft := quickScoreAt(off, centerHz)
 		if sc > bestQ || (sc == bestQ && soft > bestQS) {
 			bestQ, bestQS, bestOff = sc, soft, off
 		}
@@ -359,19 +364,40 @@ func (d *FT8Detector) detectAt(audio []float64, centerHz float64) (FT8Detection,
 			if off < 0 || off > maxOff {
 				continue
 			}
-			sc, soft := quickScore(off)
+			sc, soft := quickScoreAt(off, centerHz)
 			if sc > bestQ || (sc == bestQ && soft > bestQS) {
 				bestQ, bestQS, bestOff = sc, soft, off
 			}
 		}
 	}
+	// Frequency refinement: the FFT candidate snaps to the 6.25 Hz grid
+	// with up to ±3 Hz of error, and a tone sitting between two bins
+	// degrades every soft decision across the whole message. Sweep
+	// fractional offsets and re-align timing at the winner.
+	bestF := centerHz
+	for _, df := range []float64{0, 0.78125, -0.78125, 1.5625, -1.5625, 2.34375, -2.34375, 3.125, -3.125} {
+		sc, soft := quickScoreAt(bestOff, centerHz+df)
+		if sc > bestQ || (sc == bestQ && soft > bestQS) {
+			bestQ, bestQS, bestF = sc, soft, centerHz+df
+		}
+	}
+	for sub := -160; sub <= 160; sub += 20 {
+		off := bestOff + sub
+		if off < 0 || off > maxOff {
+			continue
+		}
+		sc, soft := quickScoreAt(off, bestF)
+		if sc > bestQ || (sc == bestQ && soft > bestQS) {
+			bestQ, bestQS, bestOff = sc, soft, off
+		}
+	}
 	// Confirm the candidate against all three Costas blocks.
-	bestSync, bestScore := scoreAt(bestOff)
+	bestSync, bestScore := scoreAt(bestOff, bestF)
 	if bestSync < 13 {
 		return FT8Detection{}, false, 0
 	}
 	return FT8Detection{
-		FreqHz:     centerHz,
+		FreqHz:     bestF,
 		SNRDb:      10 * math.Log10(bestScore/21+1e-12),
 		Confidence: float64(bestSync) / 21,
 	}, true, bestOff

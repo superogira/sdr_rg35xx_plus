@@ -341,3 +341,69 @@ func TestFT8TakeMessagesQueue(t *testing.T) {
 		t.Fatalf("queue not drained: %d left", len(again))
 	}
 }
+
+// TestFT8OffGridFrequency: real stations land up to ±3 Hz off the
+// candidate grid (FFT bin rounding); the frequency refinement must
+// recover the offset and decode.
+func TestFT8OffGridFrequency(t *testing.T) {
+	rng := rand.New(rand.NewSource(31))
+	msg := pack77("E20ZKT", "BA7SAY", "OL53")
+	tones := encodeTones(msg)
+	// +2.0 Hz off the grid, at a noise level that only decodes when
+	// the frequency estimate is right.
+	sig := synthFrame(tones, 1500.0+2.0, 1.0, 0.45, rng)
+	ring := buildRing(sig, 17000, 0.45, rng)
+	d := NewFT8Detector()
+	d.SetEnabled(true)
+	for i := 0; i < len(ring); i += 512 {
+		e := i + 512
+		if e > len(ring) {
+			e = len(ring)
+		}
+		d.Feed(ring[i:e])
+	}
+	d.Process()
+	msgs := d.TakeMessages()
+	if len(msgs) == 0 {
+		t.Fatal("off-grid signal not decoded (frequency refinement failed)")
+	}
+	if msgs[0].Text != "E20ZKT BA7SAY OL53" {
+		t.Fatalf("decoded %q", msgs[0].Text)
+	}
+}
+
+// TestFT8TwoSignals: two overlapping transmissions at different
+// frequencies must decode in the same scan.
+func TestFT8TwoSignals(t *testing.T) {
+	rng := rand.New(rand.NewSource(37))
+	t1 := encodeTones(pack77("CQ", "JA1ABC", "PM95"))
+	t2 := encodeTones(pack77("K1ABC", "W9XYZ", "EN37"))
+	sig := synthFrame(t1, 1200.0, 0.8, 0.3, rng)
+	sig2 := synthFrame(t2, 2100.0, 0.8, 0.3, rng)
+	ring := make([]float64, ft8RingSamples)
+	for i := range ring {
+		v := 0.3 * rng.NormFloat64()
+		if i >= 17000 && i < 17000+len(sig) {
+			v += sig[i-17000] + sig2[i-17000]
+		}
+		ring[i] = v
+	}
+	d := NewFT8Detector()
+	d.SetEnabled(true)
+	for i := 0; i < len(ring); i += 512 {
+		e := i + 512
+		if e > len(ring) {
+			e = len(ring)
+		}
+		d.Feed(ring[i:e])
+	}
+	d.Process()
+	msgs := d.TakeMessages()
+	found := map[string]bool{}
+	for _, m := range msgs {
+		found[m.Text] = true
+	}
+	if !found["CQ JA1ABC PM95"] || !found["K1ABC W9XYZ EN37"] {
+		t.Fatalf("expected both messages, got %v", msgs)
+	}
+}
