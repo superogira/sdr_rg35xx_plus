@@ -668,14 +668,24 @@ func (r *Radio) FT8Results() []dsp.FT8Detection {
 	return det.Results()
 }
 
-// FT8Process runs the detector analysis (call periodically).
+// ft8Processing guards against overlapping Process() runs.
+var ft8Processing bool
+
+// FT8Process kicks off the detector analysis in a background goroutine
+// so the heavy Goertzel/FFT work never blocks the UI thread (which
+// caused a total UI freeze on the A53 when called synchronously).
 func (r *Radio) FT8Process() {
 	r.mu.Lock()
 	det := r.ft8
 	r.mu.Unlock()
-	if det != nil && det.Enabled() {
-		det.Process()
+	if det == nil || !det.Enabled() || ft8Processing {
+		return
 	}
+	ft8Processing = true
+	go func() {
+		defer func() { ft8Processing = false }()
+		det.Process()
+	}()
 }
 
 // AGCEnabled reports whether SSB/CW AGC is on.
