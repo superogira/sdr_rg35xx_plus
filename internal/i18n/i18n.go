@@ -44,6 +44,7 @@ var strings = map[string][2]string{
 	"m_ds":     {"HF Direct Sampling", "HF Direct Sampling"},
 	"m_agc":    {"AGC (SSB/CW)", "AGC (SSB/CW)"},
 	"m_span":   {"Span จอ (zoom)", "Span (zoom)"},
+	"m_step":   {"สเต็ปจูน", "Tune step"},
 	"m_vol":    {"วอลุ่ม", "Volume"},
 	"m_shot":   {"ถ่ายภาพหน้าจอ", "Screenshot"},
 	"m_update": {"ตรวจอัพเดท", "Check update"},

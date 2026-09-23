@@ -431,11 +431,26 @@ func main() {
 
 	held := map[input.Button]bool{}
 	lastRepeat := map[input.Button]time.Time{}
-	stepFor := func() int64 {
-		if r.Mode() == dsp.ModeWFM {
-			return 100_000
+	// Tuning step for left/right (up/down is ×10), settable in the menu.
+	stepSteps := []int64{10, 50, 100, 500, 1_000, 5_000, 10_000, 12_500, 25_000, 100_000}
+	stepHz := int64(12_500)
+	if v, ok := cfg["step"]; ok {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			for _, s := range stepSteps {
+				if s == n {
+					stepHz = n
+				}
+			}
 		}
-		return 12_500
+	}
+	stepFor := func() int64 {
+		return stepHz
+	}
+	stepLabel := func(hz int64) string {
+		if hz >= 1000 {
+			return fmt.Sprintf("%g kHz", float64(hz)/1000)
+		}
+		return fmt.Sprintf("%d Hz", hz)
 	}
 	quit := func() {
 		langPref := i18n.Lang()
@@ -451,7 +466,7 @@ func main() {
 			dsPref = "off"
 		}
 		saveBwNow(cfg, r)
-		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref)
+		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref, stepHz)
 		stop()
 	}
 	// Screenshot support: the last presented frame and a transient status
@@ -511,12 +526,13 @@ func main() {
 		menuHost
 		menuLang
 		menuSpan
+		menuStep
 		menuVolume
 		menuShot
 		menuUpdate
 	)
 	menuCount := menuUpdate + 1
-	spanSteps := []int{1000, 750, 500, 250, 125, 100, 50}
+	spanSteps := []int{1000, 750, 500, 250, 125, 100, 50, 25, 12, 10, 5, 3}
 	spanIdx := func() int {
 		want := u.SpanFull / 1000
 		for i, v := range spanSteps {
@@ -617,6 +633,14 @@ func main() {
 		case menuSpan:
 			spanIdx = (spanIdx + len(spanSteps) + dir) % len(spanSteps)
 			u.SetSpanKHz(spanSteps[spanIdx])
+		case menuStep:
+			for i, s := range stepSteps {
+				if s == stepHz {
+					stepHz = stepSteps[(i+len(stepSteps)+dir)%len(stepSteps)]
+					break
+				}
+			}
+			cfg["step"] = strconv.FormatInt(stepHz, 10)
 		case menuVolume:
 			v := math.Round((r.Volume()+float64(dir)*0.01)*100) / 100
 			if v < 0 {
@@ -677,6 +701,13 @@ func main() {
 				if v, err := strconv.ParseFloat(bw, 64); err == nil {
 					r.SetBandwidth(v)
 				}
+			}
+			// Broadcast FM channels are 100 kHz apart — fine steps are
+			// noise there; other modes want the usual 12.5 kHz.
+			if m == dsp.ModeWFM && stepHz < 25_000 {
+				stepHz = 100_000
+			} else if m != dsp.ModeWFM && stepHz > 25_000 {
+				stepHz = 12_500
 			}
 		case input.Y:
 			if r.FT8Enabled() {
@@ -1001,6 +1032,7 @@ func main() {
 				{Label: "Host / IP", Value: r.Hostname()},
 				{Label: i18n.T("m_lang"), Value: langLabel()},
 				{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
+				{Label: i18n.T("m_step"), Value: stepLabel(stepHz)},
 				{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 				{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
 				{Label: i18n.T("m_update"), Value: i18n.T("press_a")},
@@ -1123,13 +1155,13 @@ func readIni(path string) map[string]string {
 	return cfg
 }
 
-func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string) {
+func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string, stepHz int64) {
 	f, err := os.Create(configPath())
 	if err != nil {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\nagc=%s\nlang=%s\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref, agcPref, langPref)
+	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\nagc=%s\nlang=%s\nstep=%d\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref, agcPref, langPref, stepHz)
 	// Squelch level from the live config map.
 	if v, ok := cfg["sql"]; ok {
 		fmt.Fprintf(f, "sql=%s\n", v)
