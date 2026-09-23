@@ -282,9 +282,21 @@ func ft8DecodeCodeword(llr []float64) (*FT8Message, string) {
 	ft8NormalizeLLR(llr)
 	plain := make([]int, 174)
 	if errs := ft8BPDecode(llr, 20, plain); errs != 0 {
+		// BP did not converge: ordered-statistics fallback (the WSJT-X
+		// route for the last fraction of a dB).
+		if bits := ft8OSD(llr, ft8OSDOrder); bits != nil {
+			if ft8VerifyCRC(bits) {
+				return &FT8Message{Text: ft8Unpack77(bits[:77]), Valid: true}, "osd"
+			}
+			return nil, fmt.Sprintf("ldpc=%d osd-crc", errs)
+		}
 		return nil, fmt.Sprintf("ldpc=%d", errs)
 	}
 	if !ft8VerifyCRC(plain) {
+		// BP converged to the wrong codeword — OSD gets another shot.
+		if bits := ft8OSD(llr, ft8OSDOrder); bits != nil && ft8VerifyCRC(bits) {
+			return &FT8Message{Text: ft8Unpack77(bits[:77]), Valid: true}, "osd"
+		}
 		var a91 [12]byte
 		ft8PackBits(plain, 91, a91[:])
 		extracted := ft8CRCExtract(plain)
