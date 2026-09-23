@@ -33,10 +33,17 @@ type FT8Detection struct {
 type FT8Detector struct {
 	mu      sync.Mutex
 	audio   []float64
-	written int
+	written int64
 	results []FT8Detection
 	enabled bool
 	linear  []float64 // reusable analysis buffer (~1 MB, avoids GC churn)
+
+	// slotStart is the sample index where the current 15 s slot began
+	// (set by the user's sync press). When set, Process skips the
+	// expensive sliding search and checks only at the known offset.
+	// A value of -1 means "not synced, use sliding search".
+	slotStart int64
+	synced    bool
 }
 
 const ft8RingSamples = 8000 * 15 // full 15-second cycle
@@ -67,8 +74,33 @@ func (d *FT8Detector) SetEnabled(on bool) {
 	d.enabled = on
 	if on {
 		d.written = 0
+		d.synced = false
 	}
 	d.mu.Unlock()
+}
+
+// Sync marks the END of the current FT8 transmission as heard by the
+// user — the next slot starts ~2.36 s later (15 s cycle − 12.64 s
+// transmission). From now on the detector checks only at the known
+// offset instead of sliding across the whole buffer.
+func (d *FT8Detector) Sync() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.enabled {
+		return
+	}
+	// The user pressed when a transmission ended; the NEXT slot starts
+	// 2.36 s from now. Record where that lands in our sample counter.
+	gapSamples := int64(2360 * FT8AudioRate / 1000) // 2.36 s at 8 kHz
+	d.slotStart = d.written + int64(gapSamples)
+	d.synced = true
+}
+
+// IsSynced reports whether the user has pressed sync.
+func (d *FT8Detector) IsSynced() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.synced
 }
 
 func (d *FT8Detector) Enabled() bool {
@@ -103,7 +135,7 @@ func (d *FT8Detector) Process() {
 	// heavy scan (holding the mutex for the whole scan froze the radio
 	// stream on the A53).
 	d.mu.Lock()
-	if !d.enabled || d.written < ft8RingSamples {
+	if !d.enabled || d.written < int64(ft8RingSamples) {
 		d.mu.Unlock()
 		return
 	}
@@ -117,14 +149,52 @@ func (d *FT8Detector) Process() {
 	d.mu.Unlock()
 
 	// All heavy work happens OUTSIDE the lock on our private copy.
-	candidates := d.findCandidates(linear)
 	var newResults []FT8Detection
-	for _, centerHz := range candidates {
-		if det, ok := d.detectAt(linear, centerHz); ok {
-			det.Message = DecodeFT8At(linear, det.syncOffset, centerHz)
-			newResults = append(newResults, det.FT8Detection)
+
+	if d.synced {
+		// SYNCED MODE: we know the exact slot boundary. The slot started
+		// at sample slotStart; the current buffer ends at written. The
+		// offset into our linear buffer is (slotStart mod ringSize),
+		// adjusted for the copy rotation. After each 15 s cycle the
+		// slotStart advances by 15×8000 samples.
+		cycleSamples := int64(15 * FT8AudioRate)
+		for d.slotStart+int64(FT8FrameSamp) > d.written {
+			// Slot hasn't fully arrived yet — wait
+			break
+		}
+		// Check if the latest complete slot is ready
+		latestSlot := d.slotStart
+		for latestSlot+cycleSamples+int64(FT8FrameSamp) <= d.written {
+			latestSlot += cycleSamples
+		}
+		if latestSlot >= 0 && latestSlot+int64(FT8FrameSamp) <= d.written {
+			// Compute offset in the linear buffer
+			offsetInRing := int((latestSlot - (d.written - int64(ft8RingSamples) + int64(ft8RingSamples))) % int64(ft8RingSamples))
+			if offsetInRing < 0 {
+				offsetInRing += ft8RingSamples
+			}
+			// Only decode if the full frame fits in our buffer
+			if offsetInRing+FT8FrameSamp <= ft8RingSamples {
+				candidates := d.findCandidates(linear[offsetInRing : offsetInRing+FT8FrameSamp])
+				for _, centerHz := range candidates {
+					if det, ok := d.detectAtSynced(linear, offsetInRing, centerHz); ok {
+						det.Message = DecodeFT8At(linear, offsetInRing, centerHz)
+						newResults = append(newResults, det.FT8Detection)
+					}
+				}
+			}
+		}
+	} else {
+		// UNSYNCED: fall back to the full sliding search (expensive).
+		candidates := d.findCandidates(linear)
+		for _, centerHz := range candidates {
+			if det, ok := d.detectAt(linear, centerHz); ok {
+				det.Message = DecodeFT8At(linear, det.syncOffset, centerHz)
+				newResults = append(newResults, det.FT8Detection)
+			}
 		}
 	}
+
 	if len(newResults) > 5 {
 		newResults = newResults[:5]
 	}
@@ -132,6 +202,54 @@ func (d *FT8Detector) Process() {
 	d.mu.Lock()
 	d.results = newResults
 	d.mu.Unlock()
+}
+
+// detectAtSynced checks for FT8 sync at a KNOWN offset (no sliding) —
+// dramatically cheaper than the full search.
+func (d *FT8Detector) detectAtSynced(audio []float64, offset int, centerHz float64) (ft8DetInternal, bool) {
+	if offset+FT8FrameSamp > len(audio) {
+		return ft8DetInternal{}, false
+	}
+
+	syncCount := 0
+	var snrSum float64
+
+	for i := 0; i < 7; i++ {
+		symStart := offset + ft8SyncPositions[i]*FT8SymSamples
+		if symStart+FT8SymSamples > len(audio) {
+			break
+		}
+		sym := audio[symStart : symStart+FT8SymSamples]
+
+		best, bestMag, totalMag := 0, 0.0, 0.0
+		for tone := 0; tone < 8; tone++ {
+			toneHz := centerHz + (float64(tone)-3.5)*FT8ToneHz
+			m := goertzelMag(sym, toneHz, float64(FT8AudioRate))
+			totalMag += m
+			if m > bestMag {
+				bestMag = m
+				best = tone
+			}
+		}
+		snrSum += bestMag / (totalMag/8 + 1e-12)
+
+		if best == ft8SyncCostas[i] {
+			syncCount++
+		}
+	}
+
+	if syncCount < 6 {
+		return ft8DetInternal{}, false
+	}
+
+	return ft8DetInternal{
+		FT8Detection: FT8Detection{
+			FreqHz:     centerHz,
+			SNRDb:      10 * math.Log10(snrSum/7+1e-12),
+			Confidence: float64(syncCount) / 7.0,
+		},
+		syncOffset: offset,
+	}, true
 }
 
 type ft8DetInternal struct {
