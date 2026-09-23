@@ -481,7 +481,6 @@ func main() {
 	// Screenshot support: the last presented frame and a transient status
 	// message pointing at the saved file (triggered from the menu).
 	ft8Log := make([]ui.FT8Entry, 0, 100)
-	var lastFT8Poll time.Time
 
 	var lastFrame *image.RGBA
 	capturedMsg := ""
@@ -1038,22 +1037,22 @@ func main() {
 		if m := upd.Msg(); m != "" {
 			status = m
 		}
-		if r.FT8Enabled() && time.Since(lastFT8Poll) >= 15*time.Second {
-			lastFT8Poll = time.Now()
-			for _, det := range r.FT8Results() {
-				text := fmt.Sprintf("%.0f Hz %.0f dB", det.FreqHz, det.SNRDb)
-				if det.Message != nil && det.Message.Valid {
-					text = det.Message.Text
-				}
-				// The same transmission stays in the 15 s ring for
-				// several scans — only log it once.
-				if len(ft8Log) > 0 && ft8Log[len(ft8Log)-1].Text == text {
-					continue
-				}
-				ft8Log = append(ft8Log, ui.FT8Entry{Time: time.Now().Format("15:04:05"), Text: text})
-				if len(ft8Log) > 100 {
-					ft8Log = ft8Log[len(ft8Log)-100:]
-				}
+		// Drain decoded messages every frame: the detector's live
+		// results are overwritten each scan (~1 s), so the old 15 s
+		// poll nearly always missed them — decodes showed in the log
+		// but never in the history window. The queue makes every
+		// decode reach the window; a transmission decoded on 2-3
+		// consecutive scans is deduped by the last-entry check.
+		for _, m := range r.FT8TakeMessages() {
+			if !m.Valid {
+				continue
+			}
+			if len(ft8Log) > 0 && ft8Log[len(ft8Log)-1].Text == m.Text {
+				continue
+			}
+			ft8Log = append(ft8Log, ui.FT8Entry{Time: time.Now().Format("15:04:05"), Text: m.Text})
+			if len(ft8Log) > 100 {
+				ft8Log = ft8Log[len(ft8Log)-100:]
 			}
 		}
 		cpu, mem, swp := sysinfo.Snapshot()

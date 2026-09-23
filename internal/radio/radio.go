@@ -660,6 +660,19 @@ func (r *Radio) FT8Results() []dsp.FT8Detection {
 	return det.Results()
 }
 
+// FT8TakeMessages drains newly decoded FT8 messages since the last
+// call (for the history window — the live results only survive one
+// scan cycle).
+func (r *Radio) FT8TakeMessages() []dsp.FT8Message {
+	r.mu.Lock()
+	det := r.ft8
+	r.mu.Unlock()
+	if det == nil {
+		return nil
+	}
+	return det.TakeMessages()
+}
+
 var ft8Busy bool
 
 // FT8Process runs detector analysis in a background goroutine.

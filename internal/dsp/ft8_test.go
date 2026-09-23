@@ -308,3 +308,36 @@ func TestFT8FullProcess(t *testing.T) {
 		t.Fatalf("full pipeline did not decode; results=%d", len(results))
 	}
 }
+
+// TestFT8TakeMessagesQueue verifies decoded messages land in the drain
+// queue (the UI history consumes this — the live results are wiped
+// every scan).
+func TestFT8TakeMessagesQueue(t *testing.T) {
+	rng := rand.New(rand.NewSource(23))
+	const center = 1500.0
+	msg := pack77("CQ", "BA7SAY", "OL53")
+	tones := encodeTones(msg)
+	sig := synthFrame(tones, center, 1.0, 0.2, rng)
+	ring := buildRing(sig, 17000, 0.2, rng)
+	d := NewFT8Detector()
+	d.SetEnabled(true)
+	for i := 0; i < len(ring); i += 512 {
+		e := i + 512
+		if e > len(ring) {
+			e = len(ring)
+		}
+		d.Feed(ring[i:e])
+	}
+	d.Process()
+	got := d.TakeMessages()
+	if len(got) == 0 {
+		t.Fatal("no message queued after decode")
+	}
+	if got[0].Text != "CQ BA7SAY OL53" {
+		t.Fatalf("queued %q", got[0].Text)
+	}
+	// Drain empties the queue.
+	if again := d.TakeMessages(); len(again) != 0 {
+		t.Fatalf("queue not drained: %d left", len(again))
+	}
+}
