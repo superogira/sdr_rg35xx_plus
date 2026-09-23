@@ -123,6 +123,14 @@ func openFB() (Display, error) {
 	if v := os.Getenv("SDR_FB_BPP"); v != "" {
 		d.bpp, _ = strconv.Atoi(v)
 	}
+	// The physical panel is 640x480 — some firmware states (SSH while
+	// the frontend holds the display) report 1280x1024 which makes the
+	// app render a 4x larger surface with expensive Thai text glyph
+	// rasterization, freezing the UI for minutes on the A53.
+	if d.w > 640 || d.h > 480 {
+		d.w, d.h = 640, 480
+	}
+
 	d.stride = lineLen
 	if d.stride == 0 {
 		d.stride = d.w * d.bpp / 8

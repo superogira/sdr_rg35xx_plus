@@ -807,6 +807,7 @@ func main() {
 	go func() {
 		var last uint64
 		buf := make([]byte, 1<<20)
+		time.Sleep(30 * time.Second) // grace period for slow starts
 		for range time.Tick(15 * time.Second) {
 			cur := atomic.LoadUint64(&frames)
 			if cur == last {
