@@ -201,6 +201,8 @@ func openFB() (Display, error) {
 		d.mem = mem
 		d.isFile = true
 	}
+	d.openedAt = time.Now()
+	d.lastPan = d.openedAt
 	fmt.Fprintf(os.Stderr, "fbdev: %dx%d bpp=%d stride=%d base=%d mirror=%d rgb=%d/%d/%d/%d sixteen=%v\n",
 		d.w, d.h, d.bpp, d.stride, d.base, d.mirror, d.rIdx, d.gIdx, d.bIdx, d.aIdx, d.sixteen)
 	return d, nil
