@@ -13,7 +13,8 @@ import (
 type FT8Message struct {
 	Text  string
 	Valid bool
-	SNRDb float64
+	SNRDb  float64
+	FreqHz float64
 }
 
 const (
