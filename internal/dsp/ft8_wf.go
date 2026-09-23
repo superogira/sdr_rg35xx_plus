@@ -259,6 +259,14 @@ func (w *ft8Waterfall) findCandidates(maxCand, minScore int) []ft8WFCand {
 			}
 		}
 	}
+	// Strongest first: the consumer spends its decode budget in this
+	// order, so weak-score noise cells (admitted by a low threshold)
+	// can never crowd out real signals.
+	for i := 1; i < len(best); i++ {
+		for j := i; j > 0 && best[j].score > best[j-1].score; j-- {
+			best[j], best[j-1] = best[j-1], best[j]
+		}
+	}
 	return best
 }
 
@@ -285,6 +293,11 @@ func minInt(a, b int) int {
 // timeSub marks the sub-symbol start, but the 2560-sample analysis
 // frame needs a full symbol of lead-in: when timeSub is 1, the first
 // fully-observable data symbol lives one block later.
+//
+// Each symbol's energy appears in BOTH time-sub rows of its block —
+// the ts=0 row centres on the symbol, the ts=1 row straddles it and
+// the next — so the soft values average the two rows' linear powers
+// (full weight ts=0, half weight ts=1) for ~1 dB of diversity.
 func (w *ft8Waterfall) extractLLR(c ft8WFCand, llr []float64) {
 	ts := c.timeSub
 	timeOff := c.timeOff
@@ -306,6 +319,10 @@ func (w *ft8Waterfall) extractLLR(c ft8WFCand, llr []float64) {
 			llr[3*sym], llr[3*sym+1], llr[3*sym+2] = 0, 0, 0
 			continue
 		}
+		// (Averaging the block's second time-sub row was tried and
+		// rejected: it straddles the NEXT symbol's tone, injecting more
+		// interference than the extra half-row buys — no floor gain at
+		// quarter weight, regression at half.)
 		bins := w.mag[w.blockBase(blockAbs)+subOff:]
 		var s2 [8]float64
 		for j := 0; j < 8; j++ {
