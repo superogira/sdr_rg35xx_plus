@@ -491,12 +491,13 @@ func (u *UI) NewSpectrumRow(tap, rawTap *dsp.SpectrumTap) bool {
 
 	// Draw the new row, stretching the displayed bin range across the
 	// width. The view may be panned (passband tuning): viewOffHz shifts
-	// the window relative to the LO, clamped to the real data.
+	// the window relative to the LO, clamped to the real data. A tone
+	// at f Hz sits at fftshifted bin n/2 + f·n/srcRate.
 	nVis := n * (u.SpanFull / 2) / srcRate // half-width in bins
 	if nVis < 1 || nVis > n/2 {
 		nVis = n / 2
 	}
-	centerBin := n/2 + int(float64(u.viewOffHz)/float64(srcRate)*float64(n)/2+0.5)
+	centerBin := n/2 + int(u.viewOffHz/float64(srcRate)*float64(n)+0.5)
 	if centerBin < nVis {
 		centerBin = nVis
 	}
