@@ -272,15 +272,23 @@ func ft8Unpack77(b []int) string {
 }
 
 // ft8DecodeCodeword runs LDPC + CRC over the 174 soft LLRs and returns
-// the decoded message when both checks pass.
-func ft8DecodeCodeword(llr []float64) *FT8Message {
+// the decoded message when both checks pass. The second return explains
+// a failure ("ldpc=N" parity errors remain, "crc" checksum mismatch)
+// for the diagnostic log.
+func ft8DecodeCodeword(llr []float64) (*FT8Message, string) {
 	ft8NormalizeLLR(llr)
 	plain := make([]int, 174)
-	if ft8BPDecode(llr, 20, plain) != 0 {
-		return nil
+	if errs := ft8BPDecode(llr, 20, plain); errs != 0 {
+		return nil, fmt.Sprintf("ldpc=%d", errs)
 	}
 	if !ft8VerifyCRC(plain) {
-		return nil
+		var a91 [12]byte
+		ft8PackBits(plain, 91, a91[:])
+		extracted := ft8CRCExtract(plain)
+		a91[9] &= 0xF8
+		a91[10] = 0
+		calculated := ft8CRC14(a91[:], 96-14)
+		return nil, fmt.Sprintf("crc:%04x!=%04x", extracted, calculated)
 	}
-	return &FT8Message{Text: ft8Unpack77(plain[:77]), Valid: true}
+	return &FT8Message{Text: ft8Unpack77(plain[:77]), Valid: true}, ""
 }

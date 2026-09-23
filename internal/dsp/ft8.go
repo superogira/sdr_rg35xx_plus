@@ -39,6 +39,8 @@ type FT8Detection struct {
 	SNRDb      float64
 	Confidence float64
 	Message    *FT8Message
+	// Diag explains a failed decode ("ldpc=N" / "crc:...") for the log.
+	Diag string
 }
 
 // FT8Detector buffers 15 s of 8 kHz audio, scans for FT8 sync.
@@ -132,15 +134,29 @@ func (d *FT8Detector) Process() {
 		// The FFT window (~0.5 s) sees only a few tones of the group,
 		// so the cluster midpoint can sit a whole tone step or two off
 		// the true grid centre. Sync only matches at the right shift,
-		// so sweep whole 6.25 Hz steps around the estimate.
+		// so sweep whole 6.25 Hz steps around the estimate — and keep
+		// sweeping when a sync passes but the decode fails (the offset
+		// may be a neighbour of the true one).
+		var first FT8Detection
+		haveFirst := false
 		for _, off := range []float64{0, 6.25, -6.25, 12.5, -12.5, 18.75, -18.75} {
 			det, ok, at := d.detectAt(linear, ch+off)
 			if !ok {
 				continue
 			}
-			det.Message = ft8DecodeAt(linear, at, ch+off)
-			newResults = append(newResults, det)
-			break
+			msg, diag := ft8DecodeAt(linear, at, ch+off)
+			if msg != nil && msg.Valid {
+				det.Message = msg
+				newResults = append(newResults, det)
+				break
+			}
+			if !haveFirst {
+				first, haveFirst = det, true
+				first.Diag = diag
+			}
+		}
+		if haveFirst && len(newResults) == 0 {
+			newResults = append(newResults, first)
 		}
 	}
 	if len(newResults) > 5 {
@@ -161,6 +177,8 @@ func (d *FT8Detector) Process() {
 		dStr += fmt.Sprintf(" %.0fHz/%.0fdB", r.FreqHz, r.SNRDb)
 		if r.Message != nil && r.Message.Valid {
 			dStr += fmt.Sprintf(" \"%s\"", r.Message.Text)
+		} else if r.Diag != "" {
+			dStr += fmt.Sprintf(" (%s)", r.Diag)
 		}
 	}
 	fmt.Fprintf(os.Stderr, "ft8: amp=%.3f cand=%d det=%d%s\n", maxAmp, len(candidates), len(newResults), dStr)
@@ -335,9 +353,9 @@ func (d *FT8Detector) detectAt(audio []float64, centerHz float64) (FT8Detection,
 
 // ft8DecodeAt extracts soft bit LLRs for the 58 data symbols at the
 // sync'd offset and runs the LDPC/CRC decode.
-func ft8DecodeAt(audio []float64, off int, centerHz float64) *FT8Message {
+func ft8DecodeAt(audio []float64, off int, centerHz float64) (*FT8Message, string) {
 	if off < 0 || off+FT8FrameSamp > len(audio) {
-		return nil
+		return nil, "off"
 	}
 	llr := make([]float64, 174)
 	mag := make([]float64, 8)

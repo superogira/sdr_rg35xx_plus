@@ -71,6 +71,7 @@ var strings = map[string][2]string{
 	"checksum":     {"checksum ไม่ตรง — ยกเลิก", "checksum mismatch — abort"},
 	"updated":      {"อัพเดทเป็นเวอร์ชั่น %d แล้ว — กำลังรีสตาร์ท", "Updated to %d — restarting"},
 	"ft8_synced":   {"FT8 sync แล้ว — รอสัญญาณถัดไป…", "FT8 synced — waiting for next signal…"},
+	"ft8_need_sync": {"FT8: กด Y ตอนสัญญาณเริ่ม ก่อนใช้งาน", "FT8: press Y at slot start to sync"},
 	"starting":     {"กำลังเริ่มระบบ…", "Starting…"},
 }
 

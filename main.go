@@ -431,6 +431,12 @@ func main() {
 
 	held := map[input.Button]bool{}
 	lastRepeat := map[input.Button]time.Time{}
+	// FT8 slot markers: after a Y sync, a red separator is drawn on the
+	// waterfall at every 15 s slot boundary so sync accuracy is visible
+	// (signals should start right under each line).
+	ft8SyncWall := time.Time{}
+	ft8SlotIdx := -1
+	ft8SlotMark := false
 	// Tuning step for left/right (up/down is ×10), settable in the menu.
 	stepSteps := []int64{10, 50, 100, 500, 1_000, 5_000, 10_000, 12_500, 25_000, 100_000}
 	stepHz := int64(12_500)
@@ -714,6 +720,11 @@ func main() {
 				r.SyncFT8()
 				capturedMsg = i18n.T("ft8_synced")
 				capturedAt = time.Now()
+				// Slot boundaries for the red waterfall markers: Y is
+				// pressed when a slot starts, so boundaries run every
+				// 15 s from now (-1 draws one immediately).
+				ft8SyncWall = time.Now()
+				ft8SlotIdx = -1
 			}
 		case input.X:
 			r.CycleSquelch()
@@ -955,9 +966,23 @@ func main() {
 			}
 		}
 
-		u.NewSpectrumRow(r.Tap(), r.RawTap())
+		// FT8 slot boundary: mark the newest waterfall row red once per
+		// 15 s slot after a Y sync (pending until a fresh row arrives).
+		if r.FT8Enabled() && !ft8SyncWall.IsZero() {
+			if idx := int(time.Since(ft8SyncWall) / (15 * time.Second)); idx > ft8SlotIdx {
+				ft8SlotIdx = idx
+				ft8SlotMark = true
+			}
+		}
+		if newRow := u.NewSpectrumRow(r.Tap(), r.RawTap()); newRow && ft8SlotMark {
+			u.MarkFT8Slot()
+			ft8SlotMark = false
+		}
 		snap := r.Snapshot()
 		status := snap.StatusText
+		if r.FT8Enabled() && !r.FT8Synced() {
+			status = i18n.T("ft8_need_sync")
+		}
 		if ft8s := r.FT8Results(); len(ft8s) > 0 {
 			best := ft8s[0]
 			for _, d := range ft8s[1:] {
@@ -965,7 +990,11 @@ func main() {
 					best = d
 				}
 			}
-			status = fmt.Sprintf("FT8: %.0f Hz %.0f dB (%.0f%%)", best.FreqHz, best.SNRDb, best.Confidence*100)
+			if best.Message != nil && best.Message.Valid {
+				status = "FT8: " + best.Message.Text
+			} else {
+				status = fmt.Sprintf("FT8: %.0f Hz %.0f dB (%.0f%%)", best.FreqHz, best.SNRDb, best.Confidence*100)
+			}
 		}
 		if exitHint != "" {
 			status = exitHint

@@ -150,6 +150,14 @@ func ft8VerifyCRC(plain []int) bool {
 	return extracted == calculated
 }
 
+// ft8CRCExtract returns the embedded 14-bit CRC of the 91-bit codeword
+// prefix (diagnostics only).
+func ft8CRCExtract(plain []int) uint16 {
+	var a91 [12]byte
+	ft8PackBits(plain, 91, a91[:])
+	return uint16(a91[9]&0x07)<<11 | uint16(a91[10])<<3 | uint16(a91[11])>>5
+}
+
 // --- encoder (used by tests to build known waveforms) -----------------
 
 func ft8Parity8(x byte) int {
