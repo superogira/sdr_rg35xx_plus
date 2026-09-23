@@ -908,12 +908,6 @@ func main() {
 				}
 			}
 		case uiFT8Log:
-		case uiSysMon:
-			// Any of the usual close keys backs out of the monitor.
-			switch b {
-			case input.B, input.Start, input.Select, input.A:
-				uiMode, menuPage, menuSel = uiMenu, pageSys, 2
-			}
 			// D-pad scrolls the big FT8 history: up/down one line,
 			// left/right one page (8 lines).
 			page := 8
@@ -934,6 +928,12 @@ func main() {
 			}
 			if ft8Scroll < 0 {
 				ft8Scroll = 0
+			}
+		case uiSysMon:
+			// Any of the usual close keys backs out of the monitor.
+			switch b {
+			case input.B, input.Start, input.Select, input.A:
+				uiMode, menuPage, menuSel = uiMenu, pageSys, 2
 			}
 		case uiHostList:
 			// Rows: saved hosts + "add new" at the bottom.
