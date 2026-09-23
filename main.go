@@ -676,6 +676,13 @@ func main() {
 			}
 		case input.X:
 			r.CycleSquelch()
+		case input.Y:
+			// FT8 time sync: press when a transmission ends
+			if r.FT8Enabled() {
+				r.SyncFT8()
+				capturedMsg = "FT8 sync — รอสัญญาณถัดไป…"
+				capturedAt = time.Now()
+			}
 			cfg["sql"] = fmt.Sprintf("%g", r.SquelchDb())
 		case input.L1:
 			v := math.Round((r.Volume()-0.01)*100) / 100
@@ -980,7 +987,7 @@ func main() {
 				{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
 				{Label: i18n.T("m_bw"), Value: bwLabel(r.Bandwidth())},
 				{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
-				{Label: "FT8 Decode", Value: ft8Label(r.FT8Enabled())},
+				{Label: "FT8 Decode", Value: ft8StatusLabel(r)},
 				{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
 				{Label: "Host / IP", Value: r.Hostname()},
 				{Label: i18n.T("m_lang"), Value: langLabel()},
@@ -1030,6 +1037,16 @@ var kbRows = []string{
 	"0123456789",
 	"abcdefghijklmnopqrstuvwxyz",
 	".:-_/ ",
+}
+
+func ft8StatusLabel(r *radio.Radio) string {
+	if !r.FT8Enabled() {
+		return "ปิด"
+	}
+	if r.FT8Synced() {
+		return "เปิด · synced (Y รี-sync)"
+	}
+	return "เปิด · ยังไม่ sync (กด Y)"
 }
 
 func ft8Label(on bool) string {

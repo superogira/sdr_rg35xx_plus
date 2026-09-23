@@ -671,6 +671,27 @@ func (r *Radio) FT8Results() []dsp.FT8Detection {
 // ft8Processing guards against overlapping Process() runs.
 var ft8Processing bool
 
+// SyncFT8 marks the current moment as the end of an FT8 transmission
+// (user presses when they hear a signal stop).
+func (r *Radio) SyncFT8() {
+	r.mu.Lock()
+	det := r.ft8
+	r.mu.Unlock()
+	if det != nil {
+		det.Sync()
+		fmt.Fprintf(os.Stderr, "radio: FT8 time sync set\n")
+
+	}
+}
+
+// FT8Synced reports whether the user has synced.
+func (r *Radio) FT8Synced() bool {
+	r.mu.Lock()
+	det := r.ft8
+	r.mu.Unlock()
+	return det != nil && det.IsSynced()
+}
+
 // FT8Process kicks off the detector analysis in a background goroutine
 // so the heavy Goertzel/FFT work never blocks the UI thread (which
 // caused a total UI freeze on the A53 when called synchronously).
