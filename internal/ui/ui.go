@@ -23,14 +23,15 @@ func SavePNG(path string, img *image.RGBA) error {
 }
 
 // SetSpanKHz sets the waterfall zoom (full width in kHz). Values wider
-// than the capture rate are clamped to it.
+// than the capture rate are clamped to it; 3 kHz is the finest zoom
+// (below that the same IF-tap bins would just stretch further).
 func (u *UI) SetSpanKHz(khz int) {
 	max := dsp.IQRate / 1000
 	if khz > max {
 		khz = max
 	}
-	if khz < 10 {
-		khz = 10
+	if khz < 3 {
+		khz = 3
 	}
 	u.SpanFull = khz * 1000
 }
