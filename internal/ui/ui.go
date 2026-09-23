@@ -98,6 +98,9 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int) {
 	if vis < 1 {
 		vis = 1
 	}
+	// scroll counts entries hidden BELOW the view; clamp both ends so
+	// the window never indexes past the history (an empty list once
+	// panicked here and killed the app on Select).
 	bottom := len(entries) - scroll
 	if bottom > len(entries) {
 		bottom = len(entries)
@@ -105,13 +108,12 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int) {
 	if bottom < vis {
 		bottom = vis
 	}
+	if bottom > len(entries) {
+		bottom = len(entries)
+	}
 	top := bottom - vis
 	if top < 0 {
 		top = 0
-		bottom = vis
-		if bottom > len(entries) {
-			bottom = len(entries)
-		}
 	}
 
 	title := fmt.Sprintf("FT8  ·  %d", len(entries))
@@ -119,6 +121,9 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int) {
 	pos := fmt.Sprintf("%d–%d", top+1, bottom)
 	lineF.DrawString(u.img, gray, x+w-10-lineF.TextWidth(pos), y+20, pos)
 
+	if len(entries) == 0 {
+		lineF.DrawString(u.img, gray, x+10, y+lh+22, "· · ·")
+	}
 	for i := top; i < bottom; i++ {
 		e := entries[i]
 		yy := y + lh + 22 + (i-top)*lh
