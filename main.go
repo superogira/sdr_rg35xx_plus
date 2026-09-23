@@ -449,6 +449,10 @@ func main() {
 	}
 	// Screenshot support: the last presented frame and a transient status
 	// message pointing at the saved file (triggered from the menu).
+	// FT8 decode log (latest first, capped at 12)
+	ft8Log := make([]ui.FT8Entry, 0, 12)
+	var lastFT8Check time.Time
+
 	var lastFrame *image.RGBA
 	capturedMsg := ""
 	var capturedAt time.Time
@@ -886,6 +890,40 @@ func main() {
 		}
 
 		r.FT8Process()
+		// Poll results once per second; deduplicate by freq (one entry
+		// per frequency per cycle).
+		if r.FT8Enabled() && time.Since(lastFT8Check) >= time.Second {
+			lastFT8Check = time.Now()
+			for _, det := range r.FT8Results() {
+				text := fmt.Sprintf("%.0f Hz %.0f dB", det.FreqHz, det.SNRDb)
+				if det.Message != nil && det.Message.Valid {
+					m := det.Message
+					if m.CallsignTo != "" {
+						text = fmt.Sprintf("%s %s %s", m.CallsignFrom, m.CallsignTo, m.Grid)
+					} else {
+						text = fmt.Sprintf("%s %s", m.CallsignFrom, m.Grid)
+					}
+				}
+				entry := ui.FT8Entry{
+					Time: time.Now().Format("15:04:05"),
+					Text: text,
+				}
+				// Deduplicate: skip if same text in last 15s
+				dup := false
+				for _, e := range ft8Log {
+					if e.Text == text {
+						dup = true
+						break
+					}
+				}
+				if !dup {
+					ft8Log = append(ft8Log, entry)
+					if len(ft8Log) > 12 {
+						ft8Log = ft8Log[len(ft8Log)-12:]
+					}
+				}
+			}
+		}
 		u.NewSpectrumRow(r.Tap(), r.RawTap())
 		snap := r.Snapshot()
 		status := snap.StatusText
@@ -953,26 +991,29 @@ func main() {
 			u.DrawMenu(items, menuSel, fmt.Sprintf("รุ่น %s · %s", buildStamp, strings.ReplaceAll(buildTime, "_", " ")))
 		} else if uiMode == uiFreqEdit {
 			u.DrawFreqEditor(editDigits, editCursor)
-		} else if uiMode == uiHostEdit {
-			u.DrawKeyboard(hostText, len(hostText), hostKbR, hostKbC)
-		}
-		lastFrame = frame
-		if err := disp.Present(frame); err != nil {
-			fmt.Fprintf(os.Stderr, "present: %v\n", err)
-			return
-		}
-		frames++
-		// Heartbeat: separates "app hung" from "rendering but invisible"
-		// when reading a launch log.
-		if time.Since(lastBeat) >= 10*time.Second {
-			s := r.Snapshot()
-			var af, astall int64
-			if out != nil {
-				af, astall = out.Stats()
+			if r.FT8Enabled() && len(ft8Log) > 0 && uiMode == uiMain {
+				u.DrawFT8Log(ft8Log)
+			} else if uiMode == uiHostEdit {
+				u.DrawKeyboard(hostText, len(hostText), hostKbR, hostKbC)
 			}
-			fmt.Fprintf(os.Stderr, "alive: frames=%d connected=%v freq=%.4f MHz mode=%s bytes=%d audioFrames=%d maxStall=%dms\n",
-				atomic.LoadUint64(&frames), s.Connected, float64(r.Freq())/1e6, r.Mode().Name, s.BytesRx, af, astall)
-			lastBeat = time.Now()
+			lastFrame = frame
+			if err := disp.Present(frame); err != nil {
+				fmt.Fprintf(os.Stderr, "present: %v\n", err)
+				return
+			}
+			frames++
+			// Heartbeat: separates "app hung" from "rendering but invisible"
+			// when reading a launch log.
+			if time.Since(lastBeat) >= 10*time.Second {
+				s := r.Snapshot()
+				var af, astall int64
+				if out != nil {
+					af, astall = out.Stats()
+				}
+				fmt.Fprintf(os.Stderr, "alive: frames=%d connected=%v freq=%.4f MHz mode=%s bytes=%d audioFrames=%d maxStall=%dms\n",
+					atomic.LoadUint64(&frames), s.Connected, float64(r.Freq())/1e6, r.Mode().Name, s.BytesRx, af, astall)
+				lastBeat = time.Now()
+			}
 		}
 	}
 }
