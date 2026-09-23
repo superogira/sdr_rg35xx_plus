@@ -1281,12 +1281,15 @@ func main() {
 					}
 				}
 				if isSpotCallsign(sender) {
+					// SNR in the standard 2500 Hz convention —
+					// typically negative for FT8; keep within the
+					// int8 field's sane range.
 					sn := int8(m.SNRDb)
-					if sn < 0 {
-						sn = 0
+					if sn < -40 {
+						sn = -40
 					}
-					if sn > 99 {
-						sn = 99
+					if sn > 40 {
+						sn = 40
 					}
 					psk.Add(pskreporter.Spot{
 						Sender: sender,
