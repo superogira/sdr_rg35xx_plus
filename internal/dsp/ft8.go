@@ -116,9 +116,12 @@ func (d *FT8Detector) Process() {
 	var newResults []FT8Detection
 	candidates := d.findCandidates(linear)
 	for _, ch := range candidates {
-		if det, ok := d.detectAt(linear, ch); ok {
-			det.Message = DecodeFT8At(linear, ch)
-			newResults = append(newResults, det)
+		for _, off := range []float64{0, -3.125, 3.125} {
+			if det, ok := d.detectAt(linear, ch+off); ok {
+				det.Message = DecodeFT8At(linear, ch+off)
+				newResults = append(newResults, det)
+				break
+			}
 		}
 	}
 	if len(newResults) > 5 {
@@ -213,7 +216,7 @@ func (d *FT8Detector) findCandidates(audio []float64) []float64 {
 
 // detectAt checks Costas sync (sliding, 4-symbol steps).
 func (d *FT8Detector) detectAt(audio []float64, centerHz float64) (FT8Detection, bool) {
-	step := FT8SymSamples * 4
+	step := FT8SymSamples // every symbol for fine sync resolution
 	maxOff := len(audio) - FT8FrameSamp
 	if maxOff < 0 {
 		return FT8Detection{}, false
