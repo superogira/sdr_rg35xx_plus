@@ -68,7 +68,8 @@ func (u *UI) DrawFT8Log(entries []FT8Entry) {
 	for i, e := range entries {
 		y := py + 14 + i*lh
 		tf.DrawString(u.img, color.RGBA{150, 180, 150, 255}, px+4, y, e.Time)
-		tf.DrawString(u.img, green, px+50, y, e.Text)
+		tf.DrawString(u.img, color.RGBA{120, 200, 255, 255}, px+56, y, fmt.Sprintf("%3.0f", e.SNRDb))
+		tf.DrawString(u.img, green, px+86, y, e.Text)
 	}
 }
 
@@ -129,7 +130,8 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int) {
 		e := entries[i]
 		yy := y + lh + 22 + (i-top)*lh
 		lineF.DrawString(u.img, gray, x+10, yy, e.Time)
-		lineF.DrawString(u.img, green, x+72, yy, e.Text)
+		lineF.DrawString(u.img, color.RGBA{120, 200, 255, 255}, x+78, yy, fmt.Sprintf("%4.0f dB", e.SNRDb))
+		lineF.DrawString(u.img, green, x+140, yy, e.Text)
 	}
 	hintF.DrawString(u.img, gray, x+10, y+h-12, i18n.T("ft8_scroll"))
 }
