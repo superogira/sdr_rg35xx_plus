@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"sdr35/internal/i18n"
+	"strings"
 
 	"sdr35/internal/dsp"
 )
@@ -59,7 +60,6 @@ func (u *UI) DrawFT8Log(entries []FT8Entry) {
 	px := 4
 	py := u.WaterfallRows - ph - 4
 	u.fillBlend(px, py, pw, ph, 0, 0, 0, 180)
-	green := color.RGBA{100, 255, 100, 255}
 	tf := Face(11, false)
 	if len(entries) == 0 {
 		tf.DrawString(u.img, color.RGBA{150, 180, 150, 255}, px+4, py+14, "FT8 · · ·")
@@ -69,7 +69,7 @@ func (u *UI) DrawFT8Log(entries []FT8Entry) {
 		y := py + 14 + i*lh
 		tf.DrawString(u.img, color.RGBA{150, 180, 150, 255}, px+4, y, e.Time)
 		tf.DrawString(u.img, color.RGBA{120, 200, 255, 255}, px+56, y, fmt.Sprintf("%3.0f", e.SNRDb))
-		tf.DrawString(u.img, green, px+86, y, e.Text)
+		tf.DrawString(u.img, ft8TextColor(e.Text), px+86, y, e.Text)
 	}
 }
 
@@ -94,7 +94,6 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int) {
 	hintF := Face(11, false)
 	white := color.RGBA{235, 235, 235, 255}
 	gray := color.RGBA{150, 180, 150, 255}
-	green := color.RGBA{100, 255, 100, 255}
 
 	vis := (h - 2*lh - 14) / lh
 	if vis < 1 {
@@ -131,7 +130,7 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int) {
 		yy := y + lh + 22 + (i-top)*lh
 		lineF.DrawString(u.img, gray, x+10, yy, e.Time)
 		lineF.DrawString(u.img, color.RGBA{120, 200, 255, 255}, x+78, yy, fmt.Sprintf("%4.0f dB", e.SNRDb))
-		lineF.DrawString(u.img, green, x+140, yy, e.Text)
+		lineF.DrawString(u.img, ft8TextColor(e.Text), x+140, yy, e.Text)
 	}
 	hintF.DrawString(u.img, gray, x+10, y+h-12, i18n.T("ft8_scroll"))
 }
@@ -865,4 +864,70 @@ func (u *UI) DrawHostList(hosts []string, sel, activeIdx int) {
 		u.fillBlend(px+8, y-17, pw-16, rowH-2, 40, 96, 128, 210)
 	}
 	Face(14, sel == len(hosts)).DrawString(u.img, cyan, px+38, y, i18n.T("host_add"))
+}
+
+// FT8 message-kind colours: CQ = red, directed call = orange, signal
+// report = green, sign-off (RRR/RR73/73) = blue.
+var (
+	ft8ColorCQ   = color.RGBA{255, 90, 90, 255}
+	ft8ColorCall = color.RGBA{255, 170, 60, 255}
+	ft8ColorRpt  = color.RGBA{100, 255, 100, 255}
+	ft8ColorEnd  = color.RGBA{110, 170, 255, 255}
+)
+
+// ft8TextColor classifies a decoded FT8 message for colouring.
+func ft8TextColor(text string) color.RGBA {
+	f := strings.Fields(text)
+	if len(f) == 0 {
+		return ft8ColorRpt
+	}
+	if f[0] == "CQ" || strings.HasPrefix(f[0], "CQ_") {
+		return ft8ColorCQ
+	}
+	switch f[len(f)-1] {
+	case "RRR", "RR73", "73":
+		return ft8ColorEnd
+	}
+	for _, tok := range f[1:] {
+		if isReportToken(tok) {
+			return ft8ColorRpt
+		}
+	}
+	// Directed call: two leading callsign-like tokens (grid allowed as
+	// the tail) — the "two stations calling each other" phase.
+	if len(f) >= 2 && isCallToken(f[0]) && isCallToken(f[1]) {
+		return ft8ColorCall
+	}
+	return ft8ColorRpt
+}
+
+// isReportToken matches FT8 signal reports: +NN, -NN, R+NN, R-NN.
+func isReportToken(t string) bool {
+	if len(t) > 1 && (t[0] == 'R') {
+		t = t[1:]
+	}
+	if len(t) != 3 || (t[0] != '+' && t[0] != '-') {
+		return false
+	}
+	return t[1] >= '0' && t[1] <= '9' && t[2] >= '0' && t[2] <= '9'
+}
+
+// isCallToken is a loose callsign shape: 3-11 alphanumeric chars with
+// at least one digit.
+func isCallToken(t string) bool {
+	if len(t) < 3 || len(t) > 11 {
+		return false
+	}
+	digit := false
+	for i := 0; i < len(t); i++ {
+		c := t[i]
+		switch {
+		case c >= '0' && c <= '9':
+			digit = true
+		case c >= 'A' && c <= 'Z':
+		default:
+			return false
+		}
+	}
+	return digit
 }
