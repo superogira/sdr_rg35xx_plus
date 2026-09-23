@@ -949,6 +949,14 @@ func main() {
 			lastFT8Poll = time.Now()
 			for _, det := range r.FT8Results() {
 				text := fmt.Sprintf("%.0f Hz %.0f dB", det.FreqHz, det.SNRDb)
+				if det.Message != nil && det.Message.Valid {
+					text = det.Message.Text
+				}
+				// The same transmission stays in the 15 s ring for
+				// several scans — only log it once.
+				if len(ft8Log) > 0 && ft8Log[len(ft8Log)-1].Text == text {
+					continue
+				}
 				ft8Log = append(ft8Log, ui.FT8Entry{Time: time.Now().Format("15:04:05"), Text: text})
 				if len(ft8Log) > 12 {
 					ft8Log = ft8Log[len(ft8Log)-12:]
