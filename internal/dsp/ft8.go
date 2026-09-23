@@ -82,33 +82,37 @@ func (d *FT8Detector) Results() []FT8Detection {
 // Process scans the buffer for FT8 signals. Called every second from the
 // UI loop; the scan itself takes ~50 ms on the A53.
 func (d *FT8Detector) Process() {
+	// Snapshot the ring buffer under the lock, then RELEASE it so
+	// Feed() can keep running from the DSP goroutine while we do the
+	// heavy scan (holding the mutex for the whole scan froze the radio
+	// stream on the A53).
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	if !d.enabled || d.written < ft8RingSamples {
+		d.mu.Unlock()
 		return
 	}
-
-	d.results = d.results[:0]
-
-	// Linearize ring buffer.
 	linear := make([]float64, ft8RingSamples)
 	start := d.written % ft8RingSamples
 	copy(linear, d.audio[start:])
 	copy(linear[ft8RingSamples-start:], d.audio[:start])
+	d.mu.Unlock()
 
-	// Coarse frequency scan: FFT to find FT8-band energy clusters, then
-	// Goertzel sync search at each candidate frequency.
+	// All heavy work happens OUTSIDE the lock on our private copy.
 	candidates := d.findCandidates(linear)
+	var newResults []FT8Detection
 	for _, centerHz := range candidates {
 		if det, ok := d.detectAt(linear, centerHz); ok {
 			det.Message = DecodeFT8At(linear, det.syncOffset, centerHz)
-			d.results = append(d.results, det.FT8Detection)
+			newResults = append(newResults, det.FT8Detection)
 		}
 	}
-	// Limit results
-	if len(d.results) > 5 {
-		d.results = d.results[:5]
+	if len(newResults) > 5 {
+		newResults = newResults[:5]
 	}
+
+	d.mu.Lock()
+	d.results = newResults
+	d.mu.Unlock()
 }
 
 type ft8DetInternal struct {
