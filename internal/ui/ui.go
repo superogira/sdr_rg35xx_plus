@@ -962,7 +962,7 @@ func (u *UI) DrawSysMon(lines []string) {
 // waterfall: CPU %, MEM % and battery level.
 func (u *UI) DrawSysBadge(cpu, mem float64, batt int) {
 	tf := Face(11, false)
-	txt := fmt.Sprintf("C%.0f  M%.0f  B%d%%", cpu, mem, batt)
+	txt := fmt.Sprintf("CPU%.0f  MEM%.0f  BAT%d%%", cpu, mem, batt)
 	w := tf.TextWidth(txt) + 12
 	h := 16
 	x := u.W - w - 6
