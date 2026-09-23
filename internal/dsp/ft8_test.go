@@ -119,16 +119,20 @@ func encodeTones(payload []int) []int {
 	return tones
 }
 
-// synthFrame renders tones as 8 kHz audio; tone t of the group at
-// groupHz sits at groupHz + (t-3.5)*6.25.
+// synthFrame renders tones as 8 kHz audio with CONTINUOUS phase
+// across symbols — per-symbol random phase splatters energy across
+// the band (10-19 dB of artificial noise near the signal) that real
+// FT8 does not have. Tone t of the group at groupHz sits at
+// groupHz + (t-3.5)*6.25.
 func synthFrame(tones []int, groupHz, amp, noise float64, rng *rand.Rand) []float64 {
 	out := make([]float64, FT8FrameSamp)
+	phase := rng.Float64() * 2 * math.Pi
 	for sym, tone := range tones {
 		f := groupHz + (float64(tone)-3.5)*FT8ToneHz
-		phase := rng.Float64() * 2 * math.Pi
 		w := 2 * math.Pi * f / float64(FT8AudioRate)
 		for i := 0; i < FT8SymSamples; i++ {
-			out[sym*FT8SymSamples+i] = amp * math.Sin(phase+float64(i)*w)
+			out[sym*FT8SymSamples+i] = amp * math.Sin(phase)
+			phase += w
 		}
 	}
 	if noise > 0 {
@@ -281,5 +285,42 @@ func TestWFDecodeVeryWeak(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("very weak decode failed (this is the regression target), got %v", texts)
+	}
+}
+
+// TestWFSNRScale checks the SNR is in the FT8-standard 2500 Hz
+// convention: a clean signal reads strongly positive, a deep-weak one
+// negative, and they order correctly (this is the scale WSJT-X and
+// pskreporter display).
+func TestWFSNRScale(t *testing.T) {
+	payload := pack77("K1ABC", "W9XYZ", "EN37")
+	tones := encodeTones(payload)
+	measure := func(noise float64, seed int64) float64 {
+		rng := rand.New(rand.NewSource(seed))
+		sig := synthFrame(tones, 1800.0, 1.0, noise, rng)
+		wf := newFT8Waterfall()
+		wf.feed(make([]float64, ft8WFNFFT))
+		wf.feed(sig)
+		cands := wf.findCandidates(5, 10)
+		best := -999.0
+		for _, c := range cands {
+			if s := wf.candSNRDb(c); s > best {
+				best = s
+			}
+		}
+		return best
+	}
+	clean := measure(0.05, 41)
+	mid := measure(0.5, 42)
+	weak := measure(1.4, 43)
+	t.Logf("SNR clean=%.1f dB, mid=%.1f dB, weak=%.1f dB (2500 Hz convention)", clean, mid, weak)
+	if clean < 10 {
+		t.Errorf("clean signal should read strongly positive, got %.1f", clean)
+	}
+	if weak > 0 {
+		t.Errorf("very weak signal should read negative, got %.1f", weak)
+	}
+	if !(clean > mid && mid > weak) {
+		t.Errorf("SNR not monotonic: %.1f > %.1f > %.1f", clean, mid, weak)
 	}
 }

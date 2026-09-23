@@ -326,30 +326,59 @@ func (c ft8WFCand) candFreqHz() float64 {
 	return float64((ft8WFMinBin+c.freqOff)*ft8WFFreqOsr+c.freqSub) * (float64(FT8AudioRate) / float64(ft8WFNFFT))
 }
 
-// candSNRDb estimates SNR from the sync positions: matched-tone dB
-// above the mean of the 8-tone row.
+// candSNRDb estimates SNR in the FT8-standard convention: dB of tone
+// power above noise in a 2500 Hz reference band (the scale WSJT-X and
+// pskreporter display). The waterfall stores 0.5 dB steps as
+// v = 2·dB + 240 → dB(v) = (v−240)/2, linear power 10^dB/10.
+//
+// Noise comes from bins OUTSIDE the tone group: the 2-symbol analysis
+// window smears each symbol's tone across the neighbouring rows, so
+// the other 7 bins of the tone row itself carry adjacent-symbol
+// energy — measuring them (as the first cut did) yielded a nearly
+// constant ~8 dB regardless of actual SNR. Offsets 9-16 bins each way
+// sit 28-50 Hz out, past the leakage skirt but inside the usual gap
+// to neighbouring signals.
 func (w *ft8Waterfall) candSNRDb(c ft8WFCand) float64 {
-	sumDiff, n := 0.0, 0
+	binHz := float64(FT8AudioRate) / float64(ft8WFNFFT)
+	refBand := 10 * math.Log10(2500.0/binHz) // 3.125 Hz → 2500 Hz ≈ 29 dB
+	noiseOffs := []int{-18, -16, -14, -12, -11, 15, 16, 17, 19, 21}
+	var sumRatio float64
+	n := 0
 	for m := 0; m < 3; m++ {
 		for k := 0; k < 7; k++ {
 			blockAbs := c.timeOff + 36*m + k
 			if blockAbs < 0 || blockAbs >= w.count {
 				continue
 			}
-			bins := w.mag[w.blockBase(blockAbs)+c.timeSub*ft8WFFreqOsr*ft8WFNumBins+c.freqSub*ft8WFNumBins+c.freqOff:]
+			row := w.blockBase(blockAbs) + c.timeSub*ft8WFFreqOsr*ft8WFNumBins + c.freqSub*ft8WFNumBins + c.freqOff
 			sm := ft8SyncCostas[k]
-			var mean float64
-			for _, v := range bins[:8] {
-				mean += float64(v)
+			toneP := math.Pow(10, (float64(w.mag[row+sm])-240)/20)
+			var noiseP float64
+			nc := 0
+			for _, off := range noiseOffs {
+				b := c.freqOff + off
+				if b < 0 || b+8 > ft8WFNumBins {
+					continue
+				}
+				noiseP += math.Pow(10, (float64(w.mag[row+off])-240)/20)
+				nc++
 			}
-			mean /= 8
-			sumDiff += float64(bins[sm]) - mean
+			if nc == 0 || noiseP <= 0 {
+				continue
+			}
+			sumRatio += toneP / (noiseP / float64(nc))
 			n++
 		}
 	}
 	if n == 0 {
 		return 0
 	}
-	// uint8 units are 0.5 dB steps.
-	return sumDiff / float64(n) * 0.5
+	snr := 10*math.Log10(sumRatio/float64(n)) - refBand
+	if snr > 40 {
+		snr = 40
+	}
+	if snr < -40 {
+		snr = -40
+	}
+	return snr
 }
