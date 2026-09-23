@@ -146,7 +146,7 @@ func (d *FT8Detector) Process() {
 	d.mu.Unlock()
 
 	var newResults []FT8Detection
-	cands := wf.findCandidates(10, 10)
+	cands := wf.findCandidates(140, 10)
 	for _, c := range cands {
 		llr := make([]float64, 174)
 		wf.extractLLR(c, llr)
@@ -154,7 +154,7 @@ func (d *FT8Detector) Process() {
 		det := FT8Detection{
 			FreqHz:     c.candFreqHz(),
 			SNRDb:      wf.candSNRDb(c),
-			Confidence: float64(c.score) / 100,
+			Confidence: float64(c.score) / 255,
 			Diag:       diag,
 		}
 		if msg != nil && msg.Valid {
@@ -164,8 +164,8 @@ func (d *FT8Detector) Process() {
 		}
 		newResults = append(newResults, det)
 	}
-	if len(newResults) > 5 {
-		newResults = newResults[:5]
+	if len(newResults) > 10 {
+		newResults = newResults[:10]
 	}
 	dStr := ""
 	for _, r := range newResults {
