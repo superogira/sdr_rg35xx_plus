@@ -26,6 +26,7 @@ const (
 	Menu
 	VolDown
 	VolUp
+	Power
 )
 
 func (b Button) String() string { return fmt.Sprintf("BTN(%d)", int(b)) }

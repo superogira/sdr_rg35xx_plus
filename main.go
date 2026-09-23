@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"sdr35/internal/audio"
+	"sdr35/internal/backlight"
 	"sdr35/internal/dsp"
 	"sdr35/internal/i18n"
 	"sdr35/internal/input"
@@ -498,6 +499,7 @@ func main() {
 		}
 	}()
 
+	panelState := 0 // power-key cycle: 0=on, 1=dim, 2=off
 	var lastFrame *image.RGBA
 	capturedMsg := ""
 	var capturedAt time.Time
@@ -1142,6 +1144,13 @@ func main() {
 			for _, ev := range pad.Events() {
 				held[ev.Button] = ev.Down
 				switch ev.Button {
+				case input.Power:
+					if ev.Down {
+						panelState = backlight.Cycle(panelState)
+						fmt.Fprintf(os.Stderr, "power: panel state %d (%s)\n", panelState,
+							[]string{"on", "dim", "off"}[panelState])
+					}
+					continue
 				case input.Menu:
 					if ev.Down {
 						menuDownAt = time.Now()
@@ -1446,6 +1455,12 @@ func main() {
 			u.DrawSysBadge(cpu, mem, sysinfo.SensorSnapshot().BattPct)
 		}
 		lastFrame = frame
+		if panelState == 2 {
+			// Screen fully off: skip the (expensive) Present — the fb is
+			// blanked anyway; the DSP, FT8 and PSK Reporter keep running.
+			frames++
+			continue
+		}
 		if err := disp.Present(frame); err != nil {
 			fmt.Fprintf(os.Stderr, "present: %v\n", err)
 			return
