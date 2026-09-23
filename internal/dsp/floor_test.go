@@ -12,7 +12,7 @@ func findFloor(t *testing.T, maxNoise float64) float64 {
 	payload := pack77("K1ABC", "W9XYZ", "EN37")
 	tones := encodeTones(payload)
 	last := 0.0
-	for _, noise := range []float64{7.5, 8.0, 8.5, 9.0} {
+	for _, noise := range []float64{8.0, 8.5, 9.0, 9.5, 10.0} {
 		if noise > maxNoise {
 			break
 		}
@@ -46,5 +46,5 @@ func findFloor(t *testing.T, maxNoise float64) float64 {
 }
 
 func TestDecodeFloor(t *testing.T) {
-	t.Logf("floor = noise %.1f", findFloor(t, 9.0))
+	t.Logf("floor = noise %.1f", findFloor(t, 10.0))
 }
