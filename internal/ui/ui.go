@@ -712,19 +712,11 @@ func (u *UI) drawBottomBar() {
 	}
 	status.DrawString(u.img, col, 12, u.H-8, statusText)
 
-	// Step + button hints (bottom right).
+	// Step + button hints (bottom right). The CPU/MEM/SWAP readout
+	// moved to the system monitor window (menu ▸ System).
 	hint := Face(12, false)
 	hintText := i18n.T("hint")
 	hint.DrawString(u.img, grey, u.W-hint.TextWidth(hintText)-8, u.H-8, hintText)
-
-	// System monitor (left of the hint, dim green).
-	sysText := fmt.Sprintf("C%.0f M%.0f S%.0f", s.CpuPct, s.MemPct, s.SwpPct)
-	sysW := hint.TextWidth(sysText)
-	hintW := hint.TextWidth(hintText)
-	sysX := u.W - hintW - 16 - sysW
-	if sysX > 200 {
-		hint.DrawString(u.img, color.RGBA{100, 180, 100, 255}, sysX, u.H-8, sysText)
-	}
 }
 
 func formatHz(hz int64) string {
@@ -930,4 +922,38 @@ func isCallToken(t string) bool {
 		}
 	}
 	return digit
+}
+
+// DrawSysMon renders the system monitor panel: label/value rows with
+// section headers. lines alternate section-title ("#…") and data rows.
+func (u *UI) DrawSysMon(lines []string) {
+	lh := 24
+	x, y := 24, 8
+	w := u.W - 48
+	h := u.WaterfallRows - 16
+	u.fillBlend(x, y, w, h, 0, 0, 0, 220)
+	u.fillBlend(x, y, w, 2, 80, 220, 255, 255)
+	u.fillBlend(x, y+h-2, w, 2, 80, 220, 255, 255)
+
+	white := color.RGBA{235, 235, 235, 255}
+	gray := color.RGBA{150, 180, 150, 255}
+	yellow := color.RGBA{255, 230, 120, 255}
+	cyan := color.RGBA{80, 220, 255, 255}
+	title := i18n.T("m_sysmon")
+	Face(16, true).DrawString(u.img, cyan, x+14, y+24, title)
+
+	yy := y + 48
+	valX := x + w - 200
+	for _, ln := range lines {
+		if yy > y+h-16 {
+			break
+		}
+		if strings.HasPrefix(ln, "# ") {
+			Face(13, true).DrawString(u.img, yellow, x+14, yy, strings.TrimPrefix(ln, "# "))
+		} else if k, v, ok := strings.Cut(ln, "\t"); ok {
+			Face(13, false).DrawString(u.img, gray, x+24, yy, k)
+			Face(13, false).DrawString(u.img, white, valX, yy, v)
+		}
+		yy += lh
+	}
 }

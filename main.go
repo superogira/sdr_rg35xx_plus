@@ -528,6 +528,7 @@ func main() {
 		uiHostEdit
 		uiHostList
 		uiFT8Log
+		uiSysMon
 	)
 	uiMode := uiMain
 	// Dev aid for PNG screenshot testing of the overlays.
@@ -559,6 +560,7 @@ func main() {
 		menuCall
 		menuGrid
 		menuPSK
+		menuSysMon
 	)
 	// The flat 16-row menu outgrew the screen, so it is now three
 	// subpages reached from a 3-row root. pageItems maps (page → row)
@@ -574,7 +576,7 @@ func main() {
 		{0, 0, 0}, // root rows open subpages (dispatched by row index)
 		{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep},
 		{menuFT8, menuCall, menuGrid, menuPSK},
-		{menuHost, menuLang, menuVolume, menuShot, menuUpdate},
+		{menuHost, menuLang, menuSysMon, menuVolume, menuShot, menuUpdate},
 	}
 	spanSteps := []int{1000, 750, 500, 250, 125, 100, 50, 25, 12, 10, 5, 3}
 	spanIdx := func() int {
@@ -771,6 +773,8 @@ func main() {
 			pskOn = !pskOn
 			cfg["psk"] = map[bool]string{true: "on", false: "off"}[pskOn]
 			psk.SetEnabled(pskOn)
+		case menuSysMon:
+			uiMode = uiSysMon
 		case menuHost:
 			hostSel = 0
 			uiMode = uiHostList
@@ -904,6 +908,12 @@ func main() {
 				}
 			}
 		case uiFT8Log:
+		case uiSysMon:
+			// Any of the usual close keys backs out of the monitor.
+			switch b {
+			case input.B, input.Start, input.Select, input.A:
+				uiMode, menuPage, menuSel = uiMenu, pageSys, 2
+			}
 			// D-pad scrolls the big FT8 history: up/down one line,
 			// left/right one page (8 lines).
 			page := 8
@@ -1140,7 +1150,7 @@ func main() {
 							// Short tap: toggle the settings menu
 							// (or back out of the freq editor).
 							switch uiMode {
-							case uiFreqEdit, uiMenu, uiFT8Log, uiHostEdit, uiHostList:
+							case uiFreqEdit, uiMenu, uiFT8Log, uiHostEdit, uiHostList, uiSysMon:
 								uiMode = uiMain
 							default:
 								uiMode = uiMenu
@@ -1363,6 +1373,7 @@ func main() {
 			items = append(items,
 				ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
 				ui.MenuItem{Label: i18n.T("m_lang"), Value: langLabel()},
+				ui.MenuItem{Label: i18n.T("m_sysmon"), Value: i18n.T("press_a")},
 				ui.MenuItem{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 				ui.MenuItem{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
 				ui.MenuItem{Label: i18n.T("m_update"), Value: i18n.T("press_a")})
@@ -1382,6 +1393,39 @@ func main() {
 			u.DrawHostList(hostList, hostSel, active)
 		} else if uiMode == uiFT8Log {
 			u.DrawFT8LogFull(ft8Log, ft8Scroll)
+		} else if uiMode == uiSysMon {
+			sn := sysinfo.SensorSnapshot()
+			cpu, mem, swp := sysinfo.Snapshot()
+			fDeg := func(v float64) string {
+				if v == 0 {
+					return "—"
+				}
+				return fmt.Sprintf("%.1f °C", v)
+			}
+			swapStr := "—"
+			if swp > 0 {
+				swapStr = fmt.Sprintf("%.0f %%", swp)
+			}
+			rows := []string{
+				"# " + i18n.T("m_sysmon"),
+				i18n.T("sm_cpu_temp") + "\t" + fDeg(sn.CPUTemp),
+				i18n.T("sm_gpu_temp") + "\t" + fDeg(sn.GPUTemp),
+				i18n.T("sm_ve_temp") + "\t" + fDeg(sn.VETemp),
+				i18n.T("sm_ddr_temp") + "\t" + fDeg(sn.DDRTemp),
+				i18n.T("sm_batt_temp") + "\t" + fDeg(sn.BattTemp),
+				i18n.T("sm_batt_lvl") + "\t" + fmt.Sprintf("%d %%", sn.BattPct),
+				i18n.T("sm_batt_v") + "\t" + fmt.Sprintf("%.2f V", sn.BattVolt),
+				i18n.T("sm_batt_st") + "\t" + sn.BattStatus,
+				i18n.T("sm_cpu_use") + "\t" + fmt.Sprintf("%.0f %%", cpu),
+				i18n.T("sm_mem_use") + "\t" + fmt.Sprintf("%.0f %%", mem),
+				i18n.T("sm_swap_use") + "\t" + swapStr,
+			}
+			for i := range rows {
+				if k, v, ok := strings.Cut(rows[i], "\t"); ok && v == "" {
+					rows[i] = k + "\t—"
+				}
+			}
+			u.DrawSysMon(rows)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Log(ft8Log)
