@@ -145,12 +145,18 @@ func (d *FT8Detector) Process() {
 	wf := d.wf
 	d.mu.Unlock()
 
-	var newResults []FT8Detection
-	cands := wf.findCandidates(140, 10)
-	// Several (time,freq) cells can match the same transmission in one
-	// scan — queue each distinct message only once.
+	var okResults, failResults []FT8Detection
+	cands := wf.findCandidates(220, 7)
+	// Candidates come back sorted by sync score (strongest first), so
+	// with the lowered threshold the noise candidates cannot crowd the
+	// real signals out of the result list — the first failure of the
+	// unsorted version exactly reproduced that. Several cells can match
+	// the same transmission; queue each distinct message once.
 	seen := map[string]bool{}
 	for _, c := range cands {
+		if len(okResults) >= 10 {
+			break // decode budget spent on the strongest candidates
+		}
 		llr := make([]float64, 174)
 		wf.extractLLR(c, llr)
 		msg, diag := ft8DecodeCodeword(llr)
@@ -168,14 +174,14 @@ func (d *FT8Detector) Process() {
 			msg.SNRDb = det.SNRDb
 			msg.FreqHz = det.FreqHz
 			det.Message = msg
-			newResults = append(newResults, det)
+			okResults = append(okResults, det)
 			continue
 		}
-		newResults = append(newResults, det)
+		if len(failResults) < 3 {
+			failResults = append(failResults, det)
+		}
 	}
-	if len(newResults) > 10 {
-		newResults = newResults[:10]
-	}
+	newResults := append(okResults, failResults...)
 	dStr := ""
 	for _, r := range newResults {
 		dStr += fmt.Sprintf(" %.0fHz/%.0fdB", r.FreqHz, r.SNRDb)
