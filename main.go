@@ -59,20 +59,34 @@ var buildTime = "-"
 const defaultUpdateBase = "https://downloads.catgg.net/sdrg35xx"
 
 type updater struct {
-	mu   sync.Mutex
-	msg  string
-	busy bool
+	mu    sync.Mutex
+	msg   string
+	msgAt time.Time
+	busy  bool
 }
 
 func (u *updater) setMsg(format string, a ...any) {
 	u.mu.Lock()
 	u.msg = fmt.Sprintf(format, a...)
+	u.msgAt = time.Now()
 	u.mu.Unlock()
 }
 
+// Msg returns the last updater message only while it is still fresh.
+// Status lines are transient: without the expiry, the boot-time
+// auto-check's "อัพเดทล่าสุดแล้ว" sits in u.msg forever and masks every
+// later status (the Y-button FT8 sync confirmation never shows). While
+// busy (download/verify/install) the message stays up for the whole
+// operation, since the process re-execs right after a successful one.
 func (u *updater) Msg() string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	if u.msg == "" {
+		return ""
+	}
+	if !u.busy && time.Since(u.msgAt) > 8*time.Second {
+		return ""
+	}
 	return u.msg
 }
 
