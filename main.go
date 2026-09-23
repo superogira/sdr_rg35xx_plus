@@ -35,7 +35,6 @@ import (
 	"time"
 
 	"sdr35/internal/audio"
-	"sdr35/internal/diag"
 	"sdr35/internal/dsp"
 	"sdr35/internal/i18n"
 	"sdr35/internal/input"
@@ -300,10 +299,6 @@ func main() {
 			sqlPref = f
 		}
 	}
-	ft8On := false
-	if v, ok := cfg["ft8"]; ok && v == "on" {
-		ft8On = true
-	}
 	agcOn := true
 	if v, ok := cfg["agc"]; ok && v == "off" {
 		agcOn = false
@@ -396,10 +391,6 @@ func main() {
 	if !agcOn {
 		r.SetAGCEnabled(false)
 	}
-	// FT8 stays OFF at boot even if the config says on — the scan is
-	// expensive on the A53 and a surprise enable at startup made the
-	// app unresponsive. Enable from the menu after boot.
-	_ = ft8On
 	fmt.Fprintf(os.Stderr, "step: ui created\n")
 
 	// Boot frame right away: a solid color on screen proves the whole
@@ -431,10 +422,6 @@ func main() {
 	}
 	quit := func() {
 		langPref := i18n.Lang()
-		ft8Pref := "off"
-		if r.FT8Enabled() {
-			ft8Pref = "on"
-		}
 		agcPref := "on"
 		if !r.AGCEnabled() {
 			agcPref = "off"
@@ -447,15 +434,11 @@ func main() {
 			dsPref = "off"
 		}
 		saveBwNow(cfg, r)
-		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref, ft8Pref)
+		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref)
 		stop()
 	}
 	// Screenshot support: the last presented frame and a transient status
 	// message pointing at the saved file (triggered from the menu).
-	// FT8 decode log (latest first, capped at 12)
-	ft8Log := make([]ui.FT8Entry, 0, 12)
-	var lastFT8Check time.Time
-
 	var lastFrame *image.RGBA
 	capturedMsg := ""
 	var capturedAt time.Time
@@ -503,7 +486,6 @@ func main() {
 		menuSample
 		menuBW
 		menuDS
-		menuFT8
 		menuAGC
 		menuHost
 		menuLang
@@ -601,8 +583,6 @@ func main() {
 			default:
 				r.SetDirectSamplingMode(-1)
 			}
-		case menuFT8:
-			r.SetFT8Enabled(!r.FT8Enabled())
 		case menuAGC:
 			r.SetAGCEnabled(!r.AGCEnabled())
 		case menuHost:
@@ -678,13 +658,6 @@ func main() {
 			}
 		case input.X:
 			r.CycleSquelch()
-		case input.Y:
-			// FT8 time sync: press when a transmission ends
-			if r.FT8Enabled() {
-				r.SyncFT8()
-				capturedMsg = "FT8 sync — รอสัญญาณถัดไป…"
-				capturedAt = time.Now()
-			}
 			cfg["sql"] = fmt.Sprintf("%g", r.SquelchDb())
 		case input.L1:
 			v := math.Round((r.Volume()-0.01)*100) / 100
@@ -799,8 +772,7 @@ func main() {
 		deadline = time.Now().Add(time.Duration(*screenshot * float64(time.Second)))
 	}
 
-	diagOn := cfg["diag"] == "on"
-	var lastDiagUpload time.Time
+	sysinfo.Start()
 
 	tick := time.NewTicker(33 * time.Millisecond)
 	defer tick.Stop()
@@ -812,7 +784,6 @@ func main() {
 	go func() {
 		var last uint64
 		buf := make([]byte, 1<<20)
-		time.Sleep(30 * time.Second) // grace period for slow starts
 		for range time.Tick(15 * time.Second) {
 			cur := atomic.LoadUint64(&frames)
 			if cur == last {
@@ -903,55 +874,9 @@ func main() {
 			}
 		}
 
-		if diagOn && time.Since(lastDiagUpload) >= 60*time.Second {
-			lastDiagUpload = time.Now()
-			go func() {
-				logPath := filepath.Join(filepath.Dir(mustExe()), "..", "SDRg35xx-logfile.txt")
-				if err := diag.UploadLog(diag.FTPConfig{Host: "192.168.1.211:21", User: "ftp_downloads_catgg_net", Pass: "4a4a10ca2e1ad8"}, logPath, "sdrg35xx/device.log"); err != nil {
-					fmt.Fprintf(os.Stderr, "diag upload: %v\n", err)
-				}
-			}()
-		}
-		// DISABLED FOR TESTING: sysinfo.Read()
-		// DISABLED FOR TESTING: r.FT8Process()
-		// Poll results once per 15 s cycle (aligned with FT8 slots);
-		// the detector itself only processes when it has enough data.
-		if false && r.FT8Enabled() && time.Since(lastFT8Check) >= 15*time.Second {
-			lastFT8Check = time.Now()
-			for _, det := range r.FT8Results() {
-				text := fmt.Sprintf("%.0f Hz %.0f dB", det.FreqHz, det.SNRDb)
-				if det.Message != nil && det.Message.Valid {
-					m := det.Message
-					if m.CallsignTo != "" {
-						text = fmt.Sprintf("%s %s %s", m.CallsignFrom, m.CallsignTo, m.Grid)
-					} else {
-						text = fmt.Sprintf("%s %s", m.CallsignFrom, m.Grid)
-					}
-				}
-				entry := ui.FT8Entry{
-					Time: time.Now().Format("15:04:05"),
-					Text: text,
-				}
-				// Deduplicate: skip if same text in last 15s
-				dup := false
-				for _, e := range ft8Log {
-					if e.Text == text {
-						dup = true
-						break
-					}
-				}
-				if !dup {
-					ft8Log = append(ft8Log, entry)
-					if len(ft8Log) > 12 {
-						ft8Log = ft8Log[len(ft8Log)-12:]
-					}
-				}
-			}
-		}
 		u.NewSpectrumRow(r.Tap(), r.RawTap())
 		snap := r.Snapshot()
 		status := snap.StatusText
-		// FT8 status disabled
 		if exitHint != "" {
 			status = exitHint
 		}
@@ -994,7 +919,6 @@ func main() {
 				{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
 				{Label: i18n.T("m_bw"), Value: bwLabel(r.Bandwidth())},
 				{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
-				{Label: "FT8 Decode", Value: ft8StatusLabel(r)},
 				{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
 				{Label: "Host / IP", Value: r.Hostname()},
 				{Label: i18n.T("m_lang"), Value: langLabel()},
@@ -1006,30 +930,26 @@ func main() {
 			u.DrawMenu(items, menuSel, fmt.Sprintf("รุ่น %s · %s", buildStamp, strings.ReplaceAll(buildTime, "_", " ")))
 		} else if uiMode == uiFreqEdit {
 			u.DrawFreqEditor(editDigits, editCursor)
-			if r.FT8Enabled() && len(ft8Log) > 0 && uiMode == uiMain {
-				u.DrawFT8Log(ft8Log)
-			} else if uiMode == uiHostEdit {
-				u.DrawKeyboard(hostText, len(hostText), hostKbR, hostKbC)
+		} else if uiMode == uiHostEdit {
+			u.DrawKeyboard(hostText, len(hostText), hostKbR, hostKbC)
+		}
+		lastFrame = frame
+		if err := disp.Present(frame); err != nil {
+			fmt.Fprintf(os.Stderr, "present: %v\n", err)
+			return
+		}
+		frames++
+		// Heartbeat: separates "app hung" from "rendering but invisible"
+		// when reading a launch log.
+		if time.Since(lastBeat) >= 10*time.Second {
+			s := r.Snapshot()
+			var af, astall int64
+			if out != nil {
+				af, astall = out.Stats()
 			}
-			lastFrame = frame
-			if err := disp.Present(frame); err != nil {
-				fmt.Fprintf(os.Stderr, "present: %v\n", err)
-				return
-			}
-			frames++
-			// Heartbeat: separates "app hung" from "rendering but invisible"
-			// when reading a launch log.
-			if time.Since(lastBeat) >= 10*time.Second {
-				s := r.Snapshot()
-				fmt.Fprintf(os.Stderr, "diag: presented=%d\n", atomic.LoadUint64(&frames))
-				var af, astall int64
-				if out != nil {
-					af, astall = out.Stats()
-				}
-				fmt.Fprintf(os.Stderr, "alive: frames=%d connected=%v freq=%.4f MHz mode=%s bytes=%d audioFrames=%d maxStall=%dms\n",
-					atomic.LoadUint64(&frames), s.Connected, float64(r.Freq())/1e6, r.Mode().Name, s.BytesRx, af, astall)
-				lastBeat = time.Now()
-			}
+			fmt.Fprintf(os.Stderr, "alive: frames=%d connected=%v freq=%.4f MHz mode=%s bytes=%d audioFrames=%d maxStall=%dms\n",
+				atomic.LoadUint64(&frames), s.Connected, float64(r.Freq())/1e6, r.Mode().Name, s.BytesRx, af, astall)
+			lastBeat = time.Now()
 		}
 	}
 }
@@ -1045,23 +965,6 @@ var kbRows = []string{
 	"0123456789",
 	"abcdefghijklmnopqrstuvwxyz",
 	".:-_/ ",
-}
-
-func ft8StatusLabel(r *radio.Radio) string {
-	if !r.FT8Enabled() {
-		return "ปิด"
-	}
-	if r.FT8Synced() {
-		return "เปิด · synced (Y รี-sync)"
-	}
-	return "เปิด · ยังไม่ sync (กด Y)"
-}
-
-func ft8Label(on bool) string {
-	if on {
-		return "เปิด"
-	}
-	return "ปิด"
 }
 
 func langLabel() string {
@@ -1087,14 +990,6 @@ func bwLabel(hz float64) string {
 }
 
 // --- tiny config file ---------------------------------------------------
-
-func mustExe() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return "."
-	}
-	return exe
-}
 
 func configFile(name string) string {
 	exe, err := os.Executable()
@@ -1132,13 +1027,13 @@ func readIni(path string) map[string]string {
 	return cfg
 }
 
-func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref, ft8Pref string) {
+func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string) {
 	f, err := os.Create(configPath())
 	if err != nil {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\nagc=%s\nlang=%s\nft8=%s\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref, agcPref, langPref, ft8Pref)
+	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\nagc=%s\nlang=%s\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref, agcPref, langPref)
 	// Squelch level from the live config map.
 	if v, ok := cfg["sql"]; ok {
 		fmt.Fprintf(f, "sql=%s\n", v)

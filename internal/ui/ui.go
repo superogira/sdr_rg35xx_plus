@@ -35,42 +35,6 @@ func (u *UI) SetSpanKHz(khz int) {
 	u.SpanFull = khz * 1000
 }
 
-// FT8Entry is one line in the FT8 message log overlay.
-type FT8Entry struct {
-	Time string // HH:MM:SS
-	Text string // decoded message or "sync only"
-}
-
-// DrawFT8Log renders a semi-transparent log of the latest FT8 decodes
-// in the bottom-left corner of the waterfall area.
-func (u *UI) DrawFT8Log(entries []FT8Entry) {
-	if len(entries) == 0 {
-		return
-	}
-	maxShow := 6
-	if len(entries) > maxShow {
-		entries = entries[len(entries)-maxShow:]
-	}
-
-	lh := 15 // line height
-	pw := 320
-	ph := len(entries)*lh + 8
-	px := 4
-	py := u.WaterfallRows - ph - 4
-
-	u.fillBlend(px, py, pw, ph, 0, 0, 0, 180)
-	white := color.RGBA{220, 255, 220, 255}
-	green := color.RGBA{100, 255, 100, 255}
-
-	tf := Face(11, false)
-	for i, e := range entries {
-		y := py + 14 + i*lh
-		tf.DrawString(u.img, color.RGBA{150, 180, 150, 255}, px+4, y, e.Time)
-		tf.DrawString(u.img, green, px+50, y, e.Text)
-	}
-	_ = white
-}
-
 // MenuItem is one row of the settings menu.
 type MenuItem struct {
 	Label string
@@ -214,9 +178,6 @@ type UI struct {
 	floor float64
 
 	stats FrameStats
-
-	// Bottom-bar cache key (nil = force redraw on first frame).
-	lastBarKey string
 }
 
 // FrameStats is everything the bottom bar and overlays show.
@@ -285,19 +246,16 @@ func (u *UI) initLUT() {
 }
 
 func (u *UI) clearAll() {
-	// Direct memory fill (pixel-by-pixel SetRGBA was 100x slower on the
-	// A53 and caused the UI to appear frozen for the first minute).
-	for i := 0; i < len(u.img.Pix); i += 4 {
-		u.img.Pix[i] = 0
-		u.img.Pix[i+1] = 0
-		u.img.Pix[i+2] = 0
-		u.img.Pix[i+3] = 255
+	black := color.RGBA{0, 0, 0, 255}
+	for y := 0; y < u.H; y++ {
+		for x := 0; x < u.W; x++ {
+			u.img.SetRGBA(x, y, black)
+		}
 	}
-	for i := 0; i < len(u.wf.Pix); i += 4 {
-		u.wf.Pix[i] = 0
-		u.wf.Pix[i+1] = 0
-		u.wf.Pix[i+2] = 0
-		u.wf.Pix[i+3] = 255
+	for y := 0; y < u.WaterfallRows; y++ {
+		for x := 0; x < u.W; x++ {
+			u.wf.SetRGBA(x, y, black)
+		}
 	}
 }
 
@@ -392,9 +350,7 @@ func (u *UI) NewSpectrumRow(tap, rawTap *dsp.SpectrumTap) bool {
 
 // Frame composes one screen: a fresh copy of the waterfall history with
 // the overlays (center line, span labels) and the bottom bar drawn on top,
-// then returns the image for presenting. The bottom bar is cached — it's
-// only redrawn when the displayed values change (Thai text rasterization
-// is expensive on the A53 at 30fps).
+// then returns the image for presenting.
 func (u *UI) Frame(stats FrameStats) *image.RGBA {
 	u.stats = stats
 	// Fresh waterfall copy: overlays from the previous frame are gone,
@@ -402,20 +358,7 @@ func (u *UI) Frame(stats FrameStats) *image.RGBA {
 	copy(u.img.Pix[:u.WaterfallRows*u.img.Stride], u.wf.Pix)
 	u.drawCenterLine()
 	u.drawSpanLabels()
-
-	// Only redraw the bottom bar when something visible changed.
-	// Quantize frequently-changing values so the bar cache survives:
-	// PowerDb swings every DSP block (~16 ms) which without rounding
-	// forced a full Thai-glyph re-render every single frame.
-	barKey := fmt.Sprintf("%v|%v|%v|%v|%0.0f|%v|%0.0f|%v|%v|%0.0f|%0.0f|%0.0f",
-		stats.FreqHz, stats.Mode, stats.Connected, stats.StatusText,
-		math.Round(stats.PowerDb), stats.SquelchOpen,
-		math.Round(stats.Volume*100), stats.GainText,
-		u.SpanFull, math.Round(stats.CpuPct), math.Round(stats.MemPct), math.Round(stats.SwpPct))
-	if barKey != u.lastBarKey {
-		u.lastBarKey = barKey
-		u.drawBottomBar()
-	}
+	u.drawBottomBar()
 	return u.img
 }
 
@@ -566,15 +509,21 @@ func (u *UI) drawBottomBar() {
 			statusText = "ไม่ได้เชื่อมต่อ " + s.Host
 		}
 	}
-	sysText := fmt.Sprintf("C%.0f M%.0f S%.0f", s.CpuPct, s.MemPct, s.SwpPct)
-	sw2 := status.TextWidth(sysText)
-	status.DrawString(u.img, color.RGBA{100, 180, 100, 255}, u.W-sw2-160, u.H-8, sysText)
 	status.DrawString(u.img, col, 12, u.H-8, statusText)
 
 	// Step + button hints (bottom right).
 	hint := Face(12, false)
 	hintText := "←→ จูน · SELECT โหมด · X sql · MENU เมนู (ค้าง 3 วิ = ออก)"
 	hint.DrawString(u.img, grey, u.W-hint.TextWidth(hintText)-8, u.H-8, hintText)
+
+	// System monitor (left of the hint, dim green).
+	sysText := fmt.Sprintf("C%.0f M%.0f S%.0f", s.CpuPct, s.MemPct, s.SwpPct)
+	sysW := hint.TextWidth(sysText)
+	hintW := hint.TextWidth(hintText)
+	sysX := u.W - hintW - 16 - sysW
+	if sysX > 200 {
+		hint.DrawString(u.img, color.RGBA{100, 180, 100, 255}, sysX, u.H-8, sysText)
+	}
 }
 
 func formatHz(hz int64) string {

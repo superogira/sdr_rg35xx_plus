@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -52,11 +51,6 @@ type fbDisplay struct {
 	sixteen                bool
 	rBits, gBits, bBits    uint32
 	rShift, gShift, bShift uint32
-
-	// Periodic FBIOPAN re-activation (the frontend can re-pan over us).
-	lastPan  time.Time
-	openedAt time.Time
-	rawVInfo [160]byte
 }
 
 func openFB() (Display, error) {
@@ -74,7 +68,6 @@ func openFB() (Display, error) {
 	var varRaw [160]byte
 	var smemLen, lineLen int
 	vinfoOK := ioctlOK(f, fbioGetVScreenInfo, unsafe.Pointer(&varRaw[0]))
-	d.rawVInfo = varRaw // save for periodic re-pan
 	if vinfoOK {
 		w := int(binary.LittleEndian.Uint32(varRaw[0:]))
 		h := int(binary.LittleEndian.Uint32(varRaw[4:]))
@@ -130,14 +123,6 @@ func openFB() (Display, error) {
 	if v := os.Getenv("SDR_FB_BPP"); v != "" {
 		d.bpp, _ = strconv.Atoi(v)
 	}
-	// The physical panel is 640x480 — some firmware states (SSH while
-	// the frontend holds the display) report 1280x1024 which makes the
-	// app render a 4x larger surface with expensive Thai text glyph
-	// rasterization, freezing the UI for minutes on the A53.
-	if d.w > 640 || d.h > 480 {
-		d.w, d.h = 640, 480
-	}
-
 	d.stride = lineLen
 	if d.stride == 0 {
 		d.stride = d.w * d.bpp / 8
@@ -202,8 +187,6 @@ func openFB() (Display, error) {
 		d.mem = mem
 		d.isFile = true
 	}
-	d.openedAt = time.Now()
-	d.lastPan = d.openedAt
 	fmt.Fprintf(os.Stderr, "fbdev: %dx%d bpp=%d stride=%d base=%d mirror=%d rgb=%d/%d/%d/%d sixteen=%v\n",
 		d.w, d.h, d.bpp, d.stride, d.base, d.mirror, d.rIdx, d.gIdx, d.bIdx, d.aIdx, d.sixteen)
 	return d, nil
@@ -255,29 +238,9 @@ func (d *fbDisplay) Present(frame *image.RGBA) error {
 	if frame.Bounds().Dx() != d.w || frame.Bounds().Dy() != d.h {
 		return fmt.Errorf("frame %v does not match fb %dx%d", frame.Bounds(), d.w, d.h)
 	}
-	// Re-assert the display layer every 5 s — the console frontend can
-	// re-pan or overwrite after our app starts, freezing the screen on
-	// the boot frame. This keeps the layer pointed at our buffer.
-	interval := 2 * time.Second
-	if time.Since(d.openedAt) < 30*time.Second {
-		interval = 500 * time.Millisecond
-	}
-	if time.Since(d.lastPan) > interval {
-		d.lastPan = time.Now()
-		v := d.rawVInfo
-		_ = ioctlRaw(d.f, fbioPanDisplay, unsafe.Pointer(&v[0]))
-	}
 	d.paint(frame, d.base)
 	if d.mirror != 0 {
 		d.paint(frame, d.mirror)
-	}
-	// ARM cache coherency: flush the framebuffer mmap so the display
-	// controller sees our writes. Without this, sequential memcpy-style
-	// writes (waterfall scroll) stay in the CPU's write cache; the
-	// read-modify-write from dialog alpha-blending happened to flush
-	// them, which is why the freq editor appeared to "fix" the screen.
-	if d.mem != nil {
-		unix.Msync(d.mem, unix.MS_SYNC)
 	}
 	if d.isFile {
 		if _, err := d.f.WriteAt(d.mem, 0); err != nil {
