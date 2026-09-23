@@ -39,6 +39,7 @@ import (
 	"sdr35/internal/i18n"
 	"sdr35/internal/input"
 	"sdr35/internal/radio"
+	"sdr35/internal/pskreporter"
 	"sdr35/internal/sysinfo"
 	"sdr35/internal/ui"
 )
@@ -310,6 +311,9 @@ func main() {
 	if v, ok := cfg["lang"]; ok {
 		i18n.SetLang(v)
 	}
+	myCall := strings.ToUpper(strings.TrimSpace(cfg["call"]))
+	myGrid := strings.ToUpper(strings.TrimSpace(cfg["grid"]))
+	pskOn := cfg["psk"] == "on"
 	sqlPref := 0.0
 	if v, ok := cfg["sql"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 4 && f <= 40 {
@@ -475,7 +479,7 @@ func main() {
 			dsPref = "off"
 		}
 		saveBwNow(cfg, r)
-		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref, stepHz)
+		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref, stepHz, myCall, myGrid, pskOn)
 		stop()
 	}
 	// Screenshot support: the last presented frame and a transient status
@@ -483,6 +487,16 @@ func main() {
 	ft8Log := make([]ui.FT8Entry, 0, 100)
 	// recentFT8 drives the 6 s duplicate window for decoded messages.
 	recentFT8 := make([]ft8Seen, 0, 40)
+	// PSK Reporter: spots are buffered as they decode and flushed over
+	// UDP every 5 minutes (the service asks for at most that rate).
+	psk := pskreporter.New(myCall, myGrid, pskOn)
+	go func() {
+		t := time.NewTicker(5 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			psk.Flush()
+		}
+	}()
 
 	var lastFrame *image.RGBA
 	capturedMsg := ""
@@ -542,8 +556,26 @@ func main() {
 		menuVolume
 		menuShot
 		menuUpdate
+		menuCall
+		menuGrid
+		menuPSK
 	)
-	menuCount := menuUpdate + 1
+	// The flat 16-row menu outgrew the screen, so it is now three
+	// subpages reached from a 3-row root. pageItems maps (page → row)
+	// to the item ids that adjustItem/activateItem already dispatch on.
+	const (
+		pageRoot = iota
+		pageRx
+		pageFT8
+		pageSys
+	)
+	menuPage := pageRoot
+	pageItems := [][]int{
+		{0, 0, 0}, // root rows open subpages (dispatched by row index)
+		{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep},
+		{menuFT8, menuCall, menuGrid, menuPSK},
+		{menuHost, menuLang, menuVolume, menuShot, menuUpdate},
+	}
 	spanSteps := []int{1000, 750, 500, 250, 125, 100, 50, 25, 12, 10, 5, 3}
 	spanIdx := func() int {
 		want := u.SpanFull / 1000
@@ -563,6 +595,17 @@ func main() {
 	}
 	editDigits := freqDigits()
 	hostText := *host
+	// kbTarget: what the on-screen keyboard is editing ("host"/"call"/"grid").
+	kbTarget := "host"
+	kbTitle := func() string {
+		switch kbTarget {
+		case "call":
+			return i18n.T("m_call")
+		case "grid":
+			return i18n.T("m_grid")
+		}
+		return i18n.T("m_host") + ":port"
+	}
 	hostKbR, hostKbC := 0, 0
 	editCursor := 6 // default to the 10 kHz digit (index into 9 digits)
 	// Saved host list (hosts= in the ini, comma-separated). The current
@@ -694,10 +737,40 @@ func main() {
 				v = 1.5
 			}
 			r.SetVolume(v)
+		case menuPSK:
+			pskOn = !pskOn
+			cfg["psk"] = map[bool]string{true: "on", false: "off"}[pskOn]
+			psk.SetEnabled(pskOn)
 		}
 	}
 	activateItem := func(idx int) {
+		if menuPage == pageRoot {
+			// Root rows open subpages by position.
+			menuPage = menuSel + 1
+			menuSel = 0
+			return
+		}
 		switch idx {
+		case menuFT8:
+			r.SetFT8Enabled(!r.FT8Enabled())
+		case menuLang:
+			if i18n.Lang() == "th" {
+				i18n.SetLang("en")
+			} else {
+				i18n.SetLang("th")
+			}
+		case menuCall:
+			hostText, kbTarget = myCall, "call"
+			hostKbR, hostKbC = 0, 0
+			uiMode = uiHostEdit
+		case menuGrid:
+			hostText, kbTarget = myGrid, "grid"
+			hostKbR, hostKbC = 0, 0
+			uiMode = uiHostEdit
+		case menuPSK:
+			pskOn = !pskOn
+			cfg["psk"] = map[bool]string{true: "on", false: "off"}[pskOn]
+			psk.SetEnabled(pskOn)
 		case menuHost:
 			hostSel = 0
 			uiMode = uiHostList
@@ -807,19 +880,28 @@ func main() {
 		case uiMain:
 			act(b)
 		case uiMenu:
+			rows := len(pageItems[menuPage])
 			switch b {
 			case input.Up:
-				menuSel = (menuSel + menuCount - 1) % menuCount
+				menuSel = (menuSel + rows - 1) % rows
 			case input.Down:
-				menuSel = (menuSel + 1) % menuCount
+				menuSel = (menuSel + 1) % rows
 			case input.Left:
-				adjustItem(menuSel, -1)
+				if menuPage != pageRoot {
+					adjustItem(pageItems[menuPage][menuSel], -1)
+				}
 			case input.Right:
-				adjustItem(menuSel, +1)
+				if menuPage != pageRoot {
+					adjustItem(pageItems[menuPage][menuSel], +1)
+				}
 			case input.A:
-				activateItem(menuSel)
+				activateItem(pageItems[menuPage][menuSel])
 			case input.B, input.Start:
-				uiMode = uiMain
+				if menuPage != pageRoot {
+					menuPage, menuSel = pageRoot, 0
+				} else {
+					uiMode = uiMain
+				}
 			}
 		case uiFT8Log:
 			// D-pad scrolls the big FT8 history: up/down one line,
@@ -853,7 +935,7 @@ func main() {
 				hostSel = (hostSel + 1) % rows
 			case input.A:
 				if hostSel == len(hostList) {
-					hostText, hostEditIdx = "", -1
+					hostText, hostEditIdx, kbTarget = "", -1, "host"
 					hostKbR, hostKbC = 0, 0
 					uiMode = uiHostEdit
 				} else {
@@ -866,7 +948,7 @@ func main() {
 				}
 			case input.X:
 				if hostSel < len(hostList) {
-					hostText, hostEditIdx = hostList[hostSel], hostSel
+					hostText, hostEditIdx, kbTarget = hostList[hostSel], hostSel, "host"
 					hostKbR, hostKbC = 0, 0
 					uiMode = uiHostEdit
 				}
@@ -909,21 +991,48 @@ func main() {
 					hostText = hostText[:len(hostText)-1]
 				}
 			case input.X, input.Y:
-				if hostText != "" {
-					if hostEditIdx >= 0 && hostEditIdx < len(hostList) {
-						hostList[hostEditIdx] = hostText
-					} else {
-						hostList = append(hostList, hostText)
-						hostEditIdx = len(hostList) - 1
+				switch kbTarget {
+				case "call":
+					if hostText != "" {
+						myCall = strings.ToUpper(hostText)
+						cfg["call"] = myCall
+						psk.SetStation(myCall, myGrid)
 					}
-					saveHosts()
-					*host = hostText
-					cfg["host"] = hostText
-					r.SetHost(hostText)
-					hostSel = hostEditIdx
+					hostText = ""
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, 1
+				case "grid":
+					if hostText != "" {
+						myGrid = strings.ToUpper(hostText)
+						cfg["grid"] = myGrid
+						psk.SetStation(myCall, myGrid)
+					}
+					hostText = ""
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, 2
+				default:
+					if hostText != "" {
+						if hostEditIdx >= 0 && hostEditIdx < len(hostList) {
+							hostList[hostEditIdx] = hostText
+						} else {
+							hostList = append(hostList, hostText)
+							hostEditIdx = len(hostList) - 1
+						}
+						saveHosts()
+						*host = hostText
+						cfg["host"] = hostText
+						r.SetHost(hostText)
+						hostSel = hostEditIdx
+					}
+					hostEditIdx = -1
+					uiMode = uiHostList
 				}
-				hostEditIdx = -1
-				uiMode = uiHostList
+			case input.Start:
+				// abandon the edit
+				hostText = ""
+				if kbTarget == "host" {
+					uiMode = uiHostList
+				} else {
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, 0
+				}
 			}
 		case uiFreqEdit:
 			switch b {
@@ -1152,6 +1261,41 @@ func main() {
 			if len(ft8Log) > 100 {
 				ft8Log = ft8Log[len(ft8Log)-100:]
 			}
+			// Report to PSK Reporter: the sender is the first token of
+			// the message text ("CALL CALL2 …" — for CQ messages the
+			// caller follows the CQ token). Hash/telemetry texts and
+			// CQ itself are skipped.
+			if toks := strings.Fields(m.Text); len(toks) >= 2 {
+				sender := toks[0]
+				if sender == "CQ" || strings.HasPrefix(sender, "CQ_") {
+					sender = toks[1]
+					if sender == "DX" || sender == "NA" || sender == "EU" || sender == "AS" ||
+						sender == "JA" || sender == "OC" || sender == "SA" || sender == "AF" ||
+						sender == "RU" || sender == "AN" || sender == "FD" || sender == "TEST" ||
+						sender == "FIELD" || sender == "POTA" || sender == "SOTA" || sender == "RR73" {
+						if len(toks) >= 3 {
+							sender = toks[2]
+						} else {
+							sender = ""
+						}
+					}
+				}
+				if isSpotCallsign(sender) {
+					sn := int8(m.SNRDb)
+					if sn < 0 {
+						sn = 0
+					}
+					if sn > 99 {
+						sn = 99
+					}
+					psk.Add(pskreporter.Spot{
+						Sender: sender,
+						FreqHz: uint32(float64(r.Freq()) + m.FreqHz),
+						SNRDb:  sn,
+						At:     now,
+					})
+				}
+			}
 		}
 		cpu, mem, swp := sysinfo.Snapshot()
 		frame := u.Frame(ui.FrameStats{
@@ -1183,29 +1327,48 @@ func main() {
 			} else {
 				sq = fmt.Sprintf("%.0f dB", v)
 			}
-			items := []ui.MenuItem{
-				{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.5f MHz ▸", float64(r.Freq())/1e6)},
-				{Label: i18n.T("m_mode"), Value: r.Mode().Name},
-				{Label: i18n.T("m_gain"), Value: fmt.Sprintf("%.1f dB", r.GainDb())},
-				{Label: i18n.T("m_sql"), Value: sq},
-				{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
-				{Label: i18n.T("m_bw"), Value: bwLabel(r.Bandwidth())},
-				{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
-				{Label: i18n.T("m_ft8"), Value: ft8Label(r.FT8Enabled())},
-				{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
-				{Label: i18n.T("m_host"), Value: r.Hostname()},
-				{Label: i18n.T("m_lang"), Value: langLabel()},
-				{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
-				{Label: i18n.T("m_step"), Value: stepLabel(stepHz)},
-				{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
-				{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
-				{Label: i18n.T("m_update"), Value: i18n.T("press_a")},
+		items := []ui.MenuItem{}
+		switch menuPage {
+		case pageRoot:
+			items = append(items,
+				ui.MenuItem{Label: i18n.T("m_rxpage"), Value: "▸"},
+				ui.MenuItem{Label: i18n.T("m_ft8page"), Value: "▸"},
+				ui.MenuItem{Label: i18n.T("m_syspage"), Value: "▸"})
+		case pageRx:
+			items = append(items,
+				ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.5f MHz ▸", float64(r.Freq())/1e6)},
+				ui.MenuItem{Label: i18n.T("m_mode"), Value: r.Mode().Name},
+				ui.MenuItem{Label: i18n.T("m_gain"), Value: fmt.Sprintf("%.1f dB", r.GainDb())},
+				ui.MenuItem{Label: i18n.T("m_sql"), Value: sq},
+				ui.MenuItem{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
+				ui.MenuItem{Label: i18n.T("m_bw"), Value: bwLabel(r.Bandwidth())},
+				ui.MenuItem{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
+				ui.MenuItem{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
+				ui.MenuItem{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
+				ui.MenuItem{Label: i18n.T("m_step"), Value: stepLabel(stepHz)})
+		case pageFT8:
+			pskVal := i18n.T("off")
+			if pskOn {
+				pskVal = i18n.T("on")
 			}
-			u.DrawMenu(items, menuSel, fmt.Sprintf(i18n.T("menu_ver"), buildStamp, strings.ReplaceAll(buildTime, "_", " ")))
+			items = append(items,
+				ui.MenuItem{Label: i18n.T("m_ft8"), Value: ft8Label(r.FT8Enabled())},
+				ui.MenuItem{Label: i18n.T("m_call"), Value: myCall},
+				ui.MenuItem{Label: i18n.T("m_grid"), Value: myGrid},
+				ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal})
+		case pageSys:
+			items = append(items,
+				ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
+				ui.MenuItem{Label: i18n.T("m_lang"), Value: langLabel()},
+				ui.MenuItem{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
+				ui.MenuItem{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
+				ui.MenuItem{Label: i18n.T("m_update"), Value: i18n.T("press_a")})
+		}
+		u.DrawMenu(items, menuSel, fmt.Sprintf(i18n.T("menu_ver"), buildStamp, strings.ReplaceAll(buildTime, "_", " ")))
 		} else if uiMode == uiFreqEdit {
 			u.DrawFreqEditor(editDigits, editCursor)
 		} else if uiMode == uiHostEdit {
-			u.DrawKeyboard(hostText, len(hostText), hostKbR, hostKbC)
+			u.DrawKeyboard(kbTitle(), hostText, len(hostText), hostKbR, hostKbC)
 		} else if uiMode == uiHostList {
 			active := 0
 			for i, h := range hostList {
@@ -1335,7 +1498,7 @@ func readIni(path string) map[string]string {
 	return cfg
 }
 
-func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string, stepHz int64) {
+func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string, stepHz int64, myCall, myGrid string, pskOn bool) {
 	f, err := os.Create(configPath())
 	if err != nil {
 		return
@@ -1352,6 +1515,7 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	if v, ok := cfg["hosts"]; ok && v != "" {
 		fmt.Fprintf(f, "hosts=%s\n", v)
 	}
+	fmt.Fprintf(f, "call=%s\ngrid=%s\npsk=%s\n", myCall, myGrid, map[bool]string{true: "on", false: "off"}[pskOn])
 	if v, ok := cfg["updateurl"]; ok && v != "" {
 		fmt.Fprintf(f, "updateurl=%s\n", v)
 	}
@@ -1361,4 +1525,25 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 			fmt.Fprintf(f, "bw.%s=%s\n", m.Name, v)
 		}
 	}
+}
+
+// isSpotCallsign filters reportable callsigns: 3-11 chars, starts with
+// a letter or digit, contains at least one digit (standard-form
+// amateur calls) — skips hashes "<...>", telemetry and plain words.
+func isSpotCallsign(s string) bool {
+	if len(s) < 3 || len(s) > 11 {
+		return false
+	}
+	hasDigit := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9':
+			hasDigit = true
+		case c >= 'A' && c <= 'Z':
+		default:
+			return false
+		}
+	}
+	return hasDigit
 }

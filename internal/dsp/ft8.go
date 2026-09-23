@@ -166,6 +166,7 @@ func (d *FT8Detector) Process() {
 			}
 			seen[msg.Text] = true
 			msg.SNRDb = det.SNRDb
+			msg.FreqHz = det.FreqHz
 			det.Message = msg
 			newResults = append(newResults, det)
 			continue

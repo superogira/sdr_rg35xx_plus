@@ -751,7 +751,7 @@ var kbRows = []string{
 // DrawKeyboard renders an on-screen keyboard for editing the rtl_tcp
 // host address. cursor is the text-edit position; kbR/kbC are the
 // selected key row/column; shift selects the uppercase row.
-func (u *UI) DrawKeyboard(text string, textCursor, kbR, kbC int) {
+func (u *UI) DrawKeyboard(title, text string, textCursor, kbR, kbC int) {
 	pw, ph := 520, 260
 	px := (u.W - pw) / 2
 	py := (u.H - ph) / 2
@@ -763,7 +763,7 @@ func (u *UI) DrawKeyboard(text string, textCursor, kbR, kbC int) {
 	grey := color.RGBA{150, 160, 170, 255}
 	cyan := color.RGBA{80, 220, 255, 255}
 
-	Face(16, true).DrawString(u.img, cyan, px+16, py+28, i18n.T("m_host") + ":port")
+	Face(16, true).DrawString(u.img, cyan, px+16, py+28, title)
 	Face(11, false).DrawString(u.img, grey, px+16, py+46,
 		i18n.T("kb_hint"))
 
