@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -51,6 +52,10 @@ type fbDisplay struct {
 	sixteen                bool
 	rBits, gBits, bBits    uint32
 	rShift, gShift, bShift uint32
+
+	// Periodic FBIOPAN re-activation (the frontend can re-pan over us).
+	lastPan  time.Time
+	rawVInfo [160]byte
 }
 
 func openFB() (Display, error) {
@@ -68,6 +73,7 @@ func openFB() (Display, error) {
 	var varRaw [160]byte
 	var smemLen, lineLen int
 	vinfoOK := ioctlOK(f, fbioGetVScreenInfo, unsafe.Pointer(&varRaw[0]))
+	d.rawVInfo = varRaw // save for periodic re-pan
 	if vinfoOK {
 		w := int(binary.LittleEndian.Uint32(varRaw[0:]))
 		h := int(binary.LittleEndian.Uint32(varRaw[4:]))
@@ -245,6 +251,14 @@ func (d *fbDisplay) Size() (int, int) { return d.w, d.h }
 func (d *fbDisplay) Present(frame *image.RGBA) error {
 	if frame.Bounds().Dx() != d.w || frame.Bounds().Dy() != d.h {
 		return fmt.Errorf("frame %v does not match fb %dx%d", frame.Bounds(), d.w, d.h)
+	}
+	// Re-assert the display layer every 5 s — the console frontend can
+	// re-pan or overwrite after our app starts, freezing the screen on
+	// the boot frame. This keeps the layer pointed at our buffer.
+	if time.Since(d.lastPan) > 5*time.Second {
+		d.lastPan = time.Now()
+		v := d.rawVInfo
+		_ = ioctlRaw(d.f, fbioPanDisplay, unsafe.Pointer(&v[0]))
 	}
 	d.paint(frame, d.base)
 	if d.mirror != 0 {
