@@ -1065,3 +1065,32 @@ func (u *UI) ViewOffHzSmooth(listenOff float64) float64 {
 	}
 	return v
 }
+
+// DrawFT8Grid draws frequency-reference lines across the waterfall at
+// round Hz offsets from the listening frequency (the bracket's
+// reference): solid lines every 1 kHz, dashed every 500 Hz. This lets
+// you read the FT8 log's Hz column against the waterfall at a glance.
+func (u *UI) DrawFT8Grid(LOHz int64, viewOffHz float64) {
+	s := u.stats
+	listenOff := float64(s.FreqHz - LOHz)
+	pxPerHz := float64(u.W) / float64(u.SpanFull)
+
+	// Draw ±5 kHz of reference lines around the listening frequency.
+	for hz := -5000; hz <= 5000; hz += 500 {
+		if hz == 0 {
+			continue // the bracket already marks zero
+		}
+		x := u.W/2 + int((float64(hz)+listenOff-viewOffHz)*pxPerHz+0.5)
+		if x < 0 || x >= u.W {
+			continue
+		}
+		isKHz := hz%1000 == 0
+		for y := 0; y < u.WaterfallRows; y++ {
+			if isKHz {
+				u.img.SetRGBA(x, y, color.RGBA{200, 200, 200, 60})
+			} else if y%4 < 2 {
+				u.img.SetRGBA(x, y, color.RGBA{150, 150, 150, 40})
+			}
+		}
+	}
+}

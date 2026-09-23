@@ -1439,6 +1439,7 @@ func main() {
 			u.DrawSysMon(rows)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
+			u.DrawFT8Grid(loHz, viewOff)
 			u.DrawFT8Log(ft8Log)
 		}
 		if uiMode == uiMain {
