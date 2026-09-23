@@ -40,3 +40,36 @@ func TestBracketRender(t *testing.T) {
 		}
 	}
 }
+
+// TestViewHysteresis: the view pans only when the bracket would leave
+// the edge band — scrolling back must leave the view where it was.
+func TestViewHysteresis(t *testing.T) {
+	u := New(640, 480)
+	u.SetSpanKHz(100)
+	// scroll right in 1 kHz steps from centre
+	for i := 1; i <= 30; i++ {
+		u.SetViewOff(u.ViewOffHzSmooth(float64(i) * 1000))
+	}
+	v1 := u.viewOffHz
+	// bracket now rides the right edge; scroll back 10 kHz
+	for i := 30; i >= 20; i-- {
+		u.SetViewOff(u.ViewOffHzSmooth(float64(i) * 1000))
+	}
+	if u.viewOffHz != v1 {
+		t.Errorf("view moved while scrolling back: %v -> %v", v1, u.viewOffHz)
+	}
+	// scroll back to the centre: view must stay (bracket well inside)
+	for i := 20; i >= 10; i-- {
+		u.SetViewOff(u.ViewOffHzSmooth(float64(i) * 1000))
+	}
+	if u.viewOffHz != v1 {
+		t.Errorf("view moved while bracket inside the edge band: %v -> %v", v1, u.viewOffHz)
+	}
+	// scroll far LEFT past the other edge: view must follow down
+	for i := 10; i >= -40; i-- {
+		u.SetViewOff(u.ViewOffHzSmooth(float64(i) * 1000))
+	}
+	if u.viewOffHz > -1000 {
+		t.Errorf("view did not follow the leftward scroll: %v", u.viewOffHz)
+	}
+}
