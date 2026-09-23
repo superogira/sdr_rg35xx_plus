@@ -43,16 +43,17 @@ type FT8Detection struct {
 	Diag string
 }
 
-// FT8Detector buffers 15 s of 8 kHz audio, scans for FT8 sync.
+// FT8Detector streams 8 kHz audio into an STFT waterfall and decodes
+// FT8 messages via soft Costas correlation + LDPC.
 type FT8Detector struct {
 	mu        sync.Mutex
-	audio     []float64
-	written   int64
-	results   []FT8Detection
 	enabled   bool
-	linear    []float64
-	slotStart int64
+	results   []FT8Detection
 	synced    bool
+	// wf consumes audio incrementally; wfPending buffers sub-640-sample
+	// remainders between Feed calls.
+	wf        *ft8Waterfall
+	wfPending []float64
 	// pending holds decoded messages until the UI drains them. The
 	// live results slice is overwritten on every scan (~1 s), so a
 	// decode only survives there for a scan or two — polling it at
@@ -71,14 +72,15 @@ var (
 )
 
 func NewFT8Detector() *FT8Detector {
-	return &FT8Detector{audio: make([]float64, ft8RingSamples)}
+	return &FT8Detector{wf: newFT8Waterfall(), wfPending: make([]float64, 0, 1024)}
 }
 
 func (d *FT8Detector) SetEnabled(on bool) {
 	d.mu.Lock()
 	d.enabled = on
 	if on {
-		d.written = 0
+		d.wf.reset()
+		d.wfPending = d.wfPending[:0]
 		d.synced = false
 	}
 	d.mu.Unlock()
@@ -87,15 +89,14 @@ func (d *FT8Detector) SetEnabled(on bool) {
 func (d *FT8Detector) Enabled() bool  { d.mu.Lock(); defer d.mu.Unlock(); return d.enabled }
 func (d *FT8Detector) IsSynced() bool { d.mu.Lock(); defer d.mu.Unlock(); return d.synced }
 
-// Sync marks now as end of a transmission; next slot starts 2.36 s later.
+// Sync acknowledges a manual slot sync (Y button); the marker drawing
+// in the UI is driven from the button press itself.
 func (d *FT8Detector) Sync() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.enabled {
 		return
 	}
-	gap := int64(2360 * FT8AudioRate / 1000)
-	d.slotStart = d.written + gap
 	d.synced = true
 }
 
@@ -105,10 +106,11 @@ func (d *FT8Detector) Feed(samples []float64) {
 	if !d.enabled {
 		return
 	}
-	for _, s := range samples {
-		d.audio[d.written%ft8RingSamples] = s
-		d.written++
-	}
+	d.wfPending = append(d.wfPending, samples...)
+	d.wf.feed(d.wfPending)
+	// keep the unconsumed remainder (< 640 samples)
+	n := len(d.wfPending) / FT8SymSamples * FT8SymSamples
+	d.wfPending = append(d.wfPending[:0], d.wfPending[n:]...)
 }
 
 func (d *FT8Detector) Results() []FT8Detection {
@@ -130,68 +132,40 @@ func (d *FT8Detector) TakeMessages() []FT8Message {
 	return out
 }
 
-// Process scans for FT8 signals. Snapshot buffer under lock, heavy work outside.
+// Process scans the waterfall for Costas patterns and decodes every
+// candidate. The correlation search is the expensive part (~1 s on the
+// A53 at 2×2 oversampling); the detector's busy guard keeps it off the
+// UI thread.
 func (d *FT8Detector) Process() {
 	d.mu.Lock()
-	if !d.enabled || d.written < int64(ft8RingSamples) {
+	if !d.enabled || d.wf.count < 80 {
 		d.mu.Unlock()
 		return
 	}
-	if d.linear == nil {
-		d.linear = make([]float64, ft8RingSamples)
-	}
-	linear := d.linear
-	start := int(d.written % int64(ft8RingSamples))
-	copy(linear, d.audio[start:])
-	copy(linear[ft8RingSamples-start:], d.audio[:start])
+	wf := d.wf
 	d.mu.Unlock()
 
 	var newResults []FT8Detection
-	candidates := d.findCandidates(linear)
-	for _, ch := range candidates {
-		// The FFT window (~0.5 s) sees only a few tones of the group,
-		// so the cluster midpoint can sit a whole tone step or two off
-		// the true grid centre. Sync only matches at the right shift,
-		// so sweep whole 6.25 Hz steps around the estimate — and keep
-		// sweeping when a sync passes but the decode fails (the offset
-		// may be a neighbour of the true one).
-		var first FT8Detection
-		haveFirst := false
-		for _, off := range []float64{0, 6.25, -6.25, 12.5, -12.5, 18.75, -18.75, 25, -25} {
-			det, ok, at := d.detectAt(linear, ch+off)
-			if !ok {
-				continue
-			}
-			// det.FreqHz carries the refined (sub-grid) centre —
-			// decoding at the raw grid estimate loses 1-3 dB to
-			// between-bin straddle.
-			msg, diag := ft8DecodeAt(linear, at, det.FreqHz)
-			if msg != nil && msg.Valid {
-				det.Message = msg
-				newResults = append(newResults, det)
-				break
-			}
-			if !haveFirst {
-				first, haveFirst = det, true
-				first.Diag = diag
-			}
+	cands := wf.findCandidates(10, 10)
+	for _, c := range cands {
+		llr := make([]float64, 174)
+		wf.extractLLR(c, llr)
+		msg, diag := ft8DecodeCodeword(llr)
+		det := FT8Detection{
+			FreqHz:     c.candFreqHz(),
+			SNRDb:      wf.candSNRDb(c),
+			Confidence: float64(c.score) / 100,
+			Diag:       diag,
 		}
-		if haveFirst && len(newResults) == 0 {
-			newResults = append(newResults, first)
+		if msg != nil && msg.Valid {
+			det.Message = msg
+			newResults = append(newResults, det)
+			continue
 		}
+		newResults = append(newResults, det)
 	}
 	if len(newResults) > 5 {
 		newResults = newResults[:5]
-	}
-	// Diagnostic logging
-	var maxAmp float64
-	for _, v := range linear[len(linear)-8000:] {
-		if v > maxAmp {
-			maxAmp = v
-		}
-		if -v > maxAmp {
-			maxAmp = -v
-		}
 	}
 	dStr := ""
 	for _, r := range newResults {
@@ -202,7 +176,7 @@ func (d *FT8Detector) Process() {
 			dStr += fmt.Sprintf(" (%s)", r.Diag)
 		}
 	}
-	fmt.Fprintf(os.Stderr, "ft8: amp=%.3f cand=%d det=%d%s\n", maxAmp, len(candidates), len(newResults), dStr)
+	fmt.Fprintf(os.Stderr, "ft8: blocks=%d cand=%d det=%d%s\n", wf.count, len(cands), len(newResults), dStr)
 
 	d.mu.Lock()
 	d.results = newResults
@@ -218,224 +192,6 @@ func (d *FT8Detector) Process() {
 }
 
 // findCandidates uses a short FFT to find energy clusters.
-func (d *FT8Detector) findCandidates(audio []float64) []float64 {
-	nfft := 4096
-	seg := audio[len(audio)-nfft:]
-	ft8FFTRe = growF(ft8FFTRe, nfft)
-	ft8FFTIm = growF(ft8FFTIm, nfft)
-	re, im := ft8FFTRe[:nfft], ft8FFTIm[:nfft]
-	for i := range seg {
-		re[i] = seg[i]
-		im[i] = 0
-	}
-	HannWindow(re, im)
-	FFT(re, im)
-
-	ft8Mags = growF(ft8Mags, nfft/2)[:0]
-	for i := 1; i < nfft/2; i++ {
-		ft8Mags = append(ft8Mags, 20*math.Log10(math.Hypot(re[i], im[i])+1e-12))
-	}
-	ft8SortBuf = append(ft8SortBuf[:0], ft8Mags...)
-	sorted := ft8SortBuf
-	for i := 1; i < len(sorted); i++ {
-		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
-			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
-		}
-	}
-	noise := sorted[len(sorted)/2]
-
-	binHz := float64(FT8AudioRate) / float64(nfft)
-	var result []float64
-	inC := false
-	var cStart, cPeak int
-	var cPeakV float64
-	for i := 1; i < nfft/2; i++ {
-		hz := float64(i) * binHz
-		if hz < 300 || hz > 3000 {
-			continue
-		}
-		mag := ft8Mags[i-1]
-		if mag > noise+15 {
-			if !inC {
-				cStart, cPeak, cPeakV = i, i, mag
-				inC = true
-			} else if mag > cPeakV {
-				cPeak, cPeakV = i, mag
-			}
-		} else {
-			inC = false
-		}
-		if !inC && cPeak > 0 {
-			w := float64(i-cStart) * binHz
-			// A 0.5 s window spans ~3 symbols, so often only ONE tone
-			// of the group is visible — a 6-12 Hz "cluster". Accept
-			// from 6 Hz and let sync + LDPC + CRC reject false leads.
-			if w >= 6 && w <= 300 {
-				// The cluster MIDPOINT estimates the centre of the
-				// 8-tone group (50 Hz wide); with a partial view it
-				// can sit a few tone steps off, which the caller's
-				// grid-shift sweep corrects.
-				mid := float64(cStart+i-1) / 2
-				hz := math.Round(mid*binHz/6.25) * 6.25
-				result = append(result, hz)
-				if len(result) >= 5 {
-					break
-				}
-			}
-			cPeak = 0
-		}
-	}
-	return result
-}
-
-// detectAt slides the proper 3-block Costas pattern over the buffer
-// and returns the best symbol-aligned offset plus a sub-symbol
-// refinement. Tone t sits at centerHz+(t-3.5)*6.25 by convention, so
-// centerHz is the middle of the 8-tone group (50 Hz wide). The wide
-// scans rank offsets with the first Costas block only (7 positions);
-// the winner is confirmed against all 21 sync positions.
-func (d *FT8Detector) detectAt(audio []float64, centerHz float64) (FT8Detection, bool, int) {
-	maxOff := len(audio) - FT8FrameSamp
-	if maxOff < 0 {
-		return FT8Detection{}, false, 0
-	}
-	quickScoreAt := func(off int, freq float64) (int, float64) {
-		sc, soft := 0, 0.0
-		for i := 0; i < 7; i++ {
-			s := off + i*FT8SymSamples
-			if s+FT8SymSamples > len(audio) {
-				break
-			}
-			sym := audio[s : s+FT8SymSamples]
-			bt, bm, tm := 0, 0.0, 0.0
-			for t := 0; t < 8; t++ {
-				m := goertzelMag(sym, freq+(float64(t)-3.5)*FT8ToneHz, float64(FT8AudioRate))
-				tm += m
-				if m > bm {
-					bm, bt = m, t
-				}
-			}
-			if bt == ft8SyncCostas[i] {
-				sc++
-				soft += bm / (tm/8 + 1e-12)
-			}
-		}
-		return sc, soft
-	}
-	scoreAt := func(off int, freq float64) (int, float64) {
-		sc, soft := 0, 0.0
-		for i := 0; i < 21; i++ {
-			s := off + ft8SyncPos(i)*FT8SymSamples
-			if s+FT8SymSamples > len(audio) {
-				break
-			}
-			sym := audio[s : s+FT8SymSamples]
-			exp := ft8SyncCostas[i%7]
-			bt, bm, tm := 0, 0.0, 0.0
-			for t := 0; t < 8; t++ {
-				m := goertzelMag(sym, freq+(float64(t)-3.5)*FT8ToneHz, float64(FT8AudioRate))
-				tm += m
-				if m > bm {
-					bm, bt = m, t
-				}
-			}
-			if bt == exp {
-				sc++
-				soft += bm / (tm/8 + 1e-12)
-			}
-		}
-		return sc, soft
-	}
-	bestQ, bestQS, bestOff := 0, -1.0, 0
-	for off := 0; off <= maxOff; off += FT8SymSamples {
-		sc, soft := quickScoreAt(off, centerHz)
-		if sc > bestQ || (sc == bestQ && soft > bestQS) {
-			bestQ, bestQS, bestOff = sc, soft, off
-		}
-	}
-	// Sub-symbol refinement in two stages (eighth-symbol, then ~1.5 ms):
-	// a partial-symbol skew smears tone energy between neighbours and
-	// wrecks the soft decisions — LDPC can only fix so much of that.
-	for _, step := range []int{160, 20} {
-		span := step * 8
-		base := bestOff
-		for sub := -span; sub <= span; sub += step {
-			off := base + sub
-			if off < 0 || off > maxOff {
-				continue
-			}
-			sc, soft := quickScoreAt(off, centerHz)
-			if sc > bestQ || (sc == bestQ && soft > bestQS) {
-				bestQ, bestQS, bestOff = sc, soft, off
-			}
-		}
-	}
-	// Frequency refinement: the FFT candidate snaps to the 6.25 Hz grid
-	// with up to ±3 Hz of error, and a tone sitting between two bins
-	// degrades every soft decision across the whole message. Sweep
-	// fractional offsets and re-align timing at the winner.
-	bestF := centerHz
-	for _, df := range []float64{0, 0.78125, -0.78125, 1.5625, -1.5625, 2.34375, -2.34375, 3.125, -3.125} {
-		sc, soft := quickScoreAt(bestOff, centerHz+df)
-		if sc > bestQ || (sc == bestQ && soft > bestQS) {
-			bestQ, bestQS, bestF = sc, soft, centerHz+df
-		}
-	}
-	for sub := -160; sub <= 160; sub += 20 {
-		off := bestOff + sub
-		if off < 0 || off > maxOff {
-			continue
-		}
-		sc, soft := quickScoreAt(off, bestF)
-		if sc > bestQ || (sc == bestQ && soft > bestQS) {
-			bestQ, bestQS, bestOff = sc, soft, off
-		}
-	}
-	// Confirm the candidate against all three Costas blocks.
-	bestSync, bestScore := scoreAt(bestOff, bestF)
-	if bestSync < 13 {
-		return FT8Detection{}, false, 0
-	}
-	return FT8Detection{
-		FreqHz:     bestF,
-		SNRDb:      10 * math.Log10(bestScore/21+1e-12),
-		Confidence: float64(bestSync) / 21,
-	}, true, bestOff
-}
-
-// ft8DecodeAt extracts soft bit LLRs for the 58 data symbols at the
-// sync'd offset and runs the LDPC/CRC decode.
-func ft8DecodeAt(audio []float64, off int, centerHz float64) (*FT8Message, string) {
-	if off < 0 || off+FT8FrameSamp > len(audio) {
-		return nil, "off"
-	}
-	llr := make([]float64, 174)
-	mag := make([]float64, 8)
-	k := 0
-	for sym := 7; sym < 72; sym++ {
-		if sym >= 36 && sym < 43 { // second Costas block
-			continue
-		}
-		s := off + sym*FT8SymSamples
-		symAudio := audio[s : s+FT8SymSamples]
-		for t := 0; t < 8; t++ {
-			mag[t] = goertzelMag(symAudio, centerHz+(float64(t)-3.5)*FT8ToneHz, float64(FT8AudioRate))
-		}
-		// s2 indexed by 3-bit value; FT8GrayMap maps value → tone.
-		s2 := [8]float64{}
-		for j := 0; j < 8; j++ {
-			s2[j] = mag[FT8GrayMap[j]]
-		}
-		llr[3*k] = math.Max(math.Max(s2[4], s2[5]), math.Max(s2[6], s2[7])) -
-			math.Max(math.Max(s2[0], s2[1]), math.Max(s2[2], s2[3]))
-		llr[3*k+1] = math.Max(math.Max(s2[2], s2[3]), math.Max(s2[6], s2[7])) -
-			math.Max(math.Max(s2[0], s2[1]), math.Max(s2[4], s2[5]))
-		llr[3*k+2] = math.Max(math.Max(s2[1], s2[3]), math.Max(s2[5], s2[7])) -
-			math.Max(math.Max(s2[0], s2[2]), math.Max(s2[4], s2[6]))
-		k++
-	}
-	return ft8DecodeCodeword(llr)
-}
 
 func goertzelMag(samples []float64, freqHz, sampleRate float64) float64 {
 	k := 2 * math.Pi * freqHz / sampleRate

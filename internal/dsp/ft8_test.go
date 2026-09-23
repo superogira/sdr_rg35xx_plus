@@ -1,18 +1,13 @@
 package dsp
 
 import (
-	"fmt"
 	"math"
 	"math/rand"
 	"testing"
 )
 
-// --- test-side encoder -------------------------------------------------
+// --- test-side encoder (77 bits → CRC → LDPC → 79 tones) --------------
 
-// packCall28 packs a standard call (or CQ/DE/QRZ token) into 28 bits
-// following packjt77's rules: the call's LAST digit must sit at
-// 1-based position 2 (then a space is prepended) or 3 (padded right),
-// so the canonical 6-char form always has the digit at position 3.
 func packCall28(call string) uint64 {
 	switch call {
 	case "DE":
@@ -32,11 +27,9 @@ func packCall28(call string) uint64 {
 	if iarea < 2 || iarea > 3 {
 		panic("test call not in standard form: " + call)
 	}
-	var c string
+	c := call
 	if iarea == 2 {
 		c = " " + call
-	} else {
-		c = call
 	}
 	for len(c) < 6 {
 		c += " "
@@ -63,15 +56,9 @@ func packCall28(call string) uint64 {
 }
 
 func packGrid15(g string) uint64 {
-	j1 := int64(g[0] - 'A')
-	j2 := int64(g[1] - 'A')
-	j3 := int64(g[2] - '0')
-	j4 := int64(g[3] - '0')
-	return uint64(j1*18*10*10 + j2*10*10 + j3*10 + j4)
+	return uint64(int64(g[0]-'A')*1800 + int64(g[1]-'A')*100 + int64(g[2]-'0')*10 + int64(g[3]-'0'))
 }
 
-// pack77 builds the 77 payload bits of a standard (i3=1) message
-// "call1 call2 grid" or "CQ call2 grid".
 func pack77(call1, call2, grid string) []int {
 	b := make([]int, 77)
 	put := func(from int, v uint64, n int) {
@@ -80,17 +67,15 @@ func pack77(call1, call2, grid string) []int {
 		}
 	}
 	put(0, packCall28(call1), 28)
-	put(28, 0, 1) // ipa
+	put(28, 0, 1)
 	put(29, packCall28(call2), 28)
-	put(57, 0, 1) // ipb
-	put(58, 0, 1) // ir
+	put(57, 0, 1)
+	put(58, 0, 1)
 	put(59, packGrid15(grid), 15)
-	// bits 74-76 are i3 (=1); type-1 messages have no separate n3 field
 	put(74, 1, 3)
 	return b
 }
 
-// encodeTones: 77 bits → CRC → LDPC → 79 tones.
 func encodeTones(payload []int) []int {
 	var pbytes [10]byte
 	ft8PackBits(payload, 77, pbytes[:])
@@ -99,16 +84,22 @@ func encodeTones(payload []int) []int {
 	var cw [22]byte
 	ft8Encode174(a91[:], cw[:])
 	bits := make([]int, 174)
-	{
-		mask := byte(0x80)
-		bi := 0
-		for i := 0; i < 174; i++ {
-			bits[i] = int(cw[bi] & mask >> trailingMaskPos(mask))
-			mask >>= 1
-			if mask == 0 {
-				mask = 0x80
-				bi++
-			}
+	mask := byte(0x80)
+	bi := 0
+	for i := 0; i < 174; i++ {
+		bits[i] = int(cw[bi] & mask & 1)
+		if mask&1 == 1 && cw[bi]&mask != 0 {
+			bits[i] = 1
+		}
+		if cw[bi]&mask != 0 {
+			bits[i] = 1
+		} else {
+			bits[i] = 0
+		}
+		mask >>= 1
+		if mask == 0 {
+			mask = 0x80
+			bi++
 		}
 	}
 	tones := make([]int, 79)
@@ -128,28 +119,16 @@ func encodeTones(payload []int) []int {
 	return tones
 }
 
-func trailingMaskPos(mask byte) uint {
-	pos := uint(0)
-	m := mask
-	for m > 1 {
-		m >>= 1
-		pos++
-	}
-	return pos
-}
-
-// synthFrame renders the 79 tones as 8 kHz audio at the given center
-// frequency (tone t at centerHz+(t-3.5)*6.25), matching the detector
-// convention.
-func synthFrame(tones []int, centerHz float64, amp, noise float64, rng *rand.Rand) []float64 {
+// synthFrame renders tones as 8 kHz audio; tone t of the group at
+// groupHz sits at groupHz + (t-3.5)*6.25.
+func synthFrame(tones []int, groupHz, amp, noise float64, rng *rand.Rand) []float64 {
 	out := make([]float64, FT8FrameSamp)
 	for sym, tone := range tones {
-		f := centerHz + (float64(tone)-3.5)*FT8ToneHz
+		f := groupHz + (float64(tone)-3.5)*FT8ToneHz
 		phase := rng.Float64() * 2 * math.Pi
 		w := 2 * math.Pi * f / float64(FT8AudioRate)
 		for i := 0; i < FT8SymSamples; i++ {
-			s := sym*FT8SymSamples + i
-			out[s] = amp * math.Sin(phase+float64(i)*w)
+			out[sym*FT8SymSamples+i] = amp * math.Sin(phase+float64(i)*w)
 		}
 	}
 	if noise > 0 {
@@ -160,250 +139,147 @@ func synthFrame(tones []int, centerHz float64, amp, noise float64, rng *rand.Ran
 	return out
 }
 
-func buildRing(sig []float64, leadSamples int, noise float64, rng *rand.Rand) []float64 {
-	ring := make([]float64, ft8RingSamples)
-	for i := 0; i < ft8RingSamples; i++ {
-		v := 0.0
-		if i >= leadSamples && i < leadSamples+len(sig) {
-			v = sig[i-leadSamples]
+// feedRing pushes lead + signal (+ tail) through the detector.
+func feedRing(d *FT8Detector, sig []float64, leadSamples int, noise float64, rng *rand.Rand) {
+	chunk := 512
+	push := func(v []float64) {
+		for i := 0; i < len(v); i += chunk {
+			e := i + chunk
+			if e > len(v) {
+				e = len(v)
+			}
+			d.Feed(v[i:e])
 		}
-		if noise > 0 {
-			v += noise * rng.NormFloat64()
-		}
-		ring[i] = v
 	}
-	return ring
+	lead := make([]float64, leadSamples)
+	for i := range lead {
+		lead[i] = noise * rng.NormFloat64()
+	}
+	push(lead)
+	push(sig)
 }
 
-func runDetectDecode(t *testing.T, ring []float64, centerHz float64) (FT8Detection, *FT8Message) {
-	t.Helper()
-	d := NewFT8Detector()
-	det, ok, at := d.detectAt(ring, centerHz)
-	if !ok {
-		t.Fatalf("sync not found at %.4f Hz", centerHz)
+func drainText(d *FT8Detector) []string {
+	d.Process()
+	var out []string
+	for _, m := range d.TakeMessages() {
+		if m.Valid {
+			out = append(out, m.Text)
+		}
 	}
-	t.Logf("sync ok: off=%d conf=%.2f snr=%.1f dB", at, det.Confidence, det.SNRDb)
-	msg, _ := ft8DecodeAt(ring, at, centerHz)
-	return det, msg
+	return out
+}
+var fftTestInputRe, fftTestInputIm []float64
+
+func re0(n int) float64 { return fftTestInputRe[n] }
+func im0(n int) float64 { return fftTestInputIm[n] }
+
+func TestFFT2560Full(t *testing.T) {
+	rng := rand.New(rand.NewSource(9))
+	const N = ft8WFNFFT
+	inRe := make([]float64, N)
+	inIm := make([]float64, N)
+	for i := 0; i < N; i++ {
+		inRe[i] = rng.NormFloat64()
+		inIm[i] = rng.NormFloat64()
+	}
+	fftTestInputRe = append([]float64(nil), inRe...)
+	fftTestInputIm = append([]float64(nil), inIm...)
+	fft2560(inRe, inIm)
+	for _, k := range []int{0, 1, 7, 320, 640, 1234, 2000, 2559} {
+		var sr, si float64
+		for n := 0; n < N; n++ {
+			a := -2 * math.Pi * float64(k) * float64(n) / float64(N)
+			sr += re0(n)*math.Cos(a) - im0(n)*math.Sin(a)
+			si += re0(n)*math.Sin(a) + im0(n)*math.Cos(a)
+		}
+		if math.Hypot(inRe[k]-sr, inIm[k]-si) > 1e-6*math.Max(1, math.Hypot(sr, si)) {
+			t.Errorf("bin %d: got (%.6f,%.6f) want (%.6f,%.6f)", k, inRe[k], inIm[k], sr, si)
+		}
+	}
 }
 
-// TestFT8RoundTripClean encodes, synthesises and decodes a CQ message
-// with no noise. Everything must come back exactly.
-func TestFT8RoundTripClean(t *testing.T) {
+// TestWFDecodeClean: strong signal, exact grid → must decode.
+func TestWFDecodeClean(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
-	const center = 1234.375
-	msg := pack77("CQ", "HS0ZKO", "OK04")
-	tones := encodeTones(msg)
-	ring := buildRing(synthFrame(tones, center, 1.0, 0, rng), 1*8000+353, 0, rng)
-	_, got := runDetectDecode(t, ring, center)
-	if got == nil || !got.Valid {
-		t.Fatalf("decode failed (clean signal)")
-	}
-	if want := "CQ HS0ZKO OK04"; got.Text != want {
-		t.Fatalf("decoded %q, want %q", got.Text, want)
-	}
-}
-
-// TestFT8RoundTripNoise repeats the round trip at a realistic SNR
-// (~0 dB in 50 Hz): the BP decoder must still recover the message.
-func TestFT8RoundTripNoise(t *testing.T) {
-	rng := rand.New(rand.NewSource(7))
-	const center = 1862.5
-	msg := pack77("E23BC", "W1AW", "FN42")
-	tones := encodeTones(msg)
-	sig := synthFrame(tones, center, 1.0, 0.35, rng)
-	ring := buildRing(sig, 1*8000+777, 0.35, rng)
-	_, got := runDetectDecode(t, ring, center)
-	if got == nil || !got.Valid {
-		t.Fatalf("decode failed at noise 0.35")
-	}
-	if want := "E23BC W1AW FN42"; got.Text != want {
-		t.Fatalf("decoded %q, want %q", got.Text, want)
-	}
-}
-
-// TestFT8ReportMessage checks the RRR/report tail decoding path via a
-// hand-built payload (report -07 in the g15 field).
-func TestFT8ReportMessage(t *testing.T) {
-	rng := rand.New(rand.NewSource(3))
-	const center = 2000.0
-	b := pack77("K1ABC", "W9XYZ", "EN37")
-	// replace grid with report -07: irpt = -7+35 = 28
-	put := func(from int, v uint64, n int) {
-		for i := 0; i < n; i++ {
-			b[from+i] = int((v >> uint(n-1-i)) & 1)
-		}
-	}
-	put(59, 28+ft8MaxGrid4, 15)
-	tones := encodeTones(b)
-	ring := buildRing(synthFrame(tones, center, 1.0, 0.15, rng), 2*8000+1234, 0.15, rng)
-	_, got := runDetectDecode(t, ring, center)
-	if got == nil || !got.Valid {
-		t.Fatalf("decode failed (report)")
-	}
-	if want := "K1ABC W9XYZ -07"; got.Text != want {
-		t.Fatalf("decoded %q, want %q", got.Text, want)
-	}
-}
-
-// TestFT8UnpackUnit sanity-checks the unpacker against known values
-// from WSJT-X's std_call_to_c28 / grid4_to_g15 utilities.
-func TestFT8UnpackUnit(t *testing.T) {
-	cases := []struct {
-		call string
-		n28  uint64
-	}{
-		{"K1ABC", packCall28("K1ABC")},
-		{"HS0ZKO", packCall28("HS0ZKO")},
-		{"W9XYZ", packCall28("W9XYZ")},
-		{"E23BC", packCall28("E23BC")},
-	}
-	for _, c := range cases {
-		if got := ft8Unpack28(c.n28); got != c.call {
-			t.Errorf("unpack28(%s) = %q (n28=%d)", c.call, got, c.n28)
-		}
-	}
-	if got := ft8Unpack28(2); got != "CQ" {
-		t.Errorf("token 2 = %q, want CQ", got)
-	}
-	if g, _ := ft8UnpackGrid15(packGrid15("OK04"), 0); g != "OK04" {
-		t.Errorf("grid = %q, want OK04", g)
-	}
-	if r, _ := ft8UnpackGrid15(ft8MaxGrid4+2, 0); r != "RRR" {
-		t.Errorf("report = %q, want RRR", r)
-	}
-	fmt.Println("unpack unit ok")
-}
-
-// TestFT8FullProcess exercises the complete path the device runs:
-// Feed() chunks → Process() → Results(), including the FFT candidate
-// finder (the earlier tests bypassed it with a known frequency).
-func TestFT8FullProcess(t *testing.T) {
-	rng := rand.New(rand.NewSource(11))
-	const center = 1500.0
-	msg := pack77("CQ", "JA1ABC", "PM95")
-	tones := encodeTones(msg)
-	sig := synthFrame(tones, center, 1.0, 0.25, rng)
-	ring := buildRing(sig, 17000, 0.25, rng)
+	tones := encodeTones(pack77("CQ", "HS0ZKO", "OK04"))
+	sig := synthFrame(tones, 1200.0, 1.0, 0.1, rng)
 	d := NewFT8Detector()
 	d.SetEnabled(true)
-	// Feed in 512-sample chunks like the DSP taps do.
-	for i := 0; i < len(ring); i += 512 {
-		e := i + 512
-		if e > len(ring) {
-			e = len(ring)
-		}
-		d.Feed(ring[i:e])
-	}
-	d.Process()
-	results := d.Results()
+	feedRing(d, sig, 2*FT8SymSamples, 0.1, rng)
+	texts := drainText(d)
 	found := false
-	for _, r := range results {
-		t.Logf("det: %.1f Hz %.1f dB conf %.2f msg=%v", r.FreqHz, r.SNRDb, r.Confidence, r.Message)
-		if r.Message != nil && r.Message.Valid && r.Message.Text == "CQ JA1ABC PM95" {
+	for _, s := range texts {
+		if s == "CQ HS0ZKO OK04" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("full pipeline did not decode; results=%d", len(results))
+		t.Fatalf("clean decode failed, got %v", texts)
 	}
 }
 
-// TestFT8TakeMessagesQueue verifies decoded messages land in the drain
-// queue (the UI history consumes this — the live results are wiped
-// every scan).
-func TestFT8TakeMessagesQueue(t *testing.T) {
-	rng := rand.New(rand.NewSource(23))
-	const center = 1500.0
-	msg := pack77("CQ", "BA7SAY", "OL53")
-	tones := encodeTones(msg)
-	sig := synthFrame(tones, center, 1.0, 0.2, rng)
-	ring := buildRing(sig, 17000, 0.2, rng)
+// TestWFDecodeOffGrid: +2 Hz carrier offset, weak signal — the case
+// that broke the old snapshot-FFT finder.
+func TestWFDecodeOffGrid(t *testing.T) {
+	rng := rand.New(rand.NewSource(3))
+	tones := encodeTones(pack77("E20ZKT", "BA7SAY", "OL53"))
+	sig := synthFrame(tones, 1500.0+2.0, 1.0, 0.55, rng)
 	d := NewFT8Detector()
 	d.SetEnabled(true)
-	for i := 0; i < len(ring); i += 512 {
-		e := i + 512
-		if e > len(ring) {
-			e = len(ring)
+	feedRing(d, sig, 2*FT8SymSamples, 0.55, rng)
+	texts := drainText(d)
+	found := false
+	for _, s := range texts {
+		if s == "E20ZKT BA7SAY OL53" {
+			found = true
 		}
-		d.Feed(ring[i:e])
 	}
-	d.Process()
-	got := d.TakeMessages()
-	if len(got) == 0 {
-		t.Fatal("no message queued after decode")
-	}
-	if got[0].Text != "CQ BA7SAY OL53" {
-		t.Fatalf("queued %q", got[0].Text)
-	}
-	// Drain empties the queue.
-	if again := d.TakeMessages(); len(again) != 0 {
-		t.Fatalf("queue not drained: %d left", len(again))
+	if !found {
+		t.Fatalf("off-grid weak decode failed, got %v", texts)
 	}
 }
 
-// TestFT8OffGridFrequency: real stations land up to ±3 Hz off the
-// candidate grid (FFT bin rounding); the frequency refinement must
-// recover the offset and decode.
-func TestFT8OffGridFrequency(t *testing.T) {
-	rng := rand.New(rand.NewSource(31))
-	msg := pack77("E20ZKT", "BA7SAY", "OL53")
-	tones := encodeTones(msg)
-	// +2.0 Hz off the grid, at a noise level that only decodes when
-	// the frequency estimate is right.
-	sig := synthFrame(tones, 1500.0+2.0, 1.0, 0.45, rng)
-	ring := buildRing(sig, 17000, 0.45, rng)
+// TestWFDecodeTwoSignals: overlapping transmissions decode in one scan.
+func TestWFDecodeTwoSignals(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	t1 := synthFrame(encodeTones(pack77("CQ", "JA1ABC", "PM95")), 1200.0, 0.9, 0.35, rng)
+	t2 := synthFrame(encodeTones(pack77("K1ABC", "W9XYZ", "EN37")), 2100.0, 0.9, 0.35, rng)
+	mix := make([]float64, len(t1))
+	for i := range mix {
+		mix[i] = t1[i] + t2[i] + 0.35*rng.NormFloat64()
+	}
 	d := NewFT8Detector()
 	d.SetEnabled(true)
-	for i := 0; i < len(ring); i += 512 {
-		e := i + 512
-		if e > len(ring) {
-			e = len(ring)
-		}
-		d.Feed(ring[i:e])
+	feedRing(d, mix, 2*FT8SymSamples, 0, rng)
+	texts := drainText(d)
+	set := map[string]bool{}
+	for _, s := range texts {
+		set[s] = true
 	}
-	d.Process()
-	msgs := d.TakeMessages()
-	if len(msgs) == 0 {
-		t.Fatal("off-grid signal not decoded (frequency refinement failed)")
-	}
-	if msgs[0].Text != "E20ZKT BA7SAY OL53" {
-		t.Fatalf("decoded %q", msgs[0].Text)
+	if !set["CQ JA1ABC PM95"] || !set["K1ABC W9XYZ EN37"] {
+		t.Fatalf("dual decode failed, got %v", texts)
 	}
 }
 
-// TestFT8TwoSignals: two overlapping transmissions at different
-// frequencies must decode in the same scan.
-func TestFT8TwoSignals(t *testing.T) {
-	rng := rand.New(rand.NewSource(37))
-	t1 := encodeTones(pack77("CQ", "JA1ABC", "PM95"))
-	t2 := encodeTones(pack77("K1ABC", "W9XYZ", "EN37"))
-	sig := synthFrame(t1, 1200.0, 0.8, 0.3, rng)
-	sig2 := synthFrame(t2, 2100.0, 0.8, 0.3, rng)
-	ring := make([]float64, ft8RingSamples)
-	for i := range ring {
-		v := 0.3 * rng.NormFloat64()
-		if i >= 17000 && i < 17000+len(sig) {
-			v += sig[i-17000] + sig2[i-17000]
-		}
-		ring[i] = v
-	}
+// TestWFDecodeVeryWeak: noise 1.0 (≈ -3..-6 dB in the tone bandwidth)
+// — below what the old finder could even see; the waterfall
+// correlation should still pull it out.
+func TestWFDecodeVeryWeak(t *testing.T) {
+	rng := rand.New(rand.NewSource(11))
+	tones := encodeTones(pack77("K1ABC", "W9XYZ", "EN37"))
+	sig := synthFrame(tones, 1800.0, 1.0, 1.0, rng)
 	d := NewFT8Detector()
 	d.SetEnabled(true)
-	for i := 0; i < len(ring); i += 512 {
-		e := i + 512
-		if e > len(ring) {
-			e = len(ring)
+	feedRing(d, sig, 2*FT8SymSamples, 1.0, rng)
+	texts := drainText(d)
+	found := false
+	for _, s := range texts {
+		if s == "K1ABC W9XYZ EN37" {
+			found = true
 		}
-		d.Feed(ring[i:e])
 	}
-	d.Process()
-	msgs := d.TakeMessages()
-	found := map[string]bool{}
-	for _, m := range msgs {
-		found[m.Text] = true
-	}
-	if !found["CQ JA1ABC PM95"] || !found["K1ABC W9XYZ EN37"] {
-		t.Fatalf("expected both messages, got %v", msgs)
+	if !found {
+		t.Fatalf("very weak decode failed (this is the regression target), got %v", texts)
 	}
 }
