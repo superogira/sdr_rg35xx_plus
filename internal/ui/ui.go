@@ -232,6 +232,11 @@ type FrameStats struct {
 	Volume      float64
 	GainText    string
 	Host        string
+
+	// System diagnostics (updated ~1 Hz).
+	CpuPct float64
+	MemPct float64
+	SwpPct float64
 }
 
 func New(w, h int) *UI {
@@ -399,10 +404,14 @@ func (u *UI) Frame(stats FrameStats) *image.RGBA {
 	u.drawSpanLabels()
 
 	// Only redraw the bottom bar when something visible changed.
-	barKey := fmt.Sprintf("%v|%v|%v|%v|%v|%v|%v|%v|%v",
+	// Quantize frequently-changing values so the bar cache survives:
+	// PowerDb swings every DSP block (~16 ms) which without rounding
+	// forced a full Thai-glyph re-render every single frame.
+	barKey := fmt.Sprintf("%v|%v|%v|%v|%0.0f|%v|%0.0f|%v|%v|%0.0f|%0.0f|%0.0f",
 		stats.FreqHz, stats.Mode, stats.Connected, stats.StatusText,
-		stats.PowerDb, stats.SquelchOpen, stats.Volume, stats.GainText,
-		u.SpanFull)
+		math.Round(stats.PowerDb), stats.SquelchOpen,
+		math.Round(stats.Volume*100), stats.GainText,
+		u.SpanFull, math.Round(stats.CpuPct), math.Round(stats.MemPct), math.Round(stats.SwpPct))
 	if barKey != u.lastBarKey {
 		u.lastBarKey = barKey
 		u.drawBottomBar()
@@ -557,6 +566,9 @@ func (u *UI) drawBottomBar() {
 			statusText = "ไม่ได้เชื่อมต่อ " + s.Host
 		}
 	}
+	sysText := fmt.Sprintf("C%.0f M%.0f S%.0f", s.CpuPct, s.MemPct, s.SwpPct)
+	sw2 := status.TextWidth(sysText)
+	status.DrawString(u.img, color.RGBA{100, 180, 100, 255}, u.W-sw2-160, u.H-8, sysText)
 	status.DrawString(u.img, col, 12, u.H-8, statusText)
 
 	// Step + button hints (bottom right).

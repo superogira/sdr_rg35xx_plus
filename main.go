@@ -40,6 +40,7 @@ import (
 	"sdr35/internal/i18n"
 	"sdr35/internal/input"
 	"sdr35/internal/radio"
+	"sdr35/internal/sysinfo"
 	"sdr35/internal/ui"
 )
 
@@ -911,6 +912,7 @@ func main() {
 				}
 			}()
 		}
+		sysinfo.Read()
 		r.FT8Process()
 		// Poll results once per 15 s cycle (aligned with FT8 slots);
 		// the detector itself only processes when it has enough data.
@@ -972,6 +974,7 @@ func main() {
 		if m := upd.Msg(); m != "" {
 			status = m
 		}
+		cpu, mem, swp := sysinfo.Snapshot()
 		frame := u.Frame(ui.FrameStats{
 			FreqHz:      r.Freq(),
 			Mode:        r.Mode().Name,
@@ -984,6 +987,9 @@ func main() {
 			Volume:      r.Volume(),
 			GainText:    r.GainText() + " · " + r.SquelchLabel(),
 			Host:        r.Hostname(),
+			CpuPct:      cpu,
+			MemPct:      mem,
+			SwpPct:      swp,
 		})
 		// Settings overlays on top of the composed frame.
 		if uiMode == uiMenu {
