@@ -35,6 +35,37 @@ func (u *UI) SetSpanKHz(khz int) {
 	u.SpanFull = khz * 1000
 }
 
+// FT8Entry is one line in the FT8 message log overlay.
+type FT8Entry struct {
+	Time string
+	Text string
+}
+
+// DrawFT8Log renders a semi-transparent log of the latest FT8 decodes
+// in the bottom-left corner of the waterfall area.
+func (u *UI) DrawFT8Log(entries []FT8Entry) {
+	if len(entries) == 0 {
+		return
+	}
+	maxShow := 6
+	if len(entries) > maxShow {
+		entries = entries[len(entries)-maxShow:]
+	}
+	lh := 15
+	pw := 320
+	ph := len(entries)*lh + 8
+	px := 4
+	py := u.WaterfallRows - ph - 4
+	u.fillBlend(px, py, pw, ph, 0, 0, 0, 180)
+	green := color.RGBA{100, 255, 100, 255}
+	tf := Face(11, false)
+	for i, e := range entries {
+		y := py + 14 + i*lh
+		tf.DrawString(u.img, color.RGBA{150, 180, 150, 255}, px+4, y, e.Time)
+		tf.DrawString(u.img, green, px+50, y, e.Text)
+	}
+}
+
 // MenuItem is one row of the settings menu.
 type MenuItem struct {
 	Label string

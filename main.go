@@ -439,6 +439,9 @@ func main() {
 	}
 	// Screenshot support: the last presented frame and a transient status
 	// message pointing at the saved file (triggered from the menu).
+	ft8Log := make([]ui.FT8Entry, 0, 12)
+	var lastFT8Poll time.Time
+
 	var lastFrame *image.RGBA
 	capturedMsg := ""
 	var capturedAt time.Time
@@ -486,6 +489,7 @@ func main() {
 		menuSample
 		menuBW
 		menuDS
+		menuFT8
 		menuAGC
 		menuHost
 		menuLang
@@ -583,6 +587,8 @@ func main() {
 			default:
 				r.SetDirectSamplingMode(-1)
 			}
+		case menuFT8:
+			r.SetFT8Enabled(!r.FT8Enabled())
 		case menuAGC:
 			r.SetAGCEnabled(!r.AGCEnabled())
 		case menuHost:
@@ -655,6 +661,10 @@ func main() {
 				if v, err := strconv.ParseFloat(bw, 64); err == nil {
 					r.SetBandwidth(v)
 				}
+			}
+		case input.Y:
+			if r.FT8Enabled() {
+				r.SyncFT8()
 			}
 		case input.X:
 			r.CycleSquelch()
@@ -809,6 +819,8 @@ func main() {
 		case <-tick.C:
 		}
 
+		r.FT8Process()
+
 		if pad != nil {
 			pad.Poll()
 			for _, ev := range pad.Events() {
@@ -877,6 +889,15 @@ func main() {
 		u.NewSpectrumRow(r.Tap(), r.RawTap())
 		snap := r.Snapshot()
 		status := snap.StatusText
+		if ft8s := r.FT8Results(); len(ft8s) > 0 {
+			best := ft8s[0]
+			for _, d := range ft8s[1:] {
+				if d.SNRDb > best.SNRDb {
+					best = d
+				}
+			}
+			status = fmt.Sprintf("FT8: %.0f Hz %.0f dB (%.0f%%)", best.FreqHz, best.SNRDb, best.Confidence*100)
+		}
 		if exitHint != "" {
 			status = exitHint
 		}
@@ -885,6 +906,16 @@ func main() {
 		}
 		if m := upd.Msg(); m != "" {
 			status = m
+		}
+		if r.FT8Enabled() && time.Since(lastFT8Poll) >= 15*time.Second {
+			lastFT8Poll = time.Now()
+			for _, det := range r.FT8Results() {
+				text := fmt.Sprintf("%.0f Hz %.0f dB", det.FreqHz, det.SNRDb)
+				ft8Log = append(ft8Log, ui.FT8Entry{Time: time.Now().Format("15:04:05"), Text: text})
+				if len(ft8Log) > 12 {
+					ft8Log = ft8Log[len(ft8Log)-12:]
+				}
+			}
 		}
 		cpu, mem, swp := sysinfo.Snapshot()
 		frame := u.Frame(ui.FrameStats{
@@ -922,6 +953,7 @@ func main() {
 				{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
 				{Label: "Host / IP", Value: r.Hostname()},
 				{Label: i18n.T("m_lang"), Value: langLabel()},
+				{Label: "FT8 Decode", Value: ft8Label(r.FT8Enabled())},
 				{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
 				{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 				{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
@@ -932,6 +964,9 @@ func main() {
 			u.DrawFreqEditor(editDigits, editCursor)
 		} else if uiMode == uiHostEdit {
 			u.DrawKeyboard(hostText, len(hostText), hostKbR, hostKbC)
+		}
+		if r.FT8Enabled() && len(ft8Log) > 0 && uiMode == uiMain {
+			u.DrawFT8Log(ft8Log)
 		}
 		lastFrame = frame
 		if err := disp.Present(frame); err != nil {
@@ -965,6 +1000,13 @@ var kbRows = []string{
 	"0123456789",
 	"abcdefghijklmnopqrstuvwxyz",
 	".:-_/ ",
+}
+
+func ft8Label(on bool) string {
+	if on {
+		return "เปิด"
+	}
+	return "ปิด"
 }
 
 func langLabel() string {

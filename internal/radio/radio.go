@@ -74,7 +74,9 @@ type Radio struct {
 	iqRate    int     // capture sample rate in Hz (server default 2.048M)
 	dsMode    int     // -1 auto (DS below 24 MHz), 0 force off, 2 force on (Q)
 	agcOn     bool    // SSB/CW AGC enabled
-	hfApplied int     // direct-sampling mode currently set on the server
+	ft8On     bool
+	ft8       *dsp.FT8Detector
+	hfApplied int // direct-sampling mode currently set on the server
 
 	client  *rtltcp.Client
 	gains   int32
@@ -118,6 +120,7 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		sqlDb:  8,
 		iqRate: 2_048_000,
 		agcOn:  true,
+		ft8:    dsp.NewFT8Detector(),
 		chain:  dsp.NewChain(mode, nil, nil),
 	}
 }
@@ -595,6 +598,76 @@ func (r *Radio) SetHost(host string) {
 		client.Close() // reconnect to the new address
 	}
 	fmt.Fprintf(os.Stderr, "radio: host now %s (reconnecting)\n", host)
+}
+
+// FT8Enabled reports whether FT8 detection is active.
+func (r *Radio) FT8Enabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ft8On
+}
+
+// SetFT8Enabled toggles FT8 detection.
+func (r *Radio) SetFT8Enabled(on bool) {
+	r.mu.Lock()
+	r.ft8On = on
+	r.ft8.SetEnabled(on)
+	chain := r.chain
+	r.mu.Unlock()
+	if chain != nil {
+		if on {
+			chain.SetFT8Detector(r.ft8)
+		} else {
+			chain.SetFT8Detector(nil)
+		}
+	}
+	fmt.Fprintf(os.Stderr, "radio: FT8 %v\n", on)
+}
+
+// SyncFT8 marks now as end of a transmission.
+func (r *Radio) SyncFT8() {
+	r.mu.Lock()
+	det := r.ft8
+	r.mu.Unlock()
+	if det != nil {
+		det.Sync()
+	}
+}
+
+// FT8Synced reports whether user has synced.
+func (r *Radio) FT8Synced() bool {
+	r.mu.Lock()
+	det := r.ft8
+	r.mu.Unlock()
+	return det != nil && det.IsSynced()
+}
+
+// FT8Results returns latest detections.
+func (r *Radio) FT8Results() []dsp.FT8Detection {
+	r.mu.Lock()
+	det := r.ft8
+	r.mu.Unlock()
+	if det == nil {
+		return nil
+	}
+	return det.Results()
+}
+
+var ft8Busy bool
+
+// FT8Process runs detector analysis in a background goroutine.
+func (r *Radio) FT8Process() {
+	r.mu.Lock()
+	det := r.ft8
+	r.mu.Unlock()
+	if det == nil || !det.Enabled() || ft8Busy {
+		return
+	}
+	ft8Busy = true
+	go func() {
+		defer func() { ft8Busy = false }()
+		det.Process()
+	}()
 }
 
 // Hostname returns the host label the UI should display.
