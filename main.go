@@ -912,11 +912,11 @@ func main() {
 				}
 			}()
 		}
-		sysinfo.Read()
-		r.FT8Process()
+		// DISABLED FOR TESTING: sysinfo.Read()
+		// DISABLED FOR TESTING: r.FT8Process()
 		// Poll results once per 15 s cycle (aligned with FT8 slots);
 		// the detector itself only processes when it has enough data.
-		if r.FT8Enabled() && time.Since(lastFT8Check) >= 15*time.Second {
+		if false && r.FT8Enabled() && time.Since(lastFT8Check) >= 15*time.Second {
 			lastFT8Check = time.Now()
 			for _, det := range r.FT8Results() {
 				text := fmt.Sprintf("%.0f Hz %.0f dB", det.FreqHz, det.SNRDb)
@@ -951,20 +951,7 @@ func main() {
 		u.NewSpectrumRow(r.Tap(), r.RawTap())
 		snap := r.Snapshot()
 		status := snap.StatusText
-		if ft8s := r.FT8Results(); len(ft8s) > 0 {
-			best := ft8s[0]
-			for _, d := range ft8s[1:] {
-				if d.SNRDb > best.SNRDb {
-					best = d
-				}
-			}
-			if best.Message != nil && best.Message.Valid {
-				m := best.Message
-				status = fmt.Sprintf("FT8: %s→%s %s (%.0f Hz %.0f dB)", m.CallsignFrom, m.CallsignTo, m.Grid, best.FreqHz, best.SNRDb)
-			} else {
-				status = fmt.Sprintf("FT8: %.0f Hz SNR %.0f dB (%.0f%% sync)", best.FreqHz, best.SNRDb, best.Confidence*100)
-			}
-		}
+		// FT8 status disabled
 		if exitHint != "" {
 			status = exitHint
 		}
