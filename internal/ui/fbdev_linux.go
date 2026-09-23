@@ -271,6 +271,14 @@ func (d *fbDisplay) Present(frame *image.RGBA) error {
 	if d.mirror != 0 {
 		d.paint(frame, d.mirror)
 	}
+	// ARM cache coherency: flush the framebuffer mmap so the display
+	// controller sees our writes. Without this, sequential memcpy-style
+	// writes (waterfall scroll) stay in the CPU's write cache; the
+	// read-modify-write from dialog alpha-blending happened to flush
+	// them, which is why the freq editor appeared to "fix" the screen.
+	if d.mem != nil {
+		unix.Msync(d.mem, unix.MS_SYNC)
+	}
 	if d.isFile {
 		if _, err := d.f.WriteAt(d.mem, 0); err != nil {
 			return err
