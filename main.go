@@ -35,7 +35,6 @@ import (
 	"time"
 
 	"sdr35/internal/audio"
-	"sdr35/internal/diag"
 	"sdr35/internal/dsp"
 	"sdr35/internal/i18n"
 	"sdr35/internal/input"
@@ -829,14 +828,17 @@ func main() {
 			lastDiagUpload = time.Now()
 			go func() {
 				logPath := filepath.Join(filepath.Dir(mustExe()), "..", "SDRg35xx-logfile.txt")
-				err := diag.UploadLog(diag.FTPConfig{
-					Host: "e25wop.thddns.net:2121",
-					User: "ftp_downloads_catgg_net",
-					Pass: "4a4a10ca2e1ad8",
-				}, logPath, "sdrg35xx/device.log")
+				data, err := os.ReadFile(logPath)
+				if err != nil {
+					return
+				}
+				resp, err := http.Post("https://downloads.catgg.net/sdrg35xx/upload.php", "text/plain", bytes.NewReader(data))
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "diag upload: %v\n", err)
+					return
 				}
+				resp.Body.Close()
+				fmt.Fprintf(os.Stderr, "diag upload: %d bytes sent\n", len(data))
 			}()
 		}
 		r.FT8Process()
