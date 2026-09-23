@@ -214,6 +214,9 @@ type UI struct {
 	floor float64
 
 	stats FrameStats
+
+	// Bottom-bar cache key (nil = force redraw on first frame).
+	lastBarKey string
 }
 
 // FrameStats is everything the bottom bar and overlays show.
@@ -277,16 +280,19 @@ func (u *UI) initLUT() {
 }
 
 func (u *UI) clearAll() {
-	black := color.RGBA{0, 0, 0, 255}
-	for y := 0; y < u.H; y++ {
-		for x := 0; x < u.W; x++ {
-			u.img.SetRGBA(x, y, black)
-		}
+	// Direct memory fill (pixel-by-pixel SetRGBA was 100x slower on the
+	// A53 and caused the UI to appear frozen for the first minute).
+	for i := 0; i < len(u.img.Pix); i += 4 {
+		u.img.Pix[i] = 0
+		u.img.Pix[i+1] = 0
+		u.img.Pix[i+2] = 0
+		u.img.Pix[i+3] = 255
 	}
-	for y := 0; y < u.WaterfallRows; y++ {
-		for x := 0; x < u.W; x++ {
-			u.wf.SetRGBA(x, y, black)
-		}
+	for i := 0; i < len(u.wf.Pix); i += 4 {
+		u.wf.Pix[i] = 0
+		u.wf.Pix[i+1] = 0
+		u.wf.Pix[i+2] = 0
+		u.wf.Pix[i+3] = 255
 	}
 }
 
@@ -381,7 +387,9 @@ func (u *UI) NewSpectrumRow(tap, rawTap *dsp.SpectrumTap) bool {
 
 // Frame composes one screen: a fresh copy of the waterfall history with
 // the overlays (center line, span labels) and the bottom bar drawn on top,
-// then returns the image for presenting.
+// then returns the image for presenting. The bottom bar is cached — it's
+// only redrawn when the displayed values change (Thai text rasterization
+// is expensive on the A53 at 30fps).
 func (u *UI) Frame(stats FrameStats) *image.RGBA {
 	u.stats = stats
 	// Fresh waterfall copy: overlays from the previous frame are gone,
@@ -389,7 +397,16 @@ func (u *UI) Frame(stats FrameStats) *image.RGBA {
 	copy(u.img.Pix[:u.WaterfallRows*u.img.Stride], u.wf.Pix)
 	u.drawCenterLine()
 	u.drawSpanLabels()
-	u.drawBottomBar()
+
+	// Only redraw the bottom bar when something visible changed.
+	barKey := fmt.Sprintf("%v|%v|%v|%v|%v|%v|%v|%v|%v",
+		stats.FreqHz, stats.Mode, stats.Connected, stats.StatusText,
+		stats.PowerDb, stats.SquelchOpen, stats.Volume, stats.GainText,
+		u.SpanFull)
+	if barKey != u.lastBarKey {
+		u.lastBarKey = barKey
+		u.drawBottomBar()
+	}
 	return u.img
 }
 
