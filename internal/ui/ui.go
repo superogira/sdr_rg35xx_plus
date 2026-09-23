@@ -7,10 +7,11 @@ import (
 	"image/png"
 	"math"
 	"os"
-	"sdr35/internal/i18n"
+	"sort"
 	"strings"
 
 	"sdr35/internal/dsp"
+	"sdr35/internal/i18n"
 )
 
 // SavePNG writes a rendered frame to disk (the menu screenshot action).
@@ -444,43 +445,49 @@ func (u *UI) clearAll() {
 // samples and draws the newest spectrum on top. Returns true when the
 // waterfall advanced.
 func (u *UI) NewSpectrumRow(tap, rawTap *dsp.SpectrumTap) bool {
-	// Pick the source: the decimated IF tap for spans inside the IF
-	// (fine 500 Hz bins), the raw full-rate tap for wider views.
+	// Pick the source: the decimated IF tap for spans inside the IF,
+	// the raw full-rate tap for wider views.
 	src := tap
 	srcRate := dsp.IF2Rate
 	if u.SpanFull/2 > dsp.IF2Rate/2 {
 		src = rawTap
 		srcRate = dsp.IQRate
 	}
-	g := src.Snapshot(u.snap)
+	// FFT size for sub-pixel frequency resolution: aim ≥1 bin per
+	// pixel (span/W Hz per pixel), power of two, capped at the tap's
+	// history. 500 Hz bins at zoomed spans smeared one bin over ~27
+	// pixels — the chunky blocks this replaces.
+	want := int(float64(srcRate) * float64(u.W) / float64(u.SpanFull))
+	n := 512
+	for n < want && n < dsp.TapLen {
+		n *= 2
+	}
+	g := src.SnapshotN(u.snap[:n])
 	if g == 0 || g == u.lastG {
 		return false
 	}
 	u.lastG = g
 
-	n := len(u.snap)
+	// Window/FFT on exactly the n-point view — the scratch arrays are
+	// TapLen long and stale tails would corrupt the bins.
+	re, im := u.re[:n], u.im[:n]
 	for i := 0; i < n; i++ {
-		u.re[i] = real(u.snap[i])
-		u.im[i] = imag(u.snap[i])
+		re[i] = real(u.snap[i])
+		im[i] = imag(u.snap[i])
 	}
-	dsp.HannWindow(u.re, u.im)
-	dsp.FFT(u.re, u.im)
+	dsp.HannWindow(re, im)
+	dsp.FFT(re, im)
 
 	// Power per bin (fftshifted: index 0 = lowest frequency).
 	power := make([]float64, n)
 	for i := 0; i < n; i++ {
-		power[i] = 20 * math.Log10(math.Hypot(u.re[(i+n/2)%n], u.im[(i+n/2)%n])+1e-12)
+		power[i] = 20 * math.Log10(math.Hypot(re[(i+n/2)%n], im[(i+n/2)%n])+1e-12)
 	}
 
 	// Track the noise floor as the 25th percentile and normalize to it.
 	sorted := append([]float64(nil), power...)
-	bins := sorted
-	for i := 1; i < len(bins); i++ { // tiny n, insertion sort is fine
-		for j := i; j > 0 && bins[j] < bins[j-1]; j-- {
-			bins[j], bins[j-1] = bins[j-1], bins[j]
-		}
-	}
-	noise := bins[len(bins)/4]
+	sort.Float64s(sorted) // n can reach TapLen — O(n log n) mandatory
+	noise := sorted[len(sorted)/4]
 	u.floor += 0.05 * (noise - u.floor)
 
 	// Scroll the waterfall history down one row (the pure waterfall

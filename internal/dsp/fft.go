@@ -58,7 +58,9 @@ type SpectrumTap struct {
 	gen uint64 // bumped on every Push
 }
 
-const TapLen = 512
+// TapLen is the retained history: enough samples for the finest zoom
+// FFT (16k points at 256 ksps → 15.6 Hz bins).
+const TapLen = 16384
 
 func NewSpectrumTap() *SpectrumTap {
 	return &SpectrumTap{buf: make([]complex128, TapLen)}
@@ -81,11 +83,18 @@ func (t *SpectrumTap) Push(block []complex128) {
 	t.gen++
 }
 
-// Snapshot copies the current buffer into dst (len == TapLen) and returns
-// its generation. Returns gen 0 if nothing has been pushed yet.
-func (t *SpectrumTap) Snapshot(dst []complex128) uint64 {
+// SnapshotN copies the NEWEST len(dst) samples into dst (len(dst) must
+// be ≤ TapLen — powers of two for the UI's FFT) and returns the
+// generation. The newest samples sit at the ring's tail.
+func (t *SpectrumTap) SnapshotN(dst []complex128) uint64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	copy(dst, t.buf)
+	copy(dst, t.buf[len(t.buf)-len(dst):])
 	return t.gen
+}
+
+// Snapshot copies the newest len(dst) samples and returns the
+// generation. Returns gen 0 if nothing has been pushed yet.
+func (t *SpectrumTap) Snapshot(dst []complex128) uint64 {
+	return t.SnapshotN(dst)
 }
