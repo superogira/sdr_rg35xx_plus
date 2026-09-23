@@ -417,7 +417,7 @@ func main() {
 	// Boot frame right away: a solid color on screen proves the whole
 	// display path before anything else can hang, and exercises the first
 	// Present (which also runs the pan + mirror logic) immediately.
-	boot := u.Frame(ui.FrameStats{FreqHz: *freq, Mode: dspMode.Name, StepHz: 12_500, StatusText: i18n.T("starting")})
+	boot := u.Frame(ui.FrameStats{FreqHz: *freq, LOHz: *freq, Mode: dspMode.Name, StepHz: 12_500, StatusText: i18n.T("starting")})
 	if err := disp.Present(boot); err != nil {
 		fmt.Fprintf(os.Stderr, "boot present: %v\n", err)
 		return
@@ -1311,6 +1311,13 @@ func main() {
 			}
 		}
 		cpu, mem, swp := sysinfo.Snapshot()
+		// Passband tuning: pan the view so the listening bracket stays
+		// on screen — the view centre trails the listening offset,
+		// clamped so we never show beyond the real spectrum.
+		loHz := r.LO()
+		listenOff := float64(r.Freq() - loHz)
+		viewOff := u.ViewOffHzSmooth(listenOff)
+		u.SetViewOff(viewOff)
 		frame := u.Frame(ui.FrameStats{
 			FreqHz:      r.Freq(),
 			Mode:        r.Mode().Name,
@@ -1323,6 +1330,9 @@ func main() {
 			Volume:      r.Volume(),
 			GainText:    r.GainText() + " · " + r.SquelchLabel(),
 			Host:        r.Hostname(),
+			LOHz:        loHz,
+			BwHz:        r.Bandwidth(),
+			SSBOneSided: r.Mode().SSB && r.Mode().Name != "LSB",
 			CpuPct:      cpu,
 			MemPct:      mem,
 			SwpPct:      swp,
@@ -1330,7 +1340,7 @@ func main() {
 		// Frequency tick ruler on the waterfall (main screen only —
 		// the menu/FT8 windows cover it anyway).
 		if uiMode == uiMain {
-			u.DrawFreqScale(r.Freq())
+			u.DrawFreqScale(loHz + int64(viewOff))
 		}
 		// Settings overlays on top of the composed frame.
 		if uiMode == uiMenu {

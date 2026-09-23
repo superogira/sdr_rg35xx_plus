@@ -67,6 +67,7 @@ type Radio struct {
 
 	mu        sync.Mutex
 	freqHz    int64
+	loHz      int64
 	mode      dsp.Mode
 	gainDb    float64 // tuner gain in dB at connect; negative = AGC
 	vol       float64
@@ -114,6 +115,7 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		rawTap: dsp.NewSpectrumTap(),
 		out:    out,
 		freqHz: freqHz,
+		loHz:   freqHz,
 		mode:   mode,
 		gainDb: gainDb,
 		vol:    1,
@@ -261,9 +263,14 @@ func (r *Radio) session(ctx context.Context) error {
 		}
 		r.chain = chain
 		r.state = stateStreaming
-		freq, gainDb := r.freqHz, r.gainDb
+		freq, gainDb, lo := r.freqHz, r.gainDb, r.loHz
 		r.mu.Unlock()
 		chain.Reset()
+		// Restore the passband offset on the fresh chain (the server
+		// below tunes the LO; the offset itself is pure DSP).
+		if off := freq - lo; off != 0 {
+			chain.SetOffsetHz(float64(off))
+		}
 
 		if r.iqRate != 2_048_000 {
 			// The server accepts exactly one rate setting per connection
@@ -284,7 +291,7 @@ func (r *Radio) session(ctx context.Context) error {
 		// rtl-sdr-web-monitor uses against this same server; index
 		// based gain is avoided entirely.
 		r.mu.Lock()
-		want := r.directSamplingFor(freq)
+		want := r.directSamplingFor(lo)
 		r.hfApplied = want
 		r.mu.Unlock()
 		if want != 0 {
@@ -292,7 +299,7 @@ func (r *Radio) session(ctx context.Context) error {
 				return fmt.Errorf("direct sampling: %w", err)
 			}
 		}
-		if err := client.SetFrequency(uint32(freq)); err != nil {
+		if err := client.SetFrequency(uint32(lo)); err != nil {
 			return fmt.Errorf("initial tune: %w", err)
 		}
 		if gainDb < 0 {
@@ -482,12 +489,29 @@ func (r *Radio) SetFreq(hz int64) {
 		hz = 1_766_000_000
 	}
 	r.mu.Lock()
+	// Passband tuning: while the new listening frequency stays inside
+	// the current LO's receive window, move only the DSP offset — no
+	// server command, no retune gap, no tune-spam while scrolling.
+	off := hz - r.loHz
+	if chain := r.chain; chain != nil && r.client != nil && abs64(off) <= r.offsetLimit() {
+		r.freqHz = hz
+		chain.SetOffsetHz(float64(off))
+		r.mu.Unlock()
+		return
+	}
+	// Out of window (or not connected yet): retune the LO onto the
+	// listening frequency and zero the offset.
 	r.freqHz = hz
+	r.loHz = hz
 	client := r.client
 	want := r.directSamplingFor(hz)
 	switchHF := want != r.hfApplied
 	r.hfApplied = want
+	chain := r.chain
 	r.mu.Unlock()
+	if chain != nil {
+		chain.SetOffsetHz(0)
+	}
 	if client == nil {
 		return
 	}
@@ -507,6 +531,31 @@ func (r *Radio) SetFreq(hz int64) {
 	// Logged so the app log can be compared against the rtl_tcp server's
 	// own console when a tuning glitch is investigated.
 	fmt.Fprintf(os.Stderr, "radio: tune %d (%.4f MHz)\n", hz, float64(hz)/1e6)
+}
+
+func abs64(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+// offsetLimit is how far the listening frequency may sit from the LO
+// before a hardware retune is required: the IF decimation filter
+// passes ~±0.4·IF2Rate; keep a mode-bandwidth of margin.
+func (r *Radio) offsetLimit() int64 {
+	lim := int64(0.35 * float64(dsp.IF2Rate))
+	if bw := int64(r.mode.BwHz); bw*2 < lim {
+		lim -= bw
+	}
+	return lim
+}
+
+// LO returns the hardware tuning (waterfall centre).
+func (r *Radio) LO() int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.loHz
 }
 
 func (r *Radio) Freq() int64 {
