@@ -55,6 +55,7 @@ type fbDisplay struct {
 
 	// Periodic FBIOPAN re-activation (the frontend can re-pan over us).
 	lastPan  time.Time
+	openedAt time.Time
 	rawVInfo [160]byte
 }
 
@@ -257,7 +258,11 @@ func (d *fbDisplay) Present(frame *image.RGBA) error {
 	// Re-assert the display layer every 5 s — the console frontend can
 	// re-pan or overwrite after our app starts, freezing the screen on
 	// the boot frame. This keeps the layer pointed at our buffer.
-	if time.Since(d.lastPan) > 5*time.Second {
+	interval := 2 * time.Second
+	if time.Since(d.openedAt) < 30*time.Second {
+		interval = 500 * time.Millisecond
+	}
+	if time.Since(d.lastPan) > interval {
 		d.lastPan = time.Now()
 		v := d.rawVInfo
 		_ = ioctlRaw(d.f, fbioPanDisplay, unsafe.Pointer(&v[0]))
