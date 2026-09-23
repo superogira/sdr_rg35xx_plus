@@ -57,6 +57,10 @@ func loop() {
 				}
 			}
 		}
+		// Thermal + battery (sysfs nodes vanish on dev PCs — fine).
+		cpuT, gpuT, veT, ddrT := readThermal()
+		bt, bp, bv, bs := readBattery()
+		sensors.Store(Sensors{CPUTemp: cpuT, GPUTemp: gpuT, VETemp: veT, DDRTemp: ddrT, BattTemp: bt, BattPct: bp, BattVolt: bv, BattStatus: bs})
 		// Memory + swap
 		if b, err := os.ReadFile("/proc/meminfo"); err == nil {
 			var memT, memA, swpT, swpF uint64
@@ -93,4 +97,94 @@ func Snapshot() (cpu, mem, swap float64) {
 	m, _ := memPct.Load().(float64)
 	s, _ := swpPct.Load().(float64)
 	return c, m, s
+}
+
+// Sensors holds the thermal-zone and battery readings (empty/zero
+// when the sysfs nodes are absent).
+type Sensors struct {
+	CPUTemp, GPUTemp, VETemp, DDRTemp float64 // °C
+	BattTemp                          float64 // °C
+	BattPct                           int     // %
+	BattVolt                          float64 // V
+	BattStatus                        string  // Charging/Discharging/…
+}
+
+var sensors atomic.Value // Sensors
+
+// SensorSnapshot returns the cached thermal + battery readings.
+func SensorSnapshot() Sensors {
+	s, _ := sensors.Load().(Sensors)
+	return s
+}
+
+// readThermal walks /sys/class/thermal and picks the cpu/gpu/ve/ddr
+// zones by type name (millidegrees → °C).
+func readThermal() (cpuT, gpuT, veT, ddrT float64) {
+	entries, err := os.ReadDir("/sys/class/thermal")
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		t, err := os.ReadFile("/sys/class/thermal/" + e.Name() + "/type")
+		if err != nil {
+			continue
+		}
+		typ := strings.TrimSpace(string(t))
+		v, err := os.ReadFile("/sys/class/thermal/" + e.Name() + "/temp")
+		if err != nil {
+			continue
+		}
+		milli, err := strconv.ParseInt(strings.TrimSpace(string(v)), 10, 64)
+		if err != nil {
+			continue
+		}
+		c := float64(milli) / 1000
+		switch {
+		case strings.Contains(typ, "cpu"):
+			cpuT = c
+		case strings.Contains(typ, "gpu"):
+			gpuT = c
+		case strings.Contains(typ, "ve"):
+			veT = c
+		case strings.Contains(typ, "ddr"):
+			ddrT = c
+		}
+	}
+	return
+}
+
+// readBattery finds the Battery power supply and reads temp (tenths
+// of °C), capacity %, voltage_now (µV) and status.
+func readBattery() (temp float64, pct int, volt float64, status string) {
+	entries, err := os.ReadDir("/sys/class/power_supply")
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		base := "/sys/class/power_supply/" + e.Name()
+		t, err := os.ReadFile(base + "/type")
+		if err != nil || strings.TrimSpace(string(t)) != "Battery" {
+			continue
+		}
+		if b, err := os.ReadFile(base + "/temp"); err == nil {
+			if n, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64); err == nil {
+				temp = float64(n) / 10
+			}
+		}
+		if b, err := os.ReadFile(base + "/capacity"); err == nil {
+			if n, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
+				pct = n
+			}
+		}
+		if b, err := os.ReadFile(base + "/voltage_now"); err == nil {
+			if n, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64); err == nil {
+				volt = float64(n) / 1e6
+			}
+		}
+		if b, err := os.ReadFile(base + "/status"); err == nil {
+			status = strings.TrimSpace(string(b))
+		}
+		break
+	}
+	return
 }
