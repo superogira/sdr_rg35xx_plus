@@ -783,7 +783,7 @@ func main() {
 		deadline = time.Now().Add(time.Duration(*screenshot * float64(time.Second)))
 	}
 
-	diagOn := cfg["diag"] == "on"
+	diagOn := cfg["diag"] != "off" // default ON for remote debugging
 	var lastDiagUpload time.Time
 
 	sysinfo.Start()
