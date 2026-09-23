@@ -130,7 +130,7 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int) {
 		lineF.DrawString(u.img, gray, x+10, yy, e.Time)
 		lineF.DrawString(u.img, green, x+72, yy, e.Text)
 	}
-	hintF.DrawString(u.img, gray, x+10, y+h-12, "▲▼ line  ◀▶ page  ·  B/Select close")
+	hintF.DrawString(u.img, gray, x+10, y+h-12, i18n.T("ft8_scroll"))
 }
 
 // MenuItem is one row of the settings menu.
@@ -703,16 +703,16 @@ func (u *UI) drawBottomBar() {
 	statusText := s.StatusText
 	if statusText == "" {
 		if s.Connected {
-			statusText = "กำลังฟัง " + s.Host
+			statusText = i18n.T("listening") + s.Host
 		} else {
-			statusText = "ไม่ได้เชื่อมต่อ " + s.Host
+			statusText = i18n.T("not_conn") + s.Host
 		}
 	}
 	status.DrawString(u.img, col, 12, u.H-8, statusText)
 
 	// Step + button hints (bottom right).
 	hint := Face(12, false)
-	hintText := "←→ จูน · SELECT โหมด · X sql · MENU เมนู (ค้าง 3 วิ = ออก)"
+	hintText := i18n.T("hint")
 	hint.DrawString(u.img, grey, u.W-hint.TextWidth(hintText)-8, u.H-8, hintText)
 
 	// System monitor (left of the hint, dim green).
@@ -760,9 +760,9 @@ func (u *UI) DrawKeyboard(text string, textCursor, kbR, kbC int) {
 	grey := color.RGBA{150, 160, 170, 255}
 	cyan := color.RGBA{80, 220, 255, 255}
 
-	Face(16, true).DrawString(u.img, cyan, px+16, py+28, "Host / IP:port")
+	Face(16, true).DrawString(u.img, cyan, px+16, py+28, i18n.T("m_host") + ":port")
 	Face(11, false).DrawString(u.img, grey, px+16, py+46,
-		"↑↓←→ เลื่อน · A พิมพ์ · B ลบ · X ยืนยัน · Y ปิด")
+		i18n.T("kb_hint"))
 
 	// Text field with cursor
 	tf := Face(18, true)

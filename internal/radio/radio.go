@@ -182,7 +182,7 @@ func (r *Radio) SetCaptureRate(hz int) {
 // instead of connecting anywhere (display/audio development without a
 // dongle).
 func NewDemo(mode dsp.Mode, out *audio.Output) *Radio {
-	r := New("DEMO (สัญญาณจำลอง)", 145_500_000, mode, -1, out)
+	r := New(i18n.T("demo_host"), 145_500_000, mode, -1, out)
 	r.demo = true
 	return r
 }
@@ -355,7 +355,7 @@ func (r *Radio) session(ctx context.Context) error {
 			if flatData(buf[:n]) {
 				flatBlocks++
 				if flatBlocks > flatLimit {
-					return errors.New("server ส่งข้อมูลเปล่า (ต้องรีสตาร์ท rtl_tcp server)")
+					return errors.New(i18n.T("dead_stream"))
 				}
 			} else {
 				flatBlocks = 0

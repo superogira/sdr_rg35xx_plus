@@ -29,11 +29,14 @@ func SetLang(l string) {
 
 var strings = map[string][2]string{
 	// index 0 = th, 1 = en
-	"hint":       {"←→ จูน · SELECT โหมด · MENU เมนู (ค้าง 3 วิ = ออก)", "←→ tune · SELECT mode · MENU menu (hold 3s = exit)"},
+	"hint":       {"←→ จูน · SELECT ประวัติ FT8 · MENU เมนู (ค้าง 3 วิ = ออก)", "←→ tune · SELECT FT8 log · MENU menu (hold 3s = exit)"},
 	"menu_title": {"ตั้งค่า — SETTINGS", "SETTINGS"},
 	"menu_hint":  {"A เลือก/ปรับ · B ปิด", "A select/adjust · B close"},
+	"menu_ver":   {"รุ่น %s · %s", "v%s · %s"},
 	"freq_title": {"ตั้งความถี่ (MHz)", "Set frequency (MHz)"},
 	"freq_hint":  {"↑↓ เปลี่ยนตัวเลข · ←→ เลื่อนหลัก · A ยืนยัน · B ยกเลิก", "↑↓ digit · ←→ position · A OK · B cancel"},
+	"kb_hint":    {"↑↓←→ เลื่อน · A พิมพ์ · B ลบ · X ยืนยัน · Y ปิด", "↑↓←→ move · A type · B backspace · X OK · Y close"},
+	"ft8_scroll": {"▲▼ บรรทัด · ◀▶ หน้า · B/Select ปิด", "▲▼ line · ◀▶ page · B/Select close"},
 
 	"m_freq":   {"ความถี่", "Frequency"},
 	"m_mode":   {"โหมดรับ", "Mode"},
@@ -42,6 +45,8 @@ var strings = map[string][2]string{
 	"m_rate":   {"Sample Rate", "Sample Rate"},
 	"m_bw":     {"Bandwidth", "Bandwidth"},
 	"m_ds":     {"HF Direct Sampling", "HF Direct Sampling"},
+	"m_ft8":    {"ถอดรหัส FT8", "FT8 decode"},
+	"m_host":   {"เครื่องแม่ข่าย / IP", "Host / IP"},
 	"m_agc":    {"AGC (SSB/CW)", "AGC (SSB/CW)"},
 	"m_span":   {"Span จอ (zoom)", "Span (zoom)"},
 	"m_step":   {"สเต็ปจูน", "Tune step"},
@@ -51,9 +56,22 @@ var strings = map[string][2]string{
 	"m_lang":   {"ภาษา / Language", "Language / ภาษา"},
 	"press_a":  {"กด A", "press A"},
 
+	"upd_only":       {"อัพเดทรองรับบนเครื่อง RG35XX เท่านั้น", "Update supported on the RG35XX only"},
+	"upd_check_fail": {"เช็คอัพเดทไม่สำเร็จ: %v", "Update check failed: %v"},
+	"upd_dl_fail":    {"โหลดไม่สำเร็จ: %v", "Download failed: %v"},
+	"upd_http":       {"โหลดไม่สำเร็จ: HTTP %d", "Download failed: HTTP %d"},
+	"upd_size":       {"ขนาดไฟล์ไม่ตรง (%d != %d)", "Package size mismatch (%d != %d)"},
+	"upd_gzip":       {"ไฟล์เสีย (gzip): %v", "Corrupt package (gzip): %v"},
+	"upd_nopath":     {"หาตำแหน่งโปรแกรมไม่ได้: %v", "Cannot locate the executable: %v"},
+	"upd_write":      {"เขียนไฟล์ไม่ได้: %v", "Cannot write file: %v"},
+	"upd_swap":       {"แทนที่ไฟล์ไม่ได้: %v", "Cannot replace file: %v"},
+	"upd_restart":    {"รีสตาร์ทไม่สำเร็จ — ปิดแล้วเปิดใหม่", "Restart failed — please relaunch"},
+
 	"ds_auto": {"อัตโนมัติ", "Auto"},
 	"ds_on":   {"เปิด (Q branch)", "On (Q branch)"},
-	"ds_off":  {"ปิด (tuner เสมอ)", "Off (tuner only)"},
+	"ds_off":     {"ปิด (tuner เสมอ)", "Off (tuner only)"},
+	"demo_host":  {"DEMO (สัญญาณจำลอง)", "DEMO (synthetic signal)"},
+	"dead_stream": {"server ส่งข้อมูลเปล่า (ต้องรีสตาร์ท rtl_tcp server)", "server sends empty data (restart the rtl_tcp server)"},
 	"on":      {"เปิด", "On"},
 	"off":     {"ปิด", "Off"},
 
