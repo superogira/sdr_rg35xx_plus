@@ -1,7 +1,9 @@
 package dsp
 
 import (
+	"fmt"
 	"math"
+	"os"
 	"sync"
 )
 
@@ -115,12 +117,32 @@ func (d *FT8Detector) Process() {
 	candidates := d.findCandidates(linear)
 	for _, ch := range candidates {
 		if det, ok := d.detectAt(linear, ch); ok {
+			det.Message = DecodeFT8At(linear, ch)
 			newResults = append(newResults, det)
 		}
 	}
 	if len(newResults) > 5 {
 		newResults = newResults[:5]
 	}
+	// Diagnostic logging
+	var maxAmp float64
+	for _, v := range linear[len(linear)-8000:] {
+		if v > maxAmp {
+			maxAmp = v
+		}
+		if -v > maxAmp {
+			maxAmp = -v
+		}
+	}
+	dStr := ""
+	for _, r := range newResults {
+		dStr += fmt.Sprintf(" %.0fHz/%.0fdB", r.FreqHz, r.SNRDb)
+		if r.Message != nil && r.Message.Valid {
+			dStr += fmt.Sprintf(" [%s>%s %s]", r.Message.CallsignFrom, r.Message.CallsignTo, r.Message.Grid)
+		}
+	}
+	fmt.Fprintf(os.Stderr, "ft8: amp=%.3f cand=%d det=%d%s\n", maxAmp, len(candidates), len(newResults), dStr)
+
 	d.mu.Lock()
 	d.results = newResults
 	d.mu.Unlock()

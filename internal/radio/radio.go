@@ -159,6 +159,9 @@ func (r *Radio) SetCaptureRate(hz int) {
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
 	r.chain.SetAGCEnabled(r.agcOn)
+	if r.ft8On {
+		r.chain.SetFT8Detector(r.ft8)
+	}
 	client := r.client
 	r.mu.Unlock()
 	if r.out != nil {
@@ -251,6 +254,9 @@ func (r *Radio) session(ctx context.Context) error {
 		chain.SetVolume(r.vol)
 		chain.SetSquelchDb(r.sqlDb)
 		chain.SetAGCEnabled(r.agcOn)
+		if r.ft8On {
+			chain.SetFT8Detector(r.ft8)
+		}
 		r.chain = chain
 		r.state = stateStreaming
 		freq, gainDb := r.freqHz, r.gainDb
@@ -520,6 +526,9 @@ func (r *Radio) SetMode(mode dsp.Mode) {
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
 	r.chain.SetAGCEnabled(r.agcOn)
+	if r.ft8On {
+		r.chain.SetFT8Detector(r.ft8)
+	}
 	r.mu.Unlock()
 	// SSB/CW chains produce 8 kHz audio; FM modes IF2/4.
 	if r.out != nil {
@@ -799,6 +808,9 @@ func (r *Radio) SetBandwidth(bw float64) {
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
 	r.chain.SetAGCEnabled(r.agcOn)
+	if r.ft8On {
+		r.chain.SetFT8Detector(r.ft8)
+	}
 	r.mu.Unlock()
 	fmt.Fprintf(os.Stderr, "radio: bandwidth %.4g Hz (%s)\n", bw, m.Name)
 }
