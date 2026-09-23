@@ -15,6 +15,8 @@ var (
 	cpuPct  atomic.Value // float64
 	memPct  atomic.Value // float64
 	swpPct  atomic.Value // float64
+	memUsed atomic.Value // float64 MiB
+	memTot  atomic.Value // float64 MiB
 	started bool
 )
 
@@ -26,6 +28,8 @@ func Start() {
 	started = true
 	cpuPct.Store(0.0)
 	memPct.Store(0.0)
+	memUsed.Store(0.0)
+	memTot.Store(0.0)
 	swpPct.Store(0.0)
 	go loop()
 }
@@ -83,6 +87,8 @@ func loop() {
 			}
 			if memT > 0 {
 				memPct.Store(100 * float64(memT-memA) / float64(memT))
+				memUsed.Store(float64(memT-memA) / 1024)
+				memTot.Store(float64(memT) / 1024)
 			}
 			if swpT > 0 {
 				swpPct.Store(100 * float64(swpT-swpF) / float64(swpT))
@@ -187,4 +193,11 @@ func readBattery() (temp float64, pct int, volt float64, status string) {
 		break
 	}
 	return
+}
+
+// MemAbsolute returns the cached used/total memory in MiB.
+func MemAbsolute() (usedMiB, totalMiB float64) {
+	u, _ := memUsed.Load().(float64)
+	t, _ := memTot.Load().(float64)
+	return u, t
 }
