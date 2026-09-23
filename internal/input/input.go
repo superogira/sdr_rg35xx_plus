@@ -45,6 +45,7 @@ const (
 	Menu
 	VolDown
 	VolUp
+	Power
 )
 
 var keyNames = map[Button]string{
@@ -69,6 +70,7 @@ var codeToButton = map[uint16]Button{
 	308: L1, 309: R1, 314: L2, 315: R2,
 	310: Select, 311: Start, 312: Menu,
 	114: VolDown, 115: VolUp,
+	116: Power,
 	103: Up, 108: Down, 105: Left, 106: Right, // KEY_UP/…
 	517: Up, 516: Down, 514: Left, 515: Right, // BTN_DPAD_*
 }
