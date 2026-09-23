@@ -69,6 +69,7 @@ var strings = map[string][2]string{
 	"downloading":  {"กำลังโหลดเวอร์ชั่นใหม่ %d …", "Downloading %d …"},
 	"checksum":     {"checksum ไม่ตรง — ยกเลิก", "checksum mismatch — abort"},
 	"updated":      {"อัพเดทเป็นเวอร์ชั่น %d แล้ว — กำลังรีสตาร์ท", "Updated to %d — restarting"},
+	"ft8_synced":   {"FT8 sync แล้ว — รอสัญญาณถัดไป…", "FT8 synced — waiting for next signal…"},
 	"starting":     {"กำลังเริ่มระบบ…", "Starting…"},
 }
 

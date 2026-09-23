@@ -666,6 +666,8 @@ func main() {
 		case input.Y:
 			if r.FT8Enabled() {
 				r.SyncFT8()
+				capturedMsg = i18n.T("ft8_synced")
+				capturedAt = time.Now()
 			}
 		case input.X:
 			r.CycleSquelch()
