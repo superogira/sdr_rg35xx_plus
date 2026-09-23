@@ -53,6 +53,11 @@ type FT8Detector struct {
 	linear    []float64
 	slotStart int64
 	synced    bool
+	// pending holds decoded messages until the UI drains them. The
+	// live results slice is overwritten on every scan (~1 s), so a
+	// decode only survives there for a scan or two — polling it at
+	// 15 s intervals missed nearly every message.
+	pending []FT8Message
 }
 
 const ft8RingSamples = 8000 * 15
@@ -110,6 +115,19 @@ func (d *FT8Detector) Results() []FT8Detection {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return append([]FT8Detection(nil), d.results...)
+}
+
+// TakeMessages drains the queue of decoded messages (the UI history
+// window consumes these).
+func (d *FT8Detector) TakeMessages() []FT8Message {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.pending) == 0 {
+		return nil
+	}
+	out := d.pending
+	d.pending = nil
+	return out
 }
 
 // Process scans for FT8 signals. Snapshot buffer under lock, heavy work outside.
@@ -185,6 +203,14 @@ func (d *FT8Detector) Process() {
 
 	d.mu.Lock()
 	d.results = newResults
+	for _, r := range newResults {
+		if r.Message != nil && r.Message.Valid {
+			d.pending = append(d.pending, *r.Message)
+		}
+	}
+	if len(d.pending) > 64 {
+		d.pending = d.pending[len(d.pending)-64:]
+	}
 	d.mu.Unlock()
 }
 
