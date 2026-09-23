@@ -147,6 +147,9 @@ func (d *FT8Detector) Process() {
 
 	var newResults []FT8Detection
 	cands := wf.findCandidates(140, 10)
+	// Several (time,freq) cells can match the same transmission in one
+	// scan — queue each distinct message only once.
+	seen := map[string]bool{}
 	for _, c := range cands {
 		llr := make([]float64, 174)
 		wf.extractLLR(c, llr)
@@ -158,6 +161,11 @@ func (d *FT8Detector) Process() {
 			Diag:       diag,
 		}
 		if msg != nil && msg.Valid {
+			if seen[msg.Text] {
+				continue
+			}
+			seen[msg.Text] = true
+			msg.SNRDb = det.SNRDb
 			det.Message = msg
 			newResults = append(newResults, det)
 			continue

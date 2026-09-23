@@ -481,6 +481,8 @@ func main() {
 	// Screenshot support: the last presented frame and a transient status
 	// message pointing at the saved file (triggered from the menu).
 	ft8Log := make([]ui.FT8Entry, 0, 100)
+	// recentFT8 drives the 6 s duplicate window for decoded messages.
+	recentFT8 := make([]ft8Seen, 0, 40)
 
 	var lastFrame *image.RGBA
 	capturedMsg := ""
@@ -510,6 +512,7 @@ func main() {
 		uiMenu
 		uiFreqEdit
 		uiHostEdit
+		uiHostList
 		uiFT8Log
 	)
 	uiMode := uiMain
@@ -562,6 +565,38 @@ func main() {
 	hostText := *host
 	hostKbR, hostKbC := 0, 0
 	editCursor := 6 // default to the 10 kHz digit (index into 9 digits)
+	// Saved host list (hosts= in the ini, comma-separated). The current
+	// host is always present so it can be edited or re-selected.
+	hostList := []string{}
+	if v, ok := cfg["hosts"]; ok && v != "" {
+		for _, h := range strings.Split(v, ",") {
+			h = strings.TrimSpace(h)
+			if h != "" {
+				hostList = append(hostList, h)
+			}
+		}
+	}
+	if len(hostList) == 0 {
+		hostList = []string{*host}
+	}
+	{
+		cur := *host
+		found := false
+		for _, h := range hostList {
+			if h == cur {
+				found = true
+			}
+		}
+		if !found {
+			hostList = append([]string{cur}, hostList...)
+		}
+	}
+	hostSel := 0
+	// hostEditIdx: which list entry the keyboard is editing (-1 = new).
+	hostEditIdx := -1
+	saveHosts := func() {
+		cfg["hosts"] = strings.Join(hostList, ",")
+	}
 
 	// Long-press exit: MENU or START held for 3s quits; a short MENU tap
 	// opens/closes the settings menu.
@@ -664,8 +699,8 @@ func main() {
 	activateItem := func(idx int) {
 		switch idx {
 		case menuHost:
-			hostText = r.Hostname()
-			uiMode = uiHostEdit
+			hostSel = 0
+			uiMode = uiHostList
 		case menuFreq:
 			editDigits = freqDigits()
 			uiMode = uiFreqEdit
@@ -808,6 +843,47 @@ func main() {
 			if ft8Scroll < 0 {
 				ft8Scroll = 0
 			}
+		case uiHostList:
+			// Rows: saved hosts + "add new" at the bottom.
+			rows := len(hostList) + 1
+			switch b {
+			case input.Up:
+				hostSel = (hostSel + rows - 1) % rows
+			case input.Down:
+				hostSel = (hostSel + 1) % rows
+			case input.A:
+				if hostSel == len(hostList) {
+					hostText, hostEditIdx = "", -1
+					hostKbR, hostKbC = 0, 0
+					uiMode = uiHostEdit
+				} else {
+					h := hostList[hostSel]
+					*host = h
+					cfg["host"] = h
+					r.SetHost(h)
+					saveHosts()
+					uiMode = uiMenu
+				}
+			case input.X:
+				if hostSel < len(hostList) {
+					hostText, hostEditIdx = hostList[hostSel], hostSel
+					hostKbR, hostKbC = 0, 0
+					uiMode = uiHostEdit
+				}
+			case input.Y:
+				if hostSel < len(hostList) {
+					hostList = append(hostList[:hostSel], hostList[hostSel+1:]...)
+					if len(hostList) == 0 {
+						hostList = []string{*host}
+					}
+					if hostSel >= len(hostList) {
+						hostSel = len(hostList)
+					}
+					saveHosts()
+				}
+			case input.B, input.Start:
+				uiMode = uiMenu
+			}
 		case uiHostEdit:
 			switch b {
 			case input.Up:
@@ -834,11 +910,20 @@ func main() {
 				}
 			case input.X, input.Y:
 				if hostText != "" {
+					if hostEditIdx >= 0 && hostEditIdx < len(hostList) {
+						hostList[hostEditIdx] = hostText
+					} else {
+						hostList = append(hostList, hostText)
+						hostEditIdx = len(hostList) - 1
+					}
+					saveHosts()
 					*host = hostText
 					cfg["host"] = hostText
 					r.SetHost(hostText)
+					hostSel = hostEditIdx
 				}
-				uiMode = uiMenu
+				hostEditIdx = -1
+				uiMode = uiHostList
 			}
 		case uiFreqEdit:
 			switch b {
@@ -946,7 +1031,7 @@ func main() {
 							// Short tap: toggle the settings menu
 							// (or back out of the freq editor).
 							switch uiMode {
-							case uiFreqEdit, uiMenu, uiFT8Log:
+							case uiFreqEdit, uiMenu, uiFT8Log, uiHostEdit, uiHostList:
 								uiMode = uiMain
 							default:
 								uiMode = uiMenu
@@ -1037,20 +1122,33 @@ func main() {
 		if m := upd.Msg(); m != "" {
 			status = m
 		}
-		// Drain decoded messages every frame: the detector's live
-		// results are overwritten each scan (~1 s), so the old 15 s
-		// poll nearly always missed them — decodes showed in the log
-		// but never in the history window. The queue makes every
-		// decode reach the window; a transmission decoded on 2-3
-		// consecutive scans is deduped by the last-entry check.
+		// Drain decoded messages every frame. A transmission sits in
+		// the 15 s waterfall for ~2.2 s and scans run several times per
+		// second, so the same text decodes over and over — and with two
+		// stations alternating, the old last-entry check leaked
+		// duplicates (one message logged 23×). Dedup by a 6 s window
+		// instead: covers the ring overlap, but a genuine repeat in the
+		// next 15 s slot still shows.
 		for _, m := range r.FT8TakeMessages() {
 			if !m.Valid {
 				continue
 			}
-			if len(ft8Log) > 0 && ft8Log[len(ft8Log)-1].Text == m.Text {
+			now := time.Now()
+			dup := false
+			for _, s := range recentFT8 {
+				if s.text == m.Text && now.Sub(s.at) < 6*time.Second {
+					dup = true
+					break
+				}
+			}
+			if dup {
 				continue
 			}
-			ft8Log = append(ft8Log, ui.FT8Entry{Time: time.Now().Format("15:04:05"), Text: m.Text})
+			recentFT8 = append(recentFT8, ft8Seen{text: m.Text, at: now})
+			if len(recentFT8) > 40 {
+				recentFT8 = recentFT8[len(recentFT8)-40:]
+			}
+			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, Text: m.Text})
 			if len(ft8Log) > 100 {
 				ft8Log = ft8Log[len(ft8Log)-100:]
 			}
@@ -1108,6 +1206,14 @@ func main() {
 			u.DrawFreqEditor(editDigits, editCursor)
 		} else if uiMode == uiHostEdit {
 			u.DrawKeyboard(hostText, len(hostText), hostKbR, hostKbC)
+		} else if uiMode == uiHostList {
+			active := 0
+			for i, h := range hostList {
+				if h == *host {
+					active = i
+				}
+			}
+			u.DrawHostList(hostList, hostSel, active)
 		} else if uiMode == uiFT8Log {
 			u.DrawFT8LogFull(ft8Log, ft8Scroll)
 		}
@@ -1167,6 +1273,12 @@ func agcLabel(on bool) string {
 		return i18n.T("on")
 	}
 	return i18n.T("off")
+}
+
+// ft8Seen is one recently decoded message, for duplicate suppression.
+type ft8Seen struct {
+	text string
+	at   time.Time
 }
 
 // bwLabel formats a bandwidth value: kHz for >= 1 kHz, Hz below.
@@ -1236,6 +1348,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["update"]; ok {
 		fmt.Fprintf(f, "update=%s\n", v)
+	}
+	if v, ok := cfg["hosts"]; ok && v != "" {
+		fmt.Fprintf(f, "hosts=%s\n", v)
 	}
 	if v, ok := cfg["updateurl"]; ok && v != "" {
 		fmt.Fprintf(f, "updateurl=%s\n", v)
