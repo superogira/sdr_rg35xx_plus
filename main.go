@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"sdr35/internal/audio"
+	"sdr35/internal/diag"
 	"sdr35/internal/dsp"
 	"sdr35/internal/i18n"
 	"sdr35/internal/input"
@@ -782,6 +783,9 @@ func main() {
 		deadline = time.Now().Add(time.Duration(*screenshot * float64(time.Second)))
 	}
 
+	diagOn := cfg["diag"] == "on"
+	var lastDiagUpload time.Time
+
 	sysinfo.Start()
 
 	tick := time.NewTicker(33 * time.Millisecond)
@@ -819,6 +823,17 @@ func main() {
 		case <-tick.C:
 		}
 
+		if diagOn && time.Since(lastDiagUpload) >= 60*time.Second {
+			lastDiagUpload = time.Now()
+			go func() {
+				logPath := filepath.Join(filepath.Dir(mustExe()), "..", "SDRg35xx-logfile.txt")
+				_ = diag.UploadLog(diag.FTPConfig{
+					Host: "192.168.1.211:21",
+					User: "ftp_downloads_catgg_net",
+					Pass: "4a4a10ca2e1ad8",
+				}, logPath, "sdrg35xx/device.log")
+			}()
+		}
 		r.FT8Process()
 
 		if pad != nil {
@@ -1032,6 +1047,14 @@ func bwLabel(hz float64) string {
 }
 
 // --- tiny config file ---------------------------------------------------
+
+func mustExe() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "."
+	}
+	return exe
+}
 
 func configFile(name string) string {
 	exe, err := os.Executable()
