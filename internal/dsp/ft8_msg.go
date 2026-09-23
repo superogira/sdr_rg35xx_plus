@@ -9,9 +9,11 @@ import (
 // message exactly as WSJT-X would print it (e.g. "CQ HS0ZKO OK04" or
 // "E23BC W1AW FN42 -07"). Valid is only set when both the LDPC parity
 // checks and the CRC-14 pass, so Text can be trusted as received.
+// SNRDb is the estimated signal strength above the tone-row noise.
 type FT8Message struct {
 	Text  string
 	Valid bool
+	SNRDb float64
 }
 
 const (

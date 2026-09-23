@@ -38,8 +38,9 @@ func (u *UI) SetSpanKHz(khz int) {
 
 // FT8Entry is one line in the FT8 message log overlay.
 type FT8Entry struct {
-	Time string
-	Text string
+	Time  string
+	SNRDb float64
+	Text  string
 }
 
 // DrawFT8Log renders a semi-transparent log of the latest FT8 decodes
@@ -812,4 +813,54 @@ func (u *UI) DrawKeyboard(text string, textCursor, kbR, kbC int) {
 
 	// Bottom row: ← space → ⌫ OK
 	// hint text in the B label row
+}
+
+// DrawHostList renders the saved-host picker: hosts are rows with the
+// active one marked, plus an "add new" row at the bottom. sel indexes
+// the rows including the add row (sel == len(hosts)).
+func (u *UI) DrawHostList(hosts []string, sel, activeIdx int) {
+	rowH := 26
+	pw := 440
+	ph := 70 + rowH*(len(hosts)+1) + 30
+	if ph > u.H-10 {
+		ph = u.H - 10
+	}
+	px := (u.W - pw) / 2
+	py := (u.H - ph) / 2
+
+	u.fillBlend(px+4, py+4, pw, ph, 0, 0, 0, 120)
+	u.fillBlend(px, py, pw, ph, 14, 20, 28, 242)
+
+	white := color.RGBA{240, 240, 240, 255}
+	grey := color.RGBA{150, 160, 170, 255}
+	cyan := color.RGBA{80, 220, 255, 255}
+	yellow := color.RGBA{255, 230, 120, 255}
+	green := color.RGBA{120, 230, 140, 255}
+
+	Face(16, true).DrawString(u.img, cyan, px+16, py+28, i18n.T("host_title"))
+	Face(11, false).DrawString(u.img, grey, px+16, py+ph-12, i18n.T("host_hint"))
+
+	for i, h := range hosts {
+		y := py + 54 + i*rowH
+		if i == sel {
+			u.fillBlend(px+8, y-17, pw-16, rowH-2, 40, 96, 128, 210)
+		}
+		mark := "  "
+		mc := grey
+		if i == activeIdx {
+			mark, mc = "●", green
+		}
+		Face(13, false).DrawString(u.img, mc, px+16, y, mark)
+		fc := white
+		if i == sel {
+			fc = yellow
+		}
+		Face(14, i == sel).DrawString(u.img, fc, px+38, y, h)
+	}
+	// The "add new" row.
+	y := py + 54 + len(hosts)*rowH
+	if sel == len(hosts) {
+		u.fillBlend(px+8, y-17, pw-16, rowH-2, 40, 96, 128, 210)
+	}
+	Face(14, sel == len(hosts)).DrawString(u.img, cyan, px+38, y, i18n.T("host_add"))
 }
