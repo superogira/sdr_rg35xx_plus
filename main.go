@@ -1509,7 +1509,11 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			if toks := strings.Fields(m.Text); len(toks) >= 2 {
 				call := toks[1] // second token = the transmitting station
 				grid := toks[len(toks)-1]
-				hasGrid := len(grid) >= 4 && grid[0] >= 'A' && grid[0] <= 'R' &&
+				// "RR73" matches [A-R][A-R][0-9][0-9] perfectly but is
+				// a sign-off, not a grid (it decodes to the Arctic!).
+				// Exclude known FT8 tail tokens before the pattern check.
+				isTail := grid == "RR73" || grid == "RRR" || grid == "73" || grid == "CQ"
+				hasGrid := !isTail && len(grid) >= 4 && grid[0] >= 'A' && grid[0] <= 'R' &&
 					grid[1] >= 'A' && grid[1] <= 'R' &&
 					grid[2] >= '0' && grid[2] <= '9' && grid[3] >= '0' && grid[3] <= '9'
 				if hasGrid {
