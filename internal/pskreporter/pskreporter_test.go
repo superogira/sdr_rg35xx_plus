@@ -23,7 +23,7 @@ func TestPacketAgainstSpecExample(t *testing.T) {
 		{Sender: "N1DQ", FreqHz: 14070567, At: time.Unix(1200960084, 0)},
 		{Sender: "KB1MBX", FreqHz: 14070987, At: time.Unix(1200960104, 0)},
 	}
-	pkt := buildPacket("N1DQ", "FN42hn", spots, 1, 0, true)
+	pkt := buildPacket("N1DQ", "FN42hn", "Dipole", "RTL-SDR V4", spots, 1, 0, true)
 
 	if pkt[0] != 0x00 || pkt[1] != 0x0A {
 		t.Fatalf("version bytes: % x", pkt[:2])
@@ -35,8 +35,15 @@ func TestPacketAgainstSpecExample(t *testing.T) {
 		t.Fatalf("sequence: % x", pkt[8:12])
 	}
 
-	if !bytes.Contains(pkt, hx("000300249992000300018002FFFF0000768F8004FFFF0000768F8008FFFF0000768F0000")) {
-		t.Error("receiver template bytes not found")
+	// 5-field template (with antenna + rig): 00 34 = 52 bytes.
+	if !bytes.Contains(pkt, hx("00030034999200050001"+
+		"8002FFFF0000768F"+
+		"8004FFFF0000768F"+
+		"8008FFFF0000768F"+
+		"8009FFFF0000768F"+
+		"800DFFFF0000768F"+
+		"0000")) {
+		t.Error("5-field receiver template bytes not found")
 	}
 	if !bytes.Contains(pkt, hx("0002003C999300078001FFFF0000768F800500040000768F800600010000768F800700010000768F800AFFFF0000768F800B00010000768F00960004")) {
 		t.Error("sender template bytes not found")
@@ -64,7 +71,7 @@ func TestPacketAgainstSpecExample(t *testing.T) {
 }
 
 func TestAddWhileDisabled(t *testing.T) {
-	r := New("", "", false)
+	r := New("", "", "", "", false)
 	r.Add(Spot{Sender: "K1ABC"})
 	if r.Pending() != 0 {
 		t.Fatal("spots buffered while inactive")
@@ -72,7 +79,7 @@ func TestAddWhileDisabled(t *testing.T) {
 	if n := r.Flush(); n != 0 {
 		t.Fatal("flush sent while inactive")
 	}
-	r.SetStation("HS0ZKO", "OK04")
+	r.SetStation("HS0ZKO", "OK04", "Dipole", "RTL-SDR V4")
 	r.SetEnabled(true)
 	r.Add(Spot{Sender: "K1ABC"})
 	if r.Pending() != 1 {
@@ -81,7 +88,7 @@ func TestAddWhileDisabled(t *testing.T) {
 }
 
 func TestBufferCap(t *testing.T) {
-	r := New("HS0ZKO", "OK04", true)
+	r := New("HS0ZKO", "OK04", "Dipole", "RTL-SDR V4", true)
 	for i := 0; i < maxBuffer+50; i++ {
 		r.Add(Spot{Sender: "K1ABC"})
 	}

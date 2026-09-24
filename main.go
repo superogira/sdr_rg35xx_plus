@@ -316,6 +316,8 @@ func main() {
 	}
 	myCall := strings.ToUpper(strings.TrimSpace(cfg["call"]))
 	myGrid := strings.ToUpper(strings.TrimSpace(cfg["grid"]))
+myAnt := strings.TrimSpace(cfg["antenna"])
+	myRig := strings.TrimSpace(cfg["rig"])
 	pskOn := cfg["psk"] == "on"
 	sqlPref := 0.0
 	if v, ok := cfg["sql"]; ok {
@@ -482,7 +484,7 @@ func main() {
 			dsPref = "off"
 		}
 		saveBwNow(cfg, r)
-		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref, stepHz, myCall, myGrid, pskOn)
+		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref, stepHz, myCall, myGrid, myAnt, myRig, pskOn)
 		stop()
 	}
 	// Screenshot support: the last presented frame and a transient status
@@ -492,7 +494,7 @@ func main() {
 	recentFT8 := make([]ft8Seen, 0, 40)
 	// PSK Reporter: spots are buffered as they decode and flushed over
 	// UDP every 5 minutes (the service asks for at most that rate).
-	psk := pskreporter.New(myCall, myGrid, pskOn)
+	psk := pskreporter.New(myCall, myGrid, myAnt, myRig, pskOn)
 	go func() {
 		t := time.NewTicker(5 * time.Minute)
 		defer t.Stop()
@@ -570,6 +572,8 @@ func main() {
 		menuGrid
 		menuPSK
 		menuSysMon
+		menuAnt
+		menuRig
 		menuLogs
 	)
 	// The flat 16-row menu outgrew the screen, so it is now three
@@ -585,7 +589,7 @@ func main() {
 	pageItems := [][]int{
 		{0, 0, 0}, // root rows open subpages (dispatched by row index)
 		{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep},
-		{menuFT8, menuCall, menuGrid, menuPSK},
+		{menuFT8, menuCall, menuGrid, menuPSK, menuAnt, menuRig},
 		{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 	}
 	spanSteps := []int{1000, 750, 500, 250, 125, 100, 50, 25, 12, 10, 5, 3}
@@ -615,6 +619,10 @@ func main() {
 			return i18n.T("m_call")
 		case "grid":
 			return i18n.T("m_grid")
+		case "ant":
+			return i18n.T("m_ant")
+		case "rig":
+			return i18n.T("m_rig")
 		}
 		return i18n.T("m_host") + ":port"
 	}
@@ -782,6 +790,14 @@ func main() {
 			uiMode = uiHostEdit
 		case menuGrid:
 			hostText, kbTarget = myGrid, "grid"
+			hostKbR, hostKbC = 0, 0
+			uiMode = uiHostEdit
+		case menuAnt:
+			hostText, kbTarget = myAnt, "ant"
+			hostKbR, hostKbC = 0, 0
+			uiMode = uiHostEdit
+		case menuRig:
+			hostText, kbTarget = myRig, "rig"
 			hostKbR, hostKbC = 0, 0
 			uiMode = uiHostEdit
 		case menuPSK:
@@ -1043,7 +1059,7 @@ func main() {
 					if hostText != "" {
 						myCall = strings.ToUpper(hostText)
 						cfg["call"] = myCall
-						psk.SetStation(myCall, myGrid)
+						psk.SetStation(myCall, myGrid, myAnt, myRig)
 					}
 					hostText = ""
 					uiMode, menuPage, menuSel = uiMenu, pageFT8, 1
@@ -1051,10 +1067,22 @@ func main() {
 					if hostText != "" {
 						myGrid = strings.ToUpper(hostText)
 						cfg["grid"] = myGrid
-						psk.SetStation(myCall, myGrid)
+						psk.SetStation(myCall, myGrid, myAnt, myRig)
 					}
 					hostText = ""
 					uiMode, menuPage, menuSel = uiMenu, pageFT8, 2
+				case "ant":
+					myAnt = hostText
+					cfg["antenna"] = myAnt
+					psk.SetStation(myCall, myGrid, myAnt, myRig)
+					hostText = ""
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, 4
+				case "rig":
+					myRig = hostText
+					cfg["rig"] = myRig
+					psk.SetStation(myCall, myGrid, myAnt, myRig)
+					hostText = ""
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, 5
 				default:
 					if hostText != "" {
 						if hostEditIdx >= 0 && hostEditIdx < len(hostList) {
@@ -1422,7 +1450,9 @@ func main() {
 				ui.MenuItem{Label: i18n.T("m_ft8"), Value: ft8Label(r.FT8Enabled())},
 				ui.MenuItem{Label: i18n.T("m_call"), Value: myCall},
 				ui.MenuItem{Label: i18n.T("m_grid"), Value: myGrid},
-				ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal})
+				ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal},
+				ui.MenuItem{Label: i18n.T("m_ant"), Value: myAnt},
+				ui.MenuItem{Label: i18n.T("m_rig"), Value: myRig})
 		case pageSys:
 			items = append(items,
 				ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
@@ -1642,7 +1672,7 @@ func readIni(path string) map[string]string {
 	return cfg
 }
 
-func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string, stepHz int64, myCall, myGrid string, pskOn bool) {
+func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string, stepHz int64, myCall, myGrid, myAnt, myRig string, pskOn bool) {
 	f, err := os.Create(configPath())
 	if err != nil {
 		return
@@ -1659,7 +1689,7 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	if v, ok := cfg["hosts"]; ok && v != "" {
 		fmt.Fprintf(f, "hosts=%s\n", v)
 	}
-	fmt.Fprintf(f, "call=%s\ngrid=%s\npsk=%s\n", myCall, myGrid, map[bool]string{true: "on", false: "off"}[pskOn])
+	fmt.Fprintf(f, "call=%s\ngrid=%s\npsk=%s\nantenna=%s\nrig=%s\n", myCall, myGrid, map[bool]string{true: "on", false: "off"}[pskOn], myAnt, myRig)
 	if v, ok := cfg["updateurl"]; ok && v != "" {
 		fmt.Fprintf(f, "updateurl=%s\n", v)
 	}

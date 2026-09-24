@@ -38,6 +38,8 @@ type Reporter struct {
 	mu       sync.Mutex
 	call     string
 	grid     string
+	antenna  string
+	rig      string
 	enabled  bool
 	spots    []Spot
 	seq      uint32
@@ -47,21 +49,24 @@ type Reporter struct {
 }
 
 // New creates a reporter; call/gridsquare may be empty (reporting
-// stays inactive until both are set and enabled).
-func New(call, grid string, enabled bool) *Reporter {
+// stays inactive until both are set and enabled). antenna/rig are
+// optional descriptive strings shown on the PSK Reporter map.
+func New(call, grid, antenna, rig string, enabled bool) *Reporter {
 	return &Reporter{
 		call:    call,
 		grid:    grid,
+		antenna: antenna,
+		rig:     rig,
 		enabled: enabled,
 		sessID:  rand.Uint32(),
 		logf:    func(format string, a ...any) { fmt.Fprintf(os.Stderr, format, a...) },
 	}
 }
 
-// SetStation updates the receiver identity.
-func (r *Reporter) SetStation(call, grid string) {
+// SetStation updates the receiver identity and descriptions.
+func (r *Reporter) SetStation(call, grid, antenna, rig string) {
 	r.mu.Lock()
-	r.call, r.grid = call, grid
+	r.call, r.grid, r.antenna, r.rig = call, grid, antenna, rig
 	r.mu.Unlock()
 }
 
@@ -114,7 +119,7 @@ func (r *Reporter) Flush() int {
 	r.sentPkts++
 	r.mu.Unlock()
 
-	pkt := buildPacket(call, grid, batch, r.seq, r.sessID, sent < 3)
+	pkt := buildPacket(call, grid, r.antenna, r.rig, batch, r.seq, r.sessID, sent < 3)
 	addr, err := net.ResolveUDPAddr("udp", dest)
 	if err != nil {
 		r.logf("psk: resolve: %v\n", err)
@@ -134,19 +139,34 @@ func (r *Reporter) Flush() int {
 	return n
 }
 
-// buildPacket assembles one complete datagram.
-func buildPacket(call, grid string, spots []Spot, seq, sess uint32, withTemplates bool) []byte {
+// buildPacket assembles one complete datagram. The receiver template
+// scales with the station description fields: 3-field (callsign,
+// locator, software) when antenna/rig are empty, 5-field (adding
+// antennaInformation id 9 and rigInformation id 13) when set — a
+// custom template the IPFIX server caches like any other.
+func buildPacket(call, grid, antenna, rig string, spots []Spot, seq, sess uint32, withTemplates bool) []byte {
 	var body []byte // everything after the 16-byte header
 
 	if withTemplates {
-		// Receiver template: receiverCallsign, receiverLocator,
-		// decodingSoftware (variable-length strings).
-		body = append(body, 0x00, 0x03, 0x00, 0x24, 0x99, 0x92, 0x00, 0x03,
-			0x00, 0x01,
-			0x80, 0x02, 0xFF, 0xFF, 0x00, 0x00, 0x76, 0x8F,
-			0x80, 0x04, 0xFF, 0xFF, 0x00, 0x00, 0x76, 0x8F,
-			0x80, 0x08, 0xFF, 0xFF, 0x00, 0x00, 0x76, 0x8F,
-			0x00, 0x00)
+		if antenna != "" || rig != "" {
+			// 5-field receiver template (00 34 = 52 bytes).
+			body = append(body, 0x00, 0x03, 0x00, 0x34, 0x99, 0x92, 0x00, 0x05,
+				0x00, 0x01,
+				0x80, 0x02, 0xFF, 0xFF, 0x00, 0x00, 0x76, 0x8F, // receiverCallsign
+				0x80, 0x04, 0xFF, 0xFF, 0x00, 0x00, 0x76, 0x8F, // receiverLocator
+				0x80, 0x08, 0xFF, 0xFF, 0x00, 0x00, 0x76, 0x8F, // decoderSoftware
+				0x80, 0x09, 0xFF, 0xFF, 0x00, 0x00, 0x76, 0x8F, // antennaInformation
+				0x80, 0x0D, 0xFF, 0xFF, 0x00, 0x00, 0x76, 0x8F, // rigInformation
+				0x00, 0x00)
+		} else {
+			// 3-field receiver template (00 24 = 36 bytes).
+			body = append(body, 0x00, 0x03, 0x00, 0x24, 0x99, 0x92, 0x00, 0x03,
+				0x00, 0x01,
+				0x80, 0x02, 0xFF, 0xFF, 0x00, 0x00, 0x76, 0x8F, // receiverCallsign
+				0x80, 0x04, 0xFF, 0xFF, 0x00, 0x00, 0x76, 0x8F, // receiverLocator
+				0x80, 0x08, 0xFF, 0xFF, 0x00, 0x00, 0x76, 0x8F, // decoderSoftware
+				0x00, 0x00)
+		}
 		// Sender template: senderCallsign, frequency(4B), sNR(1B),
 		// iMD(1B), mode, informationSource(1B), flowStartSeconds(4B).
 		body = append(body, 0x00, 0x02, 0x00, 0x3C, 0x99, 0x93, 0x00, 0x07,
@@ -159,12 +179,17 @@ func buildPacket(call, grid string, spots []Spot, seq, sess uint32, withTemplate
 			0x00, 0x96, 0x00, 0x04)
 	}
 
-	// Receiver information record (99 92): three length-prefixed
-	// strings, null padded to a multiple of 4.
+	// Receiver information record (99 92): length-prefixed strings,
+	// null padded to a multiple of 4. Field count must match the
+	// template sent above.
 	var rx []byte
 	rx = appendLenString(rx, call)
 	rx = appendLenString(rx, grid)
 	rx = appendLenString(rx, softwareID)
+	if antenna != "" || rig != "" {
+		rx = appendLenString(rx, antenna)
+		rx = appendLenString(rx, rig)
+	}
 	for len(rx)%4 != 0 {
 		rx = append(rx, 0)
 	}
