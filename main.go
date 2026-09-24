@@ -1507,11 +1507,8 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			// don't carry a grid, but we can reuse one seen earlier.
 			anno := ""
 			if toks := strings.Fields(m.Text); len(toks) >= 2 {
-				call := toks[1] // second token = the transmitting station
+				call := toks[1]
 				grid := toks[len(toks)-1]
-				// "RR73" matches [A-R][A-R][0-9][0-9] perfectly but is
-				// a sign-off, not a grid (it decodes to the Arctic!).
-				// Exclude known FT8 tail tokens before the pattern check.
 				isTail := grid == "RR73" || grid == "RRR" || grid == "73" || grid == "CQ"
 				hasGrid := !isTail && len(grid) >= 4 && grid[0] >= 'A' && grid[0] <= 'R' &&
 					grid[1] >= 'A' && grid[1] <= 'R' &&
@@ -1527,20 +1524,20 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 					country = geo.Country(call)
 					dist := geo.DistanceKm(myGrid, grid)
 					if country != "" && dist > 0 {
-						anno = fmt.Sprintf(" (%s, %d km)", country, dist)
+						anno = fmt.Sprintf("%s %dkm", country, dist)
 					} else if country != "" {
-						anno = fmt.Sprintf(" (%s)", country)
+						anno = country
 					} else if dist > 0 {
-						anno = fmt.Sprintf(" (%d km)", dist)
+						anno = fmt.Sprintf("%dkm", dist)
 					}
 				} else {
 					country = geo.Country(call)
 					if country != "" {
-						anno = fmt.Sprintf(" (%s)", country)
+						anno = country
 					}
 				}
 			}
-			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: m.Text + anno})
+			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: m.Text, Anno: anno})
 			if len(ft8Log) > 100 {
 				ft8Log = ft8Log[len(ft8Log)-100:]
 			}
