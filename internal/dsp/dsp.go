@@ -28,15 +28,20 @@ var (
 // SetIQRate re-dimensions the DSP for a new capture rate. It must run
 // BEFORE NewChain (filters are designed from these values).
 func SetIQRate(hz int) bool {
-	// 512 kHz is the floor: the NFM path decimates IF2 by 8 to the
-	// demod rate, then audio ÷ N — at 512k the NFM demod lands exactly
-	// on the 8 kHz audio output. Below that the audio decimation
-	// factor truncates to zero and the process dies.
 	if hz < 256_000 || hz%32_000 != 0 {
 		return false
 	}
 	IQRate = hz
-	IF2Rate = hz / 8
+	// Low IQ rates use a gentler IF decimation (÷4) so the passband
+	// tuning window stays usable: at 640k with ÷8, IF2=80k limits the
+	// offset to ±15.5 kHz — a 12.5 kHz step pair already forces a LO
+	// retune that looks like the waterfall jumping. With ÷4, IF2=160k
+	// gives ±43.5 kHz of scroll room.
+	if hz <= 640_000 {
+		IF2Rate = hz / 4
+	} else {
+		IF2Rate = hz / 8
+	}
 	AudioRate = IF2Rate / 4
 	DisplaySpanHz = IF2Rate / 2
 	return true
