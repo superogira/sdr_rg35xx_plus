@@ -57,6 +57,7 @@ var strings = map[string][2]string{
 	"m_ft8page": {"FT8 / รายงาน", "FT8 / Reporting"},
 	"m_syspage": {"ระบบ", "System"},
 	"m_sysmon":  {"ข้อมูลเครื่อง ▸", "System monitor ▸"},
+	"m_logs":    {"ดู log ▸", "View log ▸"},
 	"sm_cpu_temp": {"อุณหภูมิ CPU", "CPU temp"},
 	"sm_gpu_temp": {"อุณหภูมิ GPU", "GPU temp"},
 	"sm_ve_temp":  {"อุณหภูมิ VE", "VE temp"},
