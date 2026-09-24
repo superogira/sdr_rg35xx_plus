@@ -265,24 +265,40 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 		c.mode.HalfBwHz = half
 
 	case mode.Name == "NFM":
-		// Sharp channel filter that also decimates to 32 kHz; the FM
-		// discriminator then runs at 32k and audio lands at 8 kHz.
+		// Sharp channel filter that also decimates; the FM
+		// discriminator rate is rate-aware: at full IQ (2.048M → IF2
+		// 256k) it decimates by 8 to 32k, but at low IQ rates the
+		// factor shrinks (256k IQ → IF2 32k → decimate by 4 to 8k =
+		// audio rate directly). The hardcoded chD=8 crashed at 256k
+		// (auD = 4000/8000 = 0 → divide by zero).
 		c.outRate = SSBRate // 8 kHz
 		c.chTaps = DesignLowpass(511, bw/2, float64(IF2Rate))
 		c.chD = 8
-		c.chRate = IF2Rate / 8
+		for IF2Rate/c.chD < c.outRate && c.chD > 1 {
+			c.chD--
+		}
+		c.chRate = IF2Rate / c.chD
 		c.demod = FMDemod{rate: float64(c.chRate)}
 		c.auTaps = DesignLowpass(255, mode.AudioCut, float64(c.chRate))
 		c.auD = c.chRate / c.outRate
+		if c.auD < 1 {
+			c.auD = 1
+		}
 
 	default: // WFM
-		c.outRate = IF2Rate / 8 // 32 kHz
+		c.outRate = IF2Rate / 8
+		if c.outRate < SSBRate {
+			c.outRate = SSBRate // at 256k IQ: IF2=32k, can't do 32k/8=4k
+		}
 		c.chTaps = DesignLowpass(127, bw/2, float64(IF2Rate))
 		c.chD = 1
 		c.chRate = IF2Rate
 		c.demod = FMDemod{rate: float64(IF2Rate)}
 		c.auTaps = DesignLowpass(255, mode.AudioCut, float64(IF2Rate))
-		c.auD = IF2Rate / c.outRate
+		c.auD = c.chRate / c.outRate
+		if c.auD < 1 {
+			c.auD = 1
+		}
 	}
 	if mode.DeemphTau > 0 {
 		c.deemph = NewDeemph(mode.DeemphTau, float64(AudioRate))
