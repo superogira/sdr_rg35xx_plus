@@ -54,9 +54,16 @@ type Client struct {
 	Info DongleInfo
 }
 
-// Dial connects and completes the dongle-info handshake.
+// Dial connects and completes the dongle-info handshake. TCP
+// keep-alive is set aggressively (15 s) — CGNAT mobile connections
+// silently drop idle sessions, and a dead socket on the server side
+// raises SIGPIPE which kills the rtl_tcp process outright.
 func Dial(address string, timeout time.Duration) (*Client, error) {
-	conn, err := net.DialTimeout("tcp", address, timeout)
+	d := net.Dialer{
+		Timeout:   timeout,
+		KeepAlive: 15 * time.Second,
+	}
+	conn, err := d.Dial("tcp", address)
 	if err != nil {
 		return nil, err
 	}
