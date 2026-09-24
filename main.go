@@ -502,6 +502,10 @@ func main() {
 	}()
 
 	panelState := 0 // power-key cycle: 0=on, 1=dim, 2=off
+	// Log viewer state: the app's own log file, re-read every 2 s.
+	logLines := []string{}
+	logScroll := 0
+	logReadAt := time.Time{}
 	var lastFrame *image.RGBA
 	capturedMsg := ""
 	var capturedAt time.Time
@@ -533,6 +537,7 @@ func main() {
 		uiHostList
 		uiFT8Log
 		uiSysMon
+		uiLogs
 	)
 	uiMode := uiMain
 	// Dev aid for PNG screenshot testing of the overlays.
@@ -565,6 +570,7 @@ func main() {
 		menuGrid
 		menuPSK
 		menuSysMon
+		menuLogs
 	)
 	// The flat 16-row menu outgrew the screen, so it is now three
 	// subpages reached from a 3-row root. pageItems maps (page → row)
@@ -580,7 +586,7 @@ func main() {
 		{0, 0, 0}, // root rows open subpages (dispatched by row index)
 		{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep},
 		{menuFT8, menuCall, menuGrid, menuPSK},
-		{menuHost, menuLang, menuSysMon, menuVolume, menuShot, menuUpdate},
+		{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 	}
 	spanSteps := []int{1000, 750, 500, 250, 125, 100, 50, 25, 12, 10, 5, 3}
 	spanIdx := func() int {
@@ -784,6 +790,8 @@ func main() {
 			psk.SetEnabled(pskOn)
 		case menuSysMon:
 			uiMode = uiSysMon
+		case menuLogs:
+			uiMode = uiLogs
 		case menuHost:
 			hostSel = 0
 			uiMode = uiHostList
@@ -943,6 +951,26 @@ func main() {
 			switch b {
 			case input.B, input.Start, input.Select, input.A:
 				uiMode, menuPage, menuSel = uiMenu, pageSys, 2
+			}
+		case uiLogs:
+			// d-pad scrolls (line/page), close keys back to the menu.
+			switch b {
+			case input.Up:
+				logScroll++
+			case input.Down:
+				logScroll--
+			case input.Left:
+				logScroll += 16
+			case input.Right:
+				logScroll -= 16
+			case input.B, input.Start, input.Select, input.A:
+				uiMode, menuPage, menuSel = uiMenu, pageSys, 3
+			}
+			if logScroll > 5000 {
+				logScroll = 5000
+			}
+			if logScroll < 0 {
+				logScroll = 0
 			}
 		case uiHostList:
 			// Rows: saved hosts + "add new" at the bottom.
@@ -1166,7 +1194,7 @@ func main() {
 							// Short tap: toggle the settings menu
 							// (or back out of the freq editor).
 							switch uiMode {
-							case uiFreqEdit, uiMenu, uiFT8Log, uiHostEdit, uiHostList, uiSysMon:
+							case uiFreqEdit, uiMenu, uiFT8Log, uiHostEdit, uiHostList, uiSysMon, uiLogs:
 								uiMode = uiMain
 							default:
 								uiMode = uiMenu
@@ -1400,6 +1428,7 @@ func main() {
 				ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
 				ui.MenuItem{Label: i18n.T("m_lang"), Value: langLabel()},
 				ui.MenuItem{Label: i18n.T("m_sysmon"), Value: i18n.T("press_a")},
+				ui.MenuItem{Label: i18n.T("m_logs"), Value: i18n.T("press_a")},
 				ui.MenuItem{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 				ui.MenuItem{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
 				ui.MenuItem{Label: i18n.T("m_update"), Value: i18n.T("press_a")})
@@ -1452,6 +1481,37 @@ func main() {
 					rows[i] = k + "\t—"
 				}
 			}
+			u.DrawSysMon(rows)
+		} else if uiMode == uiLogs {
+			// Re-read the log file every 2 seconds while the viewer
+			// is open (cheap: one ReadFile of a few hundred KB).
+			if time.Since(logReadAt) >= 2*time.Second {
+				logReadAt = time.Now()
+				if data, err := os.ReadFile(filepath.Join(filepath.Dir(mustExe()), "..", "SDRg35xx-logfile.txt")); err == nil {
+					lines := strings.Split(string(data), "\n")
+					if len(lines) > 300 {
+						lines = lines[len(lines)-300:]
+					}
+					logLines = lines
+				}
+			}
+			rows := []string{"# Log"}
+			vis := (u.WaterfallRows - 80) / 16
+			if vis < 1 {
+				vis = 1
+			}
+			start := len(logLines) - vis - logScroll
+			if start < 0 {
+				start = 0
+			}
+			for i := start; i < start+vis && i < len(logLines); i++ {
+				ln := logLines[i]
+				if len(ln) > 80 {
+					ln = ln[:80]
+				}
+				rows = append(rows, ln)
+			}
+			rows = append(rows, fmt.Sprintf("%d–%d / %d", start+1, start+vis, len(logLines)))
 			u.DrawSysMon(rows)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
