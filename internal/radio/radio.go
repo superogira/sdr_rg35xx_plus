@@ -586,10 +586,14 @@ func (r *Radio) SetMode(mode dsp.Mode) {
 	if off := r.freqHz - r.loHz; off != 0 {
 		r.chain.SetOffsetHz(float64(off))
 	}
+	// Update the resampler INSIDE the lock: leaving it outside let the
+	// DSP goroutine write new-rate audio into an old-rate resampler
+	// during rapid mode cycling — the corrupted state crashed the app.
+	out := r.out
+	audioRate := mode.AudioOutRate()
 	r.mu.Unlock()
-	// SSB/CW chains produce 8 kHz audio; FM modes IF2/4.
-	if r.out != nil {
-		r.out.SetInputRate(mode.AudioOutRate())
+	if out != nil {
+		out.SetInputRate(audioRate)
 	}
 }
 

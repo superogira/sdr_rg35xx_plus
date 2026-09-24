@@ -761,6 +761,13 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		case menuSpan:
 			spanIdx = (spanIdx + len(spanSteps) + dir) % len(spanSteps)
 			u.SetSpanKHz(spanSteps[spanIdx])
+		case menuStep:
+			for i, s := range stepSteps {
+				if s == stepHz {
+					stepHz = stepSteps[(i+len(stepSteps)+dir)%len(stepSteps)]
+					break
+				}
+			}
 			cfg["step"] = strconv.FormatInt(stepHz, 10)
 		case menuWFMin:
 			wfMin += float64(dir)
