@@ -1072,11 +1072,14 @@ func (u *UI) ViewOffHzSmooth(listenOff float64) float64 {
 	} else if listenOff-v < -edge {
 		v = listenOff + edge
 	}
-	srcRate := float64(dsp.IF2Rate)
-	if u.SpanFull > dsp.IF2Rate {
-		srcRate = float64(dsp.IQRate)
-	}
-	maxPan := srcRate/2 - float64(u.SpanFull)/2
+	// Clamp to the IQ Nyquist (the raw tap covers the full capture
+	// range). Clamping to IF2Rate — the old behaviour — stranded the
+	// bracket off-screen at low IQ rates: at 256k, IF2 = 64k, so the
+	// view could only pan ±29.5k while the passband NCO reaches
+	// ±112k. The tap-selection logic already switches to the raw tap
+	// when the view extends beyond IF2's coverage, so the data is
+	// always available.
+	maxPan := float64(dsp.IQRate)/2 - float64(u.SpanFull)/2
 	if maxPan < 0 {
 		maxPan = 0
 	}
