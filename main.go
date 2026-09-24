@@ -37,6 +37,7 @@ import (
 	"sdr35/internal/audio"
 	"sdr35/internal/backlight"
 	"sdr35/internal/dsp"
+	"sdr35/internal/geo"
 	"sdr35/internal/i18n"
 	"sdr35/internal/input"
 	"sdr35/internal/radio"
@@ -1496,7 +1497,39 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			if len(recentFT8) > 40 {
 				recentFT8 = recentFT8[len(recentFT8)-40:]
 			}
-			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: m.Text})
+			// Annotate with country (from callsign prefix) and distance
+			// (from our grid to theirs) when a grid is present.
+			displayText := m.Text
+			if toks := strings.Fields(m.Text); len(toks) >= 2 {
+				// Sender callsign: first token (or second if CQ).
+				call := toks[0]
+				if call == "CQ" || strings.HasPrefix(call, "CQ_") {
+					if len(toks) >= 3 {
+						call = toks[1]
+					}
+				}
+				// Grid: last token if it matches [A-R]{2}[0-9]{2}.
+				grid := toks[len(toks)-1]
+				hasGrid := len(grid) >= 4 && grid[0] >= 'A' && grid[0] <= 'R' &&
+					grid[1] >= 'A' && grid[1] <= 'R' &&
+					grid[2] >= '0' && grid[2] <= '9' && grid[3] >= '0' && grid[3] <= '9'
+				if hasGrid && myGrid != "" {
+					country := geo.Country(call)
+					dist := geo.DistanceKm(myGrid, grid)
+					ann := ""
+					if country != "" && dist > 0 {
+						ann = fmt.Sprintf(" (%s, %d km)", country, dist)
+					} else if country != "" {
+						ann = fmt.Sprintf(" (%s)", country)
+					} else if dist > 0 {
+						ann = fmt.Sprintf(" (%d km)", dist)
+					}
+					displayText += ann
+				} else if country := geo.Country(call); country != "" {
+					displayText += fmt.Sprintf(" (%s)", country)
+				}
+			}
+			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: displayText})
 			if len(ft8Log) > 100 {
 				ft8Log = ft8Log[len(ft8Log)-100:]
 			}
