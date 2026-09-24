@@ -507,6 +507,10 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 	ft8Log := make([]ui.FT8Entry, 0, 100)
 	// recentFT8 drives the 6 s duplicate window for decoded messages.
 	recentFT8 := make([]ft8Seen, 0, 40)
+	// gridCache remembers each station's grid from their CQ/contact
+	// messages, so report/RRR/73 messages (which don't carry a grid)
+	// can still show the distance.
+	gridCache := map[string]string{}
 	// PSK Reporter: spots are buffered as they decode and flushed over
 	// UDP every 5 minutes (the service asks for at most that rate).
 	psk := pskreporter.New(myCall, myGrid, myAnt, myRig, pskOn)
@@ -1498,9 +1502,10 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				recentFT8 = recentFT8[len(recentFT8)-40:]
 			}
 			// Annotate with country (from callsign prefix) and distance
-			// (from our grid to theirs) when a grid is present.
-			// The SENDER is the SECOND token ("RECIPIENT SENDER grid")
-			// per the FT8 protocol (essexham.co.uk/ft8-basics-explained).
+			// (from our grid to theirs). The SENDER is the SECOND token.
+			// Grids are cached per-callsign: report/RRR/73 messages
+			// don't carry a grid, but we can reuse one seen earlier in
+			// the session from the same station's CQ or contact message.
 			displayText := m.Text
 			if toks := strings.Fields(m.Text); len(toks) >= 2 {
 				call := toks[1] // second token = the transmitting station
@@ -1509,6 +1514,12 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				hasGrid := len(grid) >= 4 && grid[0] >= 'A' && grid[0] <= 'R' &&
 					grid[1] >= 'A' && grid[1] <= 'R' &&
 					grid[2] >= '0' && grid[2] <= '9' && grid[3] >= '0' && grid[3] <= '9'
+				if hasGrid {
+					gridCache[call] = grid // remember for later messages
+				} else if g, ok := gridCache[call]; ok {
+					grid = g // reuse the cached grid
+					hasGrid = true
+				}
 				if hasGrid && myGrid != "" {
 					country := geo.Country(call)
 					dist := geo.DistanceKm(myGrid, grid)
