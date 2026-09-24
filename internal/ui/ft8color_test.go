@@ -109,3 +109,24 @@ func TestFT8ColorsPixels(t *testing.T) {
 		t.Error("no blue sign-off text pixels")
 	}
 }
+
+func TestFT8TextColorWithAnnotation(t *testing.T) {
+	// The annotation "(Country, N km)" must not break the tail-token
+	// colour classification.
+	cases := []struct {
+		text string
+		want color_t
+	}{
+		{"TF8KW BG0HP RR73 (China, ~2470 km)", end},
+		{"F5RRS JK1QHK RRR (Japan, ~4300 km)", end},
+		{"EW8AAC JK1QHK 73 (Japan, ~4300 km)", end},
+		{"F4CQS BG7ZHS R -20 (China, ~2470 km)", rpt},
+		{"OT7K JA3OPL PM74 (Slovenia, ~8960 km)", call},
+	}
+	for _, c := range cases {
+		got := ft8TextColor(c.text)
+		if got != wantColor(c.want) {
+			t.Errorf("%q: got wrong colour for annotated text", c.text)
+		}
+	}
+}
