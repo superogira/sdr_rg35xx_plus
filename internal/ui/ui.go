@@ -804,9 +804,12 @@ func formatHz(hz int64) string {
 var _ = fmt.Sprintf
 
 // Keyboard layout rows for the host editor (domain name / IP:port).
+// The alphabet is split across two rows so each fits comfortably on
+// the 640 px panel (13 × 18 px cells = 234 px per row).
 var kbRows = []string{
 	"0123456789",
-	"abcdefghijklmnopqrstuvwxyz",
+	"abcdefghijklm",
+	"nopqrstuvwxyz",
 	".:-_/ ",
 }
 
@@ -814,7 +817,7 @@ var kbRows = []string{
 // host address. cursor is the text-edit position; kbR/kbC are the
 // selected key row/column; shift selects the uppercase row.
 func (u *UI) DrawKeyboard(title, text string, textCursor, kbR, kbC int) {
-	pw, ph := 520, 260
+	pw, ph := 520, 300
 	px := (u.W - pw) / 2
 	py := (u.H - ph) / 2
 

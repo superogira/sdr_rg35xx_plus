@@ -1617,7 +1617,8 @@ func saveBwNow(cfg map[string]string, r *radio.Radio) {
 // kbRows mirrors ui.kbRows for the editor logic.
 var kbRows = []string{
 	"0123456789",
-	"abcdefghijklmnopqrstuvwxyz",
+	"abcdefghijklm",
+	"nopqrstuvwxyz",
 	".:-_/ ",
 }
 
