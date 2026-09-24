@@ -453,6 +453,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 
 	held := map[input.Button]bool{}
 	lastRepeat := map[input.Button]time.Time{}
+	volHeldAt := map[input.Button]time.Time{}
 	// FT8 slot markers: after a Y sync, a red separator is drawn on the
 	// waterfall at every 15 s slot boundary so sync accuracy is visible
 	// (signals should start right under each line).
@@ -920,32 +921,6 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		case input.X:
 			r.CycleSquelch()
 			cfg["sql"] = fmt.Sprintf("%g", r.SquelchDb())
-		case input.L1:
-			v := math.Round((r.Volume()-0.01)*100) / 100
-			if v < 0 {
-				v = 0
-			}
-			r.SetVolume(v)
-		case input.R1:
-			v := math.Round((r.Volume()+0.01)*100) / 100
-			if v > 1.5 {
-				v = 1.5
-			}
-			r.SetVolume(v)
-		case input.VolDown:
-			// Side volume wheel: 1% steps for precise levels; held
-			// buttons auto-repeat (see the key-repeat block below).
-			v := math.Round((r.Volume()-0.01)*100) / 100
-			if v < 0 {
-				v = 0
-			}
-			r.SetVolume(v)
-		case input.VolUp:
-			v := math.Round((r.Volume()+0.01)*100) / 100
-			if v > 1.5 {
-				v = 1.5
-			}
-			r.SetVolume(v)
 		}
 	}
 	handlePress := func(b input.Button) {
@@ -1301,10 +1276,47 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 					exitHint = fmt.Sprintf(i18n.T("hold_exit"), float64(3*time.Second-d)/float64(time.Second))
 				}
 			}
-			// Key repeat for held tuning/volume buttons (main screen
-			// only): 450 ms delay, then every 150 ms.
+			// Volume keys work EVERYWHERE (main screen, menus, dialogs)
+			// — instantaneous tap = 0.1%; held = exponential ramp.
+			for _, b := range []input.Button{input.VolDown, input.VolUp} {
+				if held[b] && time.Since(lastRepeat[b]) > (func() time.Duration {
+					if volHeldAt[b].IsZero() {
+						return 450 * time.Millisecond
+					}
+					return 150 * time.Millisecond
+				})() {
+					if volHeldAt[b].IsZero() {
+						volHeldAt[b] = time.Now()
+					}
+					holdSec := time.Since(volHeldAt[b]).Seconds()
+					mult := 1.0 + holdSec*holdSec*0.5
+					if mult > 50 {
+						mult = 50
+					}
+					step := 0.001 * mult
+					dir := 1.0
+					if b == input.VolDown {
+						dir = -1
+					}
+					v := r.Volume() + dir*step
+					if v < 0 {
+						v = 0
+					}
+					if v > 1.5 {
+						v = 1.5
+					}
+					r.SetVolume(v)
+					lastRepeat[b] = time.Now()
+				}
+				if !held[b] && !volHeldAt[b].IsZero() {
+					delete(volHeldAt, b)
+					lastRepeat[b] = time.Time{}
+				}
+			}
+			// Key repeat for held tuning buttons (main screen only):
+			// 450 ms delay, then every 150 ms.
 			if uiMode == uiMain {
-				for _, b := range []input.Button{input.Left, input.Right, input.Up, input.Down, input.L1, input.R1, input.VolDown, input.VolUp} {
+				for _, b := range []input.Button{input.Left, input.Right, input.Up, input.Down} {
 					if held[b] && time.Since(lastRepeat[b]) > 450*time.Millisecond {
 						act(b)
 						lastRepeat[b] = lastRepeat[b].Add(150 * time.Millisecond)
