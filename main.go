@@ -340,7 +340,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 	}
 	span := 0
 	if v, ok := cfg["span"]; ok {
-		if n, err := strconv.Atoi(v); err == nil && n >= 10 && n <= 2048 {
+		if n, err := strconv.Atoi(v); err == nil && n >= 3 && n <= 2048 {
 			span = n
 		}
 	}
