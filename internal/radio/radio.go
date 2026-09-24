@@ -148,7 +148,7 @@ func (r *Radio) SetCaptureRate(hz int) {
 	// Rates from the RTL-SDR hardware (see the server's own list);
 	// our DSP needs IQRate divisible by 64 kHz (SSB: /8→/8 to 8 kHz).
 	// Lower rates halve the network load — useful on mobile hotspots.
-	if hz != 640_000 && hz != 1_024_000 && hz != 1_536_000 &&
+	if hz != 256_000 && hz != 640_000 && hz != 1_024_000 && hz != 1_536_000 &&
 		hz != 1_792_000 && hz != 2_048_000 && hz != 2_560_000 &&
 		hz != 2_880_000 && hz != 3_200_000 {
 		return
@@ -397,7 +397,7 @@ func (r *Radio) session(ctx context.Context) error {
 					// slower — every mode then played time-stretched
 					// by the mismatch (FT8 slots audibly >15 s).
 					snap := 0
-					for _, known := range []int{640_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000} {
+					for _, known := range []int{256_000, 640_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000} {
 						if actual >= float64(known)*0.85 && actual <= float64(known)*1.15 {
 							snap = known
 							break
