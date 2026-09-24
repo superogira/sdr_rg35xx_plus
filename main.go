@@ -18,6 +18,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"flag"
+	"image/color"
 	"fmt"
 	"image"
 	"io"
@@ -1504,39 +1505,43 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			// Annotate with country (from callsign prefix) and distance
 			// (from our grid to theirs). The SENDER is the SECOND token.
 			// Grids are cached per-callsign: report/RRR/73 messages
-			// don't carry a grid, but we can reuse one seen earlier in
-			// the session from the same station's CQ or contact message.
-			displayText := m.Text
+			// don't carry a grid, but we can reuse one seen earlier.
+			anno := ""
+			var flagC [3]color.RGBA
 			if toks := strings.Fields(m.Text); len(toks) >= 2 {
 				call := toks[1] // second token = the transmitting station
-				// Grid: last token if it matches [A-R]{2}[0-9]{2}.
 				grid := toks[len(toks)-1]
 				hasGrid := len(grid) >= 4 && grid[0] >= 'A' && grid[0] <= 'R' &&
 					grid[1] >= 'A' && grid[1] <= 'R' &&
 					grid[2] >= '0' && grid[2] <= '9' && grid[3] >= '0' && grid[3] <= '9'
 				if hasGrid {
-					gridCache[call] = grid // remember for later messages
+					gridCache[call] = grid
 				} else if g, ok := gridCache[call]; ok {
-					grid = g // reuse the cached grid
+					grid = g
 					hasGrid = true
 				}
+				var country string
 				if hasGrid && myGrid != "" {
-					country := geo.Country(call)
+					country = geo.Country(call)
 					dist := geo.DistanceKm(myGrid, grid)
-					ann := ""
 					if country != "" && dist > 0 {
-						ann = fmt.Sprintf(" (%s, %d km)", country, dist)
+						anno = fmt.Sprintf(" (%s, %d km)", country, dist)
 					} else if country != "" {
-						ann = fmt.Sprintf(" (%s)", country)
+						anno = fmt.Sprintf(" (%s)", country)
 					} else if dist > 0 {
-						ann = fmt.Sprintf(" (%d km)", dist)
+						anno = fmt.Sprintf(" (%d km)", dist)
 					}
-					displayText += ann
-				} else if country := geo.Country(call); country != "" {
-					displayText += fmt.Sprintf(" (%s)", country)
+				} else {
+					country = geo.Country(call)
+					if country != "" {
+						anno = fmt.Sprintf(" (%s)", country)
+					}
+				}
+				if country != "" {
+					flagC = geo.FlagColors(country)
 				}
 			}
-			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: displayText})
+			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: m.Text, Anno: anno, FlagC: flagC})
 			if len(ft8Log) > 100 {
 				ft8Log = ft8Log[len(ft8Log)-100:]
 			}
