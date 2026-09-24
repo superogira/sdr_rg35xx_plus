@@ -454,11 +454,15 @@ func (u *UI) clearAll() {
 // samples and draws the newest spectrum on top. Returns true when the
 // waterfall advanced.
 func (u *UI) NewSpectrumRow(tap, rawTap *dsp.SpectrumTap) bool {
-	// Pick the source: the decimated IF tap for spans inside the IF,
-	// the raw full-rate tap for wider views.
+	// Pick the source: the decimated IF tap when the ENTIRE visible
+	// range (span + pan offset) fits inside the IF2 filter's passband,
+	// the raw full-rate tap otherwise. The old span-only check missed
+	// that a panned view can extend past the IF2 bandwidth even at
+	// narrow spans — the overhanging edge rendered as dead black.
 	src := tap
 	srcRate := dsp.IF2Rate
-	if u.SpanFull/2 > dsp.IF2Rate/2 {
+	viewEdge := math.Abs(u.viewOffHz) + float64(u.SpanFull)/2
+	if viewEdge > float64(dsp.IF2Rate)*0.40 {
 		src = rawTap
 		srcRate = dsp.IQRate
 	}
