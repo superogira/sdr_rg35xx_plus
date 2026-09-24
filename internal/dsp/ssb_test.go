@@ -85,7 +85,9 @@ func TestModeCycling(t *testing.T) {
 	if len(seen) != len(ModeList) {
 		t.Fatalf("cycling visited %v, want all %d modes", seen, len(ModeList))
 	}
-	if NextMode(ModeCW).Name != ModeList[0].Name {
-		t.Errorf("CW should wrap to %s, got %s", ModeList[0].Name, NextMode(ModeCW).Name)
+	// The LAST mode in the list wraps back to the first.
+	last := ModeList[len(ModeList)-1]
+	if NextMode(last).Name != ModeList[0].Name {
+		t.Errorf("%s should wrap to %s, got %s", last.Name, ModeList[0].Name, NextMode(last).Name)
 	}
 }

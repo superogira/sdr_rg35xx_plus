@@ -384,6 +384,7 @@ type FrameStats struct {
 	LOHz        int64
 	BwHz        float64
 	SSBOneSided bool // USB/CW: bracket on the high side
+	AmMode      bool // AM: symmetric bracket, envelope demod
 
 	// System diagnostics (updated ~1 Hz).
 	CpuPct float64
@@ -1168,4 +1169,53 @@ func (u *UI) SetWaterfallRange(minDb, maxDb float64) {
 // WaterfallRange returns the current min/max colour range settings.
 func (u *UI) WaterfallRange() (minDb, maxDb float64) {
 	return u.wfMinDb, u.wfMaxDb
+}
+
+// DrawBookmarkList renders the bookmark picker: entries show label,
+// mode and frequency; the matching-current one is marked; a "save
+// current" row sits at the bottom. sel indexes rows including the add
+// row (sel == len(entries)).
+func (u *UI) DrawBookmarkList(entries []string, sel, activeIdx int, curMode string) {
+	rowH := 26
+	pw := 520
+	ph := 70 + rowH*(len(entries)+1) + 30
+	if ph > u.H-10 {
+		ph = u.H - 10
+	}
+	px := (u.W - pw) / 2
+	py := (u.H - ph) / 2
+
+	u.fillBlend(px+4, py+4, pw, ph, 0, 0, 0, 120)
+	u.fillBlend(px, py, pw, ph, 14, 20, 28, 242)
+
+	white := color.RGBA{240, 240, 240, 255}
+	grey := color.RGBA{150, 160, 170, 255}
+	cyan := color.RGBA{80, 220, 255, 255}
+	yellow := color.RGBA{255, 230, 120, 255}
+	green := color.RGBA{120, 230, 140, 255}
+
+	Face(16, true).DrawString(u.img, cyan, px+16, py+28, i18n.T("m_bm"))
+	Face(11, false).DrawString(u.img, grey, px+16, py+ph-12, i18n.T("bm_hint"))
+
+	for i, e := range entries {
+		y := py + 54 + i*rowH
+		if i == sel {
+			u.fillBlend(px+8, y-17, pw-16, rowH-2, 40, 96, 128, 210)
+		}
+		mark, mc := "  ", grey
+		if i == activeIdx {
+			mark, mc = "●", green
+		}
+		Face(12, false).DrawString(u.img, mc, px+16, y, mark)
+		fc := white
+		if i == sel {
+			fc = yellow
+		}
+		Face(13, i == sel).DrawString(u.img, fc, px+34, y, e)
+	}
+	y := py + 54 + len(entries)*rowH
+	if sel == len(entries) {
+		u.fillBlend(px+8, y-17, pw-16, rowH-2, 40, 96, 128, 210)
+	}
+	Face(13, sel == len(entries)).DrawString(u.img, cyan, px+34, y, i18n.T("bm_add"))
 }
