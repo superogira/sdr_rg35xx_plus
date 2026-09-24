@@ -1068,28 +1068,55 @@ func (u *UI) ViewOffHzSmooth(listenOff float64) float64 {
 
 // DrawFT8Grid draws frequency-reference lines across the waterfall at
 // round Hz offsets from the listening frequency (the bracket's
-// reference): solid lines every 1 kHz, dashed every 500 Hz. This lets
-// you read the FT8 log's Hz column against the waterfall at a glance.
+// reference): solid lines every 1 kHz, dashed every 500 Hz. Only at
+// spans ≤ 12 kHz (wider views the lines would be sub-pixel and
+// clutter), and only INSIDE the bracket's bandwidth extent (SSB: from
+// the beat to beat+bw; FM: ±bw/2 around the channel).
 func (u *UI) DrawFT8Grid(LOHz int64, viewOffHz float64) {
+	if u.SpanFull > 12000 {
+		return
+	}
 	s := u.stats
 	listenOff := float64(s.FreqHz - LOHz)
 	pxPerHz := float64(u.W) / float64(u.SpanFull)
 
-	// Draw ±5 kHz of reference lines around the listening frequency.
-	for hz := -5000; hz <= 5000; hz += 500 {
+	// The grid lives inside the bracket's frequency extent.
+	loHz, hiHz := -5000, 5000
+	bw := int(s.BwHz)
+	if s.SSBOneSided { // USB/CW: passband above the beat
+		loHz = 0
+		hiHz = bw
+	} else if s.Mode == "LSB" {
+		loHz = -bw
+		hiHz = 0
+	} else { // FM: symmetric
+		loHz = -bw / 2
+		hiHz = bw / 2
+	}
+
+	for hz := 500; hz <= 5000; hz += 500 {
 		if hz == 0 {
 			continue // the bracket already marks zero
 		}
-		x := u.W/2 + int((float64(hz)+listenOff-viewOffHz)*pxPerHz+0.5)
-		if x < 0 || x >= u.W {
-			continue
-		}
-		isKHz := hz%1000 == 0
-		for y := 0; y < u.WaterfallRows; y++ {
-			if isKHz {
-				u.img.SetRGBA(x, y, color.RGBA{200, 200, 200, 60})
-			} else if y%4 < 2 {
-				u.img.SetRGBA(x, y, color.RGBA{150, 150, 150, 40})
+		// draw both +hz and -hz where they fall inside the bracket
+		for _, off := range []int{hz, -hz} {
+			if off < loHz || off > hiHz {
+				continue // outside the bracket's bandwidth
+			}
+			if off == 0 {
+				continue
+			}
+			x := u.W/2 + int((float64(off)+listenOff-viewOffHz)*pxPerHz+0.5)
+			if x < 0 || x >= u.W {
+				continue
+			}
+			isKHz := off%1000 == 0
+			for y := 0; y < u.WaterfallRows; y++ {
+				if isKHz {
+					u.img.SetRGBA(x, y, color.RGBA{200, 200, 200, 60})
+				} else if y%4 < 2 {
+					u.img.SetRGBA(x, y, color.RGBA{150, 150, 150, 40})
+				}
 			}
 		}
 	}
