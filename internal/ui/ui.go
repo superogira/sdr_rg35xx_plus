@@ -955,7 +955,13 @@ var (
 )
 
 // ft8TextColor classifies a decoded FT8 message for colouring.
+// The country/distance annotation " (China, ~2470 km)" is stripped
+// first — its trailing "km)" becomes the last token and hides the
+// real tail (RR73/RRR/73), breaking the sign-off colour.
 func ft8TextColor(text string) color.RGBA {
+	if idx := strings.Index(text, " ("); idx >= 0 {
+		text = text[:idx]
+	}
 	f := strings.Fields(text)
 	if len(f) == 0 {
 		return ft8ColorRpt
