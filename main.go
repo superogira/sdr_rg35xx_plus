@@ -604,7 +604,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 	pageItems := [][]int{
 		{0, 0, 0}, // root rows open subpages (dispatched by row index)
 		{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
-		{menuFT8, menuCall, menuGrid, menuPSK, menuAnt, menuRig},
+		{menuFT8, menuCall, menuGrid, menuAnt, menuRig, menuPSK},
 		{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 	}
 	spanSteps := []int{1000, 750, 500, 250, 125, 100, 50, 25, 12, 10, 5, 3}
@@ -1104,13 +1104,13 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 					cfg["antenna"] = myAnt
 					psk.SetStation(myCall, myGrid, myAnt, myRig)
 					hostText = ""
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, 4
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, 3
 				case "rig":
 					myRig = hostText
 					cfg["rig"] = myRig
 					psk.SetStation(myCall, myGrid, myAnt, myRig)
 					hostText = ""
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, 5
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, 4
 				default:
 					if hostText != "" {
 						if hostEditIdx >= 0 && hostEditIdx < len(hostList) {
@@ -1480,9 +1480,9 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				ui.MenuItem{Label: i18n.T("m_ft8"), Value: ft8Label(r.FT8Enabled())},
 				ui.MenuItem{Label: i18n.T("m_call"), Value: myCall},
 				ui.MenuItem{Label: i18n.T("m_grid"), Value: myGrid},
-				ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal},
 				ui.MenuItem{Label: i18n.T("m_ant"), Value: myAnt},
-				ui.MenuItem{Label: i18n.T("m_rig"), Value: myRig})
+				ui.MenuItem{Label: i18n.T("m_rig"), Value: myRig},
+				ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal})
 		case pageSys:
 			items = append(items,
 				ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
