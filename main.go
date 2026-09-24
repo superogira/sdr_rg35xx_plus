@@ -18,7 +18,6 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"flag"
-	"image/color"
 	"fmt"
 	"image"
 	"io"
@@ -1507,7 +1506,6 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			// Grids are cached per-callsign: report/RRR/73 messages
 			// don't carry a grid, but we can reuse one seen earlier.
 			anno := ""
-			var flagC [3]color.RGBA
 			if toks := strings.Fields(m.Text); len(toks) >= 2 {
 				call := toks[1] // second token = the transmitting station
 				grid := toks[len(toks)-1]
@@ -1537,11 +1535,8 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 						anno = fmt.Sprintf(" (%s)", country)
 					}
 				}
-				if country != "" {
-					flagC = geo.FlagColors(country)
-				}
 			}
-			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: m.Text, Anno: anno, FlagC: flagC})
+			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: m.Text + anno})
 			if len(ft8Log) > 100 {
 				ft8Log = ft8Log[len(ft8Log)-100:]
 			}

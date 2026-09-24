@@ -75,12 +75,6 @@ func (u *UI) DrawFT8Log(entries []FT8Entry) {
 		tf.DrawString(u.img, color.RGBA{120, 200, 255, 255}, px+52, y, fmt.Sprintf("%3.0f", e.SNRDb))
 		tf.DrawString(u.img, color.RGBA{170, 200, 170, 255}, px+76, y, fmt.Sprintf("%4.0f", e.FreqHz))
 		tf.DrawString(u.img, ft8TextColor(e.Text), px+106, y, e.Text)
-		if e.FlagC[0].A != 0 {
-			drawFlag(u.img, px+106+tf.TextWidth(e.Text)+4, y-9, e.FlagC)
-			if e.Anno != "" {
-				tf.DrawString(u.img, color.RGBA{140, 180, 140, 255}, px+106+tf.TextWidth(e.Text)+18, y, e.Anno)
-			}
-		}
 	}
 }
 
@@ -143,12 +137,6 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int) {
 		lineF.DrawString(u.img, color.RGBA{120, 200, 255, 255}, x+78, yy, fmt.Sprintf("%4.0f dB", e.SNRDb))
 		lineF.DrawString(u.img, color.RGBA{170, 200, 170, 255}, x+140, yy, fmt.Sprintf("%5.0f Hz", e.FreqHz))
 		lineF.DrawString(u.img, ft8TextColor(e.Text), x+210, yy, e.Text)
-		if e.FlagC[0].A != 0 {
-			drawFlag(u.img, x+210+lineF.TextWidth(e.Text)+5, yy-11, e.FlagC)
-			if e.Anno != "" {
-				lineF.DrawString(u.img, color.RGBA{140, 180, 140, 255}, x+210+lineF.TextWidth(e.Text)+22, yy, e.Anno)
-			}
-		}
 	}
 	hintF.DrawString(u.img, gray, x+10, y+h-12, i18n.T("ft8_scroll"))
 }
@@ -1237,16 +1225,3 @@ func (u *UI) DrawBookmarkList(entries []string, sel, activeIdx int, curMode stri
 	Face(13, sel == len(entries)).DrawString(u.img, cyan, px+34, y, i18n.T("bm_add"))
 }
 
-// drawFlag paints a 10×7 pixel simplified flag (3 horizontal stripes)
-// at (x, y) on the image.
-func drawFlag(img *image.RGBA, x, y int, c [3]color.RGBA) {
-	for row := 0; row < 7; row++ {
-		for col := 0; col < 10; col++ {
-			stripe := row / 3
-			if stripe > 2 {
-				stripe = 2
-			}
-			img.SetRGBA(x+col, y+row, c[stripe])
-		}
-	}
-}
