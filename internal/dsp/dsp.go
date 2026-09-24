@@ -148,6 +148,10 @@ type Chain struct {
 	ifTaps []float64
 	ifHist []complex128
 	ifD    int
+	// Second decimation pass for passband tuning: separate history so
+	// the rotated and unrotated signals don't contaminate each other.
+	ifHistRot []complex128
+	fif2Rot   []complex128
 
 	// Channel filter (selectivity) after the IF decimation. NFM: complex
 	// FIR decimates 256k -> 32k with cutoff BwHz/2 (sharp, 511 taps).
@@ -382,7 +386,8 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 		c.rawTap.Push(c.fiq)
 	}
 
-	// IF decimation IQRate -> IF2Rate.
+	// IF decimation IQRate -> IF2Rate (UNROTATED — feeds the waterfall
+	// tap and, when no passband offset, the mode chains too).
 	c.fif2 = c.fif2[:0]
 	complexFIRDecim(c.ifTaps, &c.ifHist, c.ifD, c.fiq, &c.fif2)
 
@@ -396,14 +401,18 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 		c.tap.Push(c.fif2)
 	}
 
-	// Passband tuning: rotate the demod path (NOT the taps above —
-	// the waterfall shows the raw spectrum around the LO) so the
-	// listening frequency lands at DC for every demodulator.
+	// Passband tuning: rotate at the FULL IQ rate (before IF2
+	// decimation) so the demodulation window is limited only by the
+	// IQ Nyquist, not the IF2 filter bandwidth. The NCO shifts the
+	// listening frequency to DC; the subsequent IF2 decimation acts
+	// as a bandpass around it. A second decimation pass (with its own
+	// history) produces the rotated IF2 for the mode chains; the
+	// unrotated version above still feeds the waterfall taps.
 	if c.offsetHz != 0 {
-		incr := 2 * math.Pi * c.offsetHz / float64(IF2Rate)
-		for i, z := range c.fif2 {
-			w := -c.ncoPhase // rotate by -offset
-			c.fif2[i] = z * complex(math.Cos(w), math.Sin(w))
+		incr := 2 * math.Pi * c.offsetHz / float64(IQRate)
+		for i, z := range c.fiq {
+			w := -c.ncoPhase
+			c.fiq[i] = z * complex(math.Cos(w), math.Sin(w))
 			c.ncoPhase += incr
 			if c.ncoPhase >= 2*math.Pi {
 				c.ncoPhase -= 2 * math.Pi
@@ -411,6 +420,9 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 				c.ncoPhase += 2 * math.Pi
 			}
 		}
+		c.fif2Rot = c.fif2Rot[:0]
+		complexFIRDecim(c.ifTaps, &c.ifHistRot, c.ifD, c.fiq, &c.fif2Rot)
+		c.fif2 = c.fif2Rot
 	}
 
 	if c.mode.SSB {
