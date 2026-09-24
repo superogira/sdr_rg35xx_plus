@@ -1499,15 +1499,11 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			}
 			// Annotate with country (from callsign prefix) and distance
 			// (from our grid to theirs) when a grid is present.
+			// The SENDER is the SECOND token ("RECIPIENT SENDER grid")
+			// per the FT8 protocol (essexham.co.uk/ft8-basics-explained).
 			displayText := m.Text
 			if toks := strings.Fields(m.Text); len(toks) >= 2 {
-				// Sender callsign: first token (or second if CQ).
-				call := toks[0]
-				if call == "CQ" || strings.HasPrefix(call, "CQ_") {
-					if len(toks) >= 3 {
-						call = toks[1]
-					}
-				}
+				call := toks[1] // second token = the transmitting station
 				// Grid: last token if it matches [A-R]{2}[0-9]{2}.
 				grid := toks[len(toks)-1]
 				hasGrid := len(grid) >= 4 && grid[0] >= 'A' && grid[0] <= 'R' &&
@@ -1533,14 +1529,15 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			if len(ft8Log) > 100 {
 				ft8Log = ft8Log[len(ft8Log)-100:]
 			}
-			// Report to PSK Reporter: the sender is the first token of
-			// the message text ("CALL CALL2 …" — for CQ messages the
-			// caller follows the CQ token). Hash/telemetry texts and
-			// CQ itself are skipped.
+			// Report to PSK Reporter: the SENDER is the SECOND token
+			// ("RECIPIENT SENDER grid/report" — the transmitter's call
+			// comes after the addressee; see essexham.co.uk). For CQ
+			// messages the sender follows the CQ token (also position
+			// 2). Hash/telemetry texts are skipped.
 			if toks := strings.Fields(m.Text); len(toks) >= 2 {
-				sender := toks[0]
-				if sender == "CQ" || strings.HasPrefix(sender, "CQ_") {
-					sender = toks[1]
+				sender := toks[1]
+				if toks[0] == "CQ" || strings.HasPrefix(toks[0], "CQ_") {
+					// CQ [DX/NA/EU/…] SENDER grid
 					if sender == "DX" || sender == "NA" || sender == "EU" || sender == "AS" ||
 						sender == "JA" || sender == "OC" || sender == "SA" || sender == "AF" ||
 						sender == "RU" || sender == "AN" || sender == "FD" || sender == "TEST" ||
