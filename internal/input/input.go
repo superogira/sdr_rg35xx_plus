@@ -102,24 +102,62 @@ type Reader struct {
 	menuEchoUntil time.Time
 }
 
-// Open finds and opens the ANBERNIC gamepad and starts its read loop. It
-// returns an error if no pad is found (dev machines); the app continues
-// without input then.
+// Open finds and opens the ANBERNIC gamepad AND any auxiliary input
+// devices that report keys (PMIC power button, gpio-keys). The power
+// button on these boards arrives on a separate evdev node (axp2202-pek
+// or similar), not the gamepad device. Returns an error only if NO
+// input device is found at all.
 func Open() (*Reader, error) {
-	path, err := findDevice()
-	if err != nil {
-		return nil, err
-	}
-	dev, err := os.OpenFile(path, os.O_RDONLY, 0)
-	if err != nil {
-		return nil, err
-	}
 	r := &Reader{
-		dev:      dev,
 		events:   make(chan Event, 128),
 		axisDown: map[Button]bool{},
 	}
-	go r.readLoop(path)
+	matches, _ := filepath.Glob("/dev/input/event*")
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no /dev/input/event* nodes")
+	}
+	opened := 0
+	for _, p := range matches {
+		name := devName(p)
+		upper := strings.ToUpper(name)
+		// The gamepad node, or key-reporting aux nodes (PMIC power
+		// button, gpio-keys). Skip pure accelerometer/temperature
+		// nodes that would only spam abs events.
+		isPad := strings.Contains(upper, "ANBERNIC")
+		isAux := strings.Contains(upper, "PEK") ||
+			strings.Contains(upper, "GPIO-KEYS") ||
+			strings.Contains(upper, "GPIO_KEY") ||
+			strings.Contains(upper, "AXP") ||
+			strings.Contains(upper, "SUNXI-KEY") ||
+			strings.Contains(upper, "KEYBOARD") ||
+			upper == ""
+		if !isPad && !isAux {
+			continue
+		}
+		dev, err := os.OpenFile(p, os.O_RDONLY, 0)
+		if err != nil {
+			continue
+		}
+		if isPad && r.dev == nil {
+			r.dev = dev // primary: the gamepad (for close/abs logic)
+		} else if r.dev == nil {
+			r.dev = dev // first opened device if no ANBERNIC found
+		}
+		opened++
+		go r.readLoop(p)
+		fmt.Fprintf(os.Stderr, "input: opened %s (%s)\n", p, name)
+	}
+	if opened == 0 {
+		// Last resort: open the first node unconditionally.
+		dev, err := os.OpenFile(matches[0], os.O_RDONLY, 0)
+		if err != nil {
+			return nil, err
+		}
+		r.dev = dev
+		go r.readLoop(matches[0])
+		opened = 1
+		fmt.Fprintf(os.Stderr, "input: fallback %s (%s)\n", matches[0], devName(matches[0]))
+	}
 	return r, nil
 }
 
@@ -201,6 +239,10 @@ func (r *Reader) handle(e *rawEvent) {
 		}
 		if b, ok := codeToButton[e.Code]; ok {
 			r.push(Event{Button: b, Down: e.Value == 1})
+		} else if e.Value == 1 {
+			// Log unmapped key presses once — identifies what the
+			// firmware actually reports (power button etc.).
+			fmt.Fprintf(os.Stderr, "input: unmapped key code=%d down\n", e.Code)
 		}
 	case evAbs:
 		switch e.Code {
