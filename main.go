@@ -1257,7 +1257,24 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 					continue
 				}
 				if ev.Down {
-					handlePress(ev.Button)
+					// Volume: the initial tap is an instant 0.1% step;
+					// the hold acceleration lives in the repeat loop below.
+					switch ev.Button {
+					case input.VolDown:
+						v := r.Volume() - 0.001
+						if v < 0 {
+							v = 0
+						}
+						r.SetVolume(v)
+					case input.VolUp:
+						v := r.Volume() + 0.001
+						if v > 1.5 {
+							v = 1.5
+						}
+						r.SetVolume(v)
+					default:
+						handlePress(ev.Button)
+					}
 					lastRepeat[ev.Button] = time.Now()
 				}
 			}
