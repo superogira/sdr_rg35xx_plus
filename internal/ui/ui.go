@@ -1030,9 +1030,12 @@ func (u *UI) DrawSysMon(lines []string) {
 		}
 		if strings.HasPrefix(ln, "# ") {
 			Face(13, true).DrawString(u.img, yellow, x+14, yy, strings.TrimPrefix(ln, "# "))
-		} else if k, v, ok := strings.Cut(ln, "\t"); ok {
+		} else if k, v, ok := strings.Cut(ln, "\t"); ok && v != "" {
 			Face(13, false).DrawString(u.img, gray, x+24, yy, k)
 			Face(13, false).DrawString(u.img, white, valX, yy, v)
+		} else {
+			// Plain text line (log viewer): no tab-value pair.
+			Face(13, false).DrawString(u.img, white, x+14, yy, ln)
 		}
 		yy += lh
 	}
