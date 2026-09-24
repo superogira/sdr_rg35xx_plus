@@ -92,7 +92,7 @@ type Event struct {
 // stick as ABS_X/ABS_Y with value −1/0/1, folded into the same logical
 // directions.
 type Reader struct {
-	dev     *os.File
+	devs    []*os.File // all opened evdev nodes (gamepad + aux power)
 	events  chan Event
 	closed  atomic.Bool
 	pending []Event
@@ -129,7 +129,6 @@ func Open() (*Reader, error) {
 			strings.Contains(upper, "GPIO_KEY") ||
 			strings.Contains(upper, "AXP") ||
 			strings.Contains(upper, "SUNXI-KEY") ||
-			strings.Contains(upper, "KEYBOARD") ||
 			upper == ""
 		if !isPad && !isAux {
 			continue
@@ -138,13 +137,9 @@ func Open() (*Reader, error) {
 		if err != nil {
 			continue
 		}
-		if isPad && r.dev == nil {
-			r.dev = dev // primary: the gamepad (for close/abs logic)
-		} else if r.dev == nil {
-			r.dev = dev // first opened device if no ANBERNIC found
-		}
+		r.devs = append(r.devs, dev)
 		opened++
-		go r.readLoop(p)
+		go r.readLoop(dev)
 		fmt.Fprintf(os.Stderr, "input: opened %s (%s)\n", p, name)
 	}
 	if opened == 0 {
@@ -153,9 +148,8 @@ func Open() (*Reader, error) {
 		if err != nil {
 			return nil, err
 		}
-		r.dev = dev
-		go r.readLoop(matches[0])
-		opened = 1
+		r.devs = append(r.devs, dev)
+		go r.readLoop(dev)
 		fmt.Fprintf(os.Stderr, "input: fallback %s (%s)\n", matches[0], devName(matches[0]))
 	}
 	return r, nil
@@ -200,10 +194,10 @@ const rawEventSize = int(unsafe.Sizeof(rawEvent{}))
 // readLoop blocks on the device forever and converts records to Events.
 // If the system daemon (gptokeyb-style) holds an exclusive EVIOCGRAB, no
 // events ever arrive — the loop just sleeps, which is harmless.
-func (r *Reader) readLoop(path string) {
+func (r *Reader) readLoop(dev *os.File) {
 	buf := make([]byte, 64*rawEventSize)
 	for !r.closed.Load() {
-		n, err := r.dev.Read(buf)
+		n, err := dev.Read(buf)
 		if n > 0 {
 			for off := 0; off+rawEventSize <= n; off += rawEventSize {
 				e := (*rawEvent)(unsafe.Pointer(&buf[off]))
@@ -292,7 +286,7 @@ func (r *Reader) Events() []Event {
 
 func (r *Reader) Close() {
 	r.closed.Store(true)
-	if r.dev != nil {
-		r.dev.Close()
+	for _, d := range r.devs {
+		d.Close()
 	}
 }
