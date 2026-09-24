@@ -813,10 +813,11 @@ var kbRows = []string{
 	".:-_/ ",
 }
 
-// DrawKeyboard renders an on-screen keyboard for editing the rtl_tcp
-// host address. cursor is the text-edit position; kbR/kbC are the
-// selected key row/column; shift selects the uppercase row.
-func (u *UI) DrawKeyboard(title, text string, textCursor, kbR, kbC int) {
+// DrawKeyboard renders an on-screen keyboard for editing text fields.
+// cursor is the text-edit position; kbR/kbC are the selected key
+// row/column; shifted renders the alphabet rows in uppercase (toggled
+// with L2 in the app's input handler).
+func (u *UI) DrawKeyboard(title, text string, textCursor, kbR, kbC int, shifted bool) {
 	pw, ph := 520, 300
 	px := (u.W - pw) / 2
 	py := (u.H - ph) / 2
@@ -858,13 +859,15 @@ func (u *UI) DrawKeyboard(title, text string, textCursor, kbR, kbC int) {
 	for ri, row := range kbRows {
 		for ci, ch := range row {
 			cs := string(ch)
+			if shifted && ch >= 'a' && ch <= 'z' {
+				cs = string(ch - 32)
+			}
 			cx := px + 60 + ci*cellW
 			cy := y0 + ri*cellH
 			sel := ri == kbR && ci == kbC
 			if sel {
 				u.fillBlend(cx, cy-15, cellW, cellH-4, 80, 220, 255, 130)
 			}
-			// Centre the glyph inside its cell
 			gw := kbFace.TextWidth(cs)
 			gx := cx + (cellW-gw)/2
 			if sel {
@@ -874,9 +877,12 @@ func (u *UI) DrawKeyboard(title, text string, textCursor, kbR, kbC int) {
 			}
 		}
 	}
-	// Bottom bar: ⌫ and OK labels
+	// Bottom bar: ⌫, Shift indicator and OK labels
 	by := y0 + len(kbRows)*cellH + 10
-	Face(13, false).DrawString(u.img, grey, px+60, by, "B = ⌫")
+	Face(13, false).DrawString(u.img, grey, px+60, by, "B=⌫ L2=⇧")
+	if shifted {
+		Face(13, true).DrawString(u.img, cyan, px+200, by, "ABC")
+	}
 
 	// Bottom row: ← space → ⌫ OK
 	// hint text in the B label row

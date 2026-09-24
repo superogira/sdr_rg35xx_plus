@@ -628,6 +628,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 	hostText := *host
 	// kbTarget: what the on-screen keyboard is editing ("host"/"call"/"grid").
 	kbTarget := "host"
+	kbShifted := false
 	kbTitle := func() string {
 		switch kbTarget {
 		case "call":
@@ -1075,8 +1076,14 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				hostKbC = (hostKbC + 1) % len(kbRows[hostKbR])
 			case input.A:
 				if len(hostText) < 60 {
-					hostText += string(kbRows[hostKbR][hostKbC])
+					ch := kbRows[hostKbR][hostKbC]
+					if kbShifted && ch >= 'a' && ch <= 'z' {
+						ch = ch - 32 // uppercase
+					}
+					hostText += string(ch)
 				}
+			case input.L2:
+				kbShifted = !kbShifted
 			case input.B:
 				if len(hostText) > 0 {
 					hostText = hostText[:len(hostText)-1]
@@ -1497,7 +1504,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		} else if uiMode == uiFreqEdit {
 			u.DrawFreqEditor(editDigits, editCursor)
 		} else if uiMode == uiHostEdit {
-			u.DrawKeyboard(kbTitle(), hostText, len(hostText), hostKbR, hostKbC)
+			u.DrawKeyboard(kbTitle(), hostText, len(hostText), hostKbR, hostKbC, kbShifted)
 		} else if uiMode == uiHostList {
 			active := 0
 			for i, h := range hostList {
