@@ -75,6 +75,10 @@ func (u *UI) DrawFT8Log(entries []FT8Entry) {
 		tf.DrawString(u.img, color.RGBA{120, 200, 255, 255}, px+52, y, fmt.Sprintf("%3.0f", e.SNRDb))
 		tf.DrawString(u.img, color.RGBA{170, 200, 170, 255}, px+76, y, fmt.Sprintf("%4.0f", e.FreqHz))
 		tf.DrawString(u.img, ft8TextColor(e.Text), px+106, y, e.Text)
+		if e.Anno != "" {
+			aw := tf.TextWidth(e.Anno)
+			tf.DrawString(u.img, color.RGBA{140, 170, 140, 255}, px+pw-aw-6, y, e.Anno)
+		}
 	}
 }
 
@@ -137,6 +141,10 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int) {
 		lineF.DrawString(u.img, color.RGBA{120, 200, 255, 255}, x+78, yy, fmt.Sprintf("%4.0f dB", e.SNRDb))
 		lineF.DrawString(u.img, color.RGBA{170, 200, 170, 255}, x+140, yy, fmt.Sprintf("%5.0f Hz", e.FreqHz))
 		lineF.DrawString(u.img, ft8TextColor(e.Text), x+210, yy, e.Text)
+		if e.Anno != "" {
+			aw := lineF.TextWidth(e.Anno)
+			lineF.DrawString(u.img, color.RGBA{140, 170, 140, 255}, x+w-aw-10, yy, e.Anno)
+		}
 	}
 	hintF.DrawString(u.img, gray, x+10, y+h-12, i18n.T("ft8_scroll"))
 }
