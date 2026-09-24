@@ -345,6 +345,12 @@ type UI struct {
 	// the bracket stays on screen; clamped to the real data.
 	viewOffHz float64
 
+	// Waterfall colour range: black starts at floor + wfMinDb, full
+	// colour at floor + wfMinDb + wfMaxDb. Defaults 6 / 62; smaller
+	// wfMaxDb = more contrast, larger wfMinDb = darker background.
+	wfMinDb float64
+	wfMaxDb float64
+
 	lut [256]color.RGBA
 
 	// Spectrum state.
@@ -386,7 +392,7 @@ type FrameStats struct {
 }
 
 func New(w, h int) *UI {
-	u := &UI{W: w, H: h, WaterfallRows: h - BarHeight, floor: -95, SpanFull: dsp.IF2Rate}
+	u := &UI{W: w, H: h, WaterfallRows: h - BarHeight, floor: -95, SpanFull: dsp.IF2Rate, wfMinDb: 6, wfMaxDb: 62}
 	u.img = image.NewRGBA(image.Rect(0, 0, w, h))
 	u.wf = image.NewRGBA(image.Rect(0, 0, w, u.WaterfallRows))
 	u.snap = make([]complex128, dsp.TapLen)
@@ -532,7 +538,7 @@ func (u *UI) NewSpectrumRow(tap, rawTap *dsp.SpectrumTap) bool {
 				v = power[b]
 			}
 		}
-		t := (v - u.floor - 6) / 62 // 62 dB of color above floor
+		t := (v - u.floor - u.wfMinDb) / u.wfMaxDb
 		if t < 0 {
 			t = 0
 		} else if t > 1 {
@@ -1120,4 +1126,30 @@ func (u *UI) DrawFT8Grid(LOHz int64, viewOffHz float64) {
 			}
 		}
 	}
+}
+
+// SetWaterfallRange adjusts the colour mapping: minDb is how many dB
+// above the tracked noise floor the colour starts (larger = darker
+// background); maxDb is the dynamic range to full colour (smaller =
+// more contrast).
+func (u *UI) SetWaterfallRange(minDb, maxDb float64) {
+	if minDb < 0 {
+		minDb = 0
+	}
+	if minDb > 40 {
+		minDb = 40
+	}
+	if maxDb < 10 {
+		maxDb = 10
+	}
+	if maxDb > 120 {
+		maxDb = 120
+	}
+	u.wfMinDb = minDb
+	u.wfMaxDb = maxDb
+}
+
+// WaterfallRange returns the current min/max colour range settings.
+func (u *UI) WaterfallRange() (minDb, maxDb float64) {
+	return u.wfMinDb, u.wfMaxDb
 }

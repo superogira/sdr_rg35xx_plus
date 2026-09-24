@@ -55,6 +55,8 @@ var strings = map[string][2]string{
 	"m_psk":    {"ส่งรายงาน PSK Reporter", "PSK Reporter reporting"},
 	"m_ant":    {"เสาอากาศ (PSK)", "Antenna (PSK)"},
 	"m_rig":    {"เครื่องรับ (PSK)", "Rig (PSK)"},
+	"m_wfmin":  {"Waterfall ระดับต่ำสุด", "Waterfall min level"},
+	"m_wfmax":  {"Waterfall ระดับสูงสุด", "Waterfall max level"},
 	"m_rxpage":  {"การรับ", "Receive"},
 	"m_ft8page": {"FT8 / รายงาน", "FT8 / Reporting"},
 	"m_syspage": {"ระบบ", "System"},

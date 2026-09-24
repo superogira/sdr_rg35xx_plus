@@ -400,6 +400,19 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 	dw, dh := disp.Size()
 	fmt.Fprintf(os.Stderr, "step: display ok %dx%d\n", dw, dh)
 	u := ui.New(dw, dh)
+	// Waterfall colour range (menu-adjustable, persisted).
+	wfMin, wfMax := 6.0, 62.0
+	if v, ok := cfg["wfmin"]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 40 {
+			wfMin = f
+		}
+	}
+	if v, ok := cfg["wfmax"]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 10 && f <= 120 {
+			wfMax = f
+		}
+	}
+	u.SetWaterfallRange(wfMin, wfMax)
 	if span > 0 {
 		u.SetSpanKHz(span)
 	}
@@ -484,7 +497,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			dsPref = "off"
 		}
 		saveBwNow(cfg, r)
-		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref, stepHz, myCall, myGrid, myAnt, myRig, pskOn)
+		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref, stepHz, myCall, myGrid, myAnt, myRig, pskOn, wfMin, wfMax)
 		stop()
 	}
 	// Screenshot support: the last presented frame and a transient status
@@ -574,6 +587,8 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		menuSysMon
 		menuAnt
 		menuRig
+		menuWFMin
+		menuWFMax
 		menuLogs
 	)
 	// The flat 16-row menu outgrew the screen, so it is now three
@@ -588,7 +603,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 	menuPage := pageRoot
 	pageItems := [][]int{
 		{0, 0, 0}, // root rows open subpages (dispatched by row index)
-		{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep},
+		{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 		{menuFT8, menuCall, menuGrid, menuPSK, menuAnt, menuRig},
 		{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 	}
@@ -745,14 +760,27 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		case menuSpan:
 			spanIdx = (spanIdx + len(spanSteps) + dir) % len(spanSteps)
 			u.SetSpanKHz(spanSteps[spanIdx])
-		case menuStep:
-			for i, s := range stepSteps {
-				if s == stepHz {
-					stepHz = stepSteps[(i+len(stepSteps)+dir)%len(stepSteps)]
-					break
-				}
-			}
 			cfg["step"] = strconv.FormatInt(stepHz, 10)
+		case menuWFMin:
+			wfMin += float64(dir)
+			if wfMin < 0 {
+				wfMin = 0
+			}
+			if wfMin > 40 {
+				wfMin = 40
+			}
+			u.SetWaterfallRange(wfMin, wfMax)
+			cfg["wfmin"] = fmt.Sprintf("%g", wfMin)
+		case menuWFMax:
+			wfMax += float64(dir) * 2
+			if wfMax < 10 {
+				wfMax = 10
+			}
+			if wfMax > 120 {
+				wfMax = 120
+			}
+			u.SetWaterfallRange(wfMin, wfMax)
+			cfg["wfmax"] = fmt.Sprintf("%g", wfMax)
 		case menuVolume:
 			v := math.Round((r.Volume()+float64(dir)*0.01)*100) / 100
 			if v < 0 {
@@ -1440,7 +1468,9 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				ui.MenuItem{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
 				ui.MenuItem{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
 				ui.MenuItem{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
-				ui.MenuItem{Label: i18n.T("m_step"), Value: stepLabel(stepHz)})
+				ui.MenuItem{Label: i18n.T("m_step"), Value: stepLabel(stepHz)},
+				ui.MenuItem{Label: i18n.T("m_wfmin"), Value: fmt.Sprintf("+%.0f dB", wfMin)},
+				ui.MenuItem{Label: i18n.T("m_wfmax"), Value: fmt.Sprintf("%.0f dB", wfMax)})
 		case pageFT8:
 			pskVal := i18n.T("off")
 			if pskOn {
@@ -1672,7 +1702,7 @@ func readIni(path string) map[string]string {
 	return cfg
 }
 
-func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string, stepHz int64, myCall, myGrid, myAnt, myRig string, pskOn bool) {
+func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string, stepHz int64, myCall, myGrid, myAnt, myRig string, pskOn bool, wfMin, wfMax float64) {
 	f, err := os.Create(configPath())
 	if err != nil {
 		return
@@ -1689,7 +1719,7 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	if v, ok := cfg["hosts"]; ok && v != "" {
 		fmt.Fprintf(f, "hosts=%s\n", v)
 	}
-	fmt.Fprintf(f, "call=%s\ngrid=%s\npsk=%s\nantenna=%s\nrig=%s\n", myCall, myGrid, map[bool]string{true: "on", false: "off"}[pskOn], myAnt, myRig)
+	fmt.Fprintf(f, "call=%s\ngrid=%s\npsk=%s\nantenna=%s\nrig=%s\nwfmin=%g\nwfmax=%g\n", myCall, myGrid, map[bool]string{true: "on", false: "off"}[pskOn], myAnt, myRig, wfMin, wfMax)
 	if v, ok := cfg["updateurl"]; ok && v != "" {
 		fmt.Fprintf(f, "updateurl=%s\n", v)
 	}
