@@ -35,7 +35,7 @@ var strings = map[string][2]string{
 	"menu_ver":   {"รุ่น %s · %s", "v%s · %s"},
 	"freq_title": {"ตั้งความถี่ (MHz)", "Set frequency (MHz)"},
 	"freq_hint":  {"↑↓ เปลี่ยนตัวเลข · ←→ เลื่อนหลัก · A ยืนยัน · B ยกเลิก", "↑↓ digit · ←→ position · A OK · B cancel"},
-	"kb_hint":    {"↑↓←→ เลื่อน · A พิมพ์ · B ลบ · X ยืนยัน · Y ปิด", "↑↓←→ move · A type · B backspace · X OK · Y close"},
+	"kb_hint":    {"↑↓←→ เลื่อน · A พิมพ์ · B ลบ · L2 ตัวใหญ่ · X ยืนยัน", "↑↓←→ move · A type · B backspace · L2 shift · X OK"},
 	"host_title": {"รายการเครื่องแม่ข่าย", "Host list"},
 	"host_hint":  {"A ใช้ · X แก้ไข · Y ลบ · B กลับ", "A use · X edit · Y delete · B back"},
 	"host_add":   {"+ เพิ่มรายการใหม่", "+ Add new entry"},
