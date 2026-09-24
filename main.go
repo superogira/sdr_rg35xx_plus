@@ -303,7 +303,7 @@ func main() {
 	rate := 2_048_000
 	if v, ok := cfg["rate"]; ok {
 		if n, err := strconv.Atoi(v); err == nil {
-			for _, r := range []int{640_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000} {
+			for _, r := range []int{256_000, 640_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000} {
 				if n == r {
 					rate = n
 					break
@@ -686,7 +686,7 @@ func main() {
 			// bandwidth-saving option for mobile hotspots (1.3 MB/s vs
 			// 2.0 at 1.024M). The change reconnects with the new rate
 			// as the connection's first command.
-			rates := []int{640_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000}
+			rates := []int{256_000, 640_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000}
 			cur := r.IQRate()
 			idx := 0
 			for i, v := range rates {

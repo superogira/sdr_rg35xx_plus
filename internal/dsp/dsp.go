@@ -32,7 +32,7 @@ func SetIQRate(hz int) bool {
 	// demod rate, then audio ÷ N — at 512k the NFM demod lands exactly
 	// on the 8 kHz audio output. Below that the audio decimation
 	// factor truncates to zero and the process dies.
-	if hz < 512_000 || hz%32_000 != 0 {
+	if hz < 256_000 || hz%32_000 != 0 {
 		return false
 	}
 	IQRate = hz
