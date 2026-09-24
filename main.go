@@ -554,6 +554,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		uiFT8Log
 		uiSysMon
 		uiLogs
+		uiBmList
 	)
 	uiMode := uiMain
 	// Dev aid for PNG screenshot testing of the overlays.
@@ -591,6 +592,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		menuWFMin
 		menuWFMax
 		menuLogs
+		menuBM
 	)
 	// The flat 16-row menu outgrew the screen, so it is now three
 	// subpages reached from a 3-row root. pageItems maps (page → row)
@@ -600,13 +602,15 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		pageRx
 		pageFT8
 		pageSys
+		pageBM
 	)
 	menuPage := pageRoot
 	pageItems := [][]int{
-		{0, 0, 0}, // root rows open subpages (dispatched by row index)
+		{0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
 		{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 		{menuFT8, menuCall, menuGrid, menuAnt, menuRig, menuPSK},
 		{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
+		{menuBM},
 	}
 	spanSteps := []int{1000, 750, 500, 250, 125, 100, 50, 25, 12, 10, 5, 3}
 	spanIdx := func() int {
@@ -629,6 +633,38 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 	hostText := *host
 	// kbTarget: what the on-screen keyboard is editing ("host"/"call"/"grid").
 	kbTarget := "host"
+	// Bookmarks: freq|mode|label entries persisted as bm= in the ini.
+	type bmT struct {
+		freqHz int64
+		mode   string
+		label  string
+	}
+	bookmarks := []bmT{}
+	if v, ok := cfg["bm"]; ok && v != "" {
+		for _, ent := range strings.Split(v, "|") {
+			parts := strings.SplitN(ent, ":", 3)
+			if len(parts) < 2 {
+				continue
+			}
+			f, err := strconv.ParseInt(parts[0], 10, 64)
+			if err != nil || f < 500_000 {
+				continue
+			}
+			bm := bmT{freqHz: f, mode: parts[1]}
+			if len(parts) > 2 {
+				bm.label = parts[2]
+			}
+			bookmarks = append(bookmarks, bm)
+		}
+	}
+	bmSel := 0
+	saveBookmarks := func() {
+		var parts []string
+		for _, bm := range bookmarks {
+			parts = append(parts, fmt.Sprintf("%d:%s:%s", bm.freqHz, bm.mode, bm.label))
+		}
+		cfg["bm"] = strings.Join(parts, "|")
+	}
 	kbShifted := false
 	kbTitle := func() string {
 		switch kbTarget {
@@ -640,6 +676,8 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			return i18n.T("m_ant")
 		case "rig":
 			return i18n.T("m_rig")
+		case "bm":
+			return i18n.T("m_bm")
 		}
 		return i18n.T("m_host") + ":port"
 	}
@@ -845,6 +883,9 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			uiMode = uiSysMon
 		case menuLogs:
 			uiMode = uiLogs
+		case menuBM:
+			bmSel = 0
+			uiMode = uiBmList
 		case menuHost:
 			hostSel = 0
 			uiMode = uiHostList
@@ -979,6 +1020,44 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			case input.B, input.Start, input.Select, input.A:
 				uiMode, menuPage, menuSel = uiMenu, pageSys, 2
 			}
+		case uiBmList:
+			// Rows: saved bookmarks + "save current" at the bottom.
+			rows := len(bookmarks) + 1
+			switch b {
+			case input.Up:
+				bmSel = (bmSel + rows - 1) % rows
+			case input.Down:
+				bmSel = (bmSel + 1) % rows
+			case input.A:
+				if bmSel == len(bookmarks) {
+					// Save current freq+mode as a new bookmark.
+					label := fmt.Sprintf("%.4f MHz", float64(r.Freq())/1e6)
+					bookmarks = append(bookmarks, bmT{freqHz: r.Freq(), mode: r.Mode().Name, label: label})
+					saveBookmarks()
+					bmSel = len(bookmarks) - 1
+				} else {
+					bm := bookmarks[bmSel]
+					r.SetFreq(bm.freqHz)
+					r.SetMode(dsp.ModeByName(bm.mode))
+					uiMode = uiMain
+				}
+			case input.X:
+				if bmSel < len(bookmarks) {
+					hostText, kbTarget = bookmarks[bmSel].label, "bm"
+					hostKbR, hostKbC = 0, 0
+					uiMode = uiHostEdit
+				}
+			case input.Y:
+				if bmSel < len(bookmarks) {
+					bookmarks = append(bookmarks[:bmSel], bookmarks[bmSel+1:]...)
+					if bmSel >= len(bookmarks) {
+						bmSel = len(bookmarks)
+					}
+					saveBookmarks()
+				}
+			case input.B, input.Start:
+				uiMode, menuPage, menuSel = uiMenu, pageRoot, 3
+			}
 		case uiLogs:
 			// d-pad scrolls (line/page), close keys back to the menu.
 			switch b {
@@ -1100,6 +1179,13 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 					psk.SetStation(myCall, myGrid, myAnt, myRig)
 					hostText = ""
 					uiMode, menuPage, menuSel = uiMenu, pageFT8, 4
+				case "bm":
+					if bmSel < len(bookmarks) {
+						bookmarks[bmSel].label = hostText
+						saveBookmarks()
+					}
+					hostText = ""
+					uiMode = uiBmList
 				default:
 					if hostText != "" {
 						if hostEditIdx >= 0 && hostEditIdx < len(hostList) {
@@ -1476,6 +1562,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			LOHz:        loHz,
 			BwHz:        r.Bandwidth(),
 			SSBOneSided: r.Mode().SSB && r.Mode().Name != "LSB",
+			AmMode:   r.Mode().Name == "AM",
 			CpuPct:      cpu,
 			MemPct:      mem,
 			SwpPct:      swp,
@@ -1499,7 +1586,8 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			items = append(items,
 				ui.MenuItem{Label: i18n.T("m_rxpage"), Value: "▸"},
 				ui.MenuItem{Label: i18n.T("m_ft8page"), Value: "▸"},
-				ui.MenuItem{Label: i18n.T("m_syspage"), Value: "▸"})
+				ui.MenuItem{Label: i18n.T("m_syspage"), Value: "▸"},
+				ui.MenuItem{Label: i18n.T("m_bm"), Value: "▸"})
 		case pageRx:
 			items = append(items,
 				ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.5f MHz ▸", float64(r.Freq())/1e6)},
@@ -1549,6 +1637,24 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				}
 			}
 			u.DrawHostList(hostList, hostSel, active)
+		} else if uiMode == uiBmList {
+			labels := make([]string, len(bookmarks))
+			active := -1
+			for i, bm := range bookmarks {
+				if bm.freqHz == r.Freq() && bm.mode == r.Mode().Name {
+					active = i
+				}
+				mode := bm.mode
+				if mode == "" {
+					mode = "NFM"
+				}
+				if bm.label != "" {
+					labels[i] = fmt.Sprintf("%s  %s  %.4f", bm.label, mode, float64(bm.freqHz)/1e6)
+				} else {
+					labels[i] = fmt.Sprintf("%s  %.4f MHz", mode, float64(bm.freqHz)/1e6)
+				}
+			}
+			u.DrawBookmarkList(labels, bmSel, active, r.Mode().Name)
 		} else if uiMode == uiFT8Log {
 			u.DrawFT8LogFull(ft8Log, ft8Scroll)
 		} else if uiMode == uiSysMon {
@@ -1764,6 +1870,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 		fmt.Fprintf(f, "hosts=%s\n", v)
 	}
 	fmt.Fprintf(f, "call=%s\ngrid=%s\npsk=%s\nantenna=%s\nrig=%s\nwfmin=%g\nwfmax=%g\n", myCall, myGrid, map[bool]string{true: "on", false: "off"}[pskOn], myAnt, myRig, wfMin, wfMax)
+	if v, ok := cfg["bm"]; ok {
+		fmt.Fprintf(f, "bm=%s\n", v)
+	}
 	if v, ok := cfg["updateurl"]; ok && v != "" {
 		fmt.Fprintf(f, "updateurl=%s\n", v)
 	}

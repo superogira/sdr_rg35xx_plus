@@ -76,6 +76,8 @@ func (m Mode) Bandwidths() []float64 {
 		return []float64{500, 1000, 1500, 2000, 2500, 3000, 5000, 6000}
 	case m.Name == "CW":
 		return []float64{50, 100, 150, 200, 250, 300, 400, 500}
+	case m.Name == "AM":
+		return []float64{3000, 6000, 8000, 10000}
 	}
 	return nil
 }
@@ -93,13 +95,25 @@ var (
 	ModeLSB = Mode{Name: "LSB", SSB: true, ShiftHz: -1500, HalfBwHz: 1300, BwHz: 2600}
 	// CW: a 300 Hz window centred on a +700 Hz beat note.
 	ModeCW = Mode{Name: "CW", SSB: true, ShiftHz: 700, HalfBwHz: 150, BwHz: 300}
+	// AM: envelope detection (airband 118-137 MHz, shortwave broadcast).
+	ModeAM = Mode{Name: "AM", AudioCut: 3000, BwHz: 6000}
 )
 
 // SSBRate is the audio rate of the SSB/CW branch.
 const SSBRate = 8000
 
 // ModeList is the cycling order for the mode button/menu.
-var ModeList = []Mode{ModeNFM, ModeWFM, ModeUSB, ModeLSB, ModeCW}
+var ModeList = []Mode{ModeNFM, ModeWFM, ModeUSB, ModeLSB, ModeCW, ModeAM}
+
+// ModeByName looks up a mode by its Name (for bookmarks, ini restore).
+func ModeByName(name string) Mode {
+	for _, m := range ModeList {
+		if m.Name == name {
+			return m
+		}
+	}
+	return ModeNFM
+}
 
 // NextMode returns the mode after m in the cycling order.
 func NextMode(m Mode) Mode {
@@ -121,7 +135,7 @@ func (m Mode) AudioOutRate() int {
 		}
 		return SSBRate
 	}
-	if m.Name == "NFM" {
+	if m.Name == "NFM" || m.Name == "AM" {
 		return SSBRate
 	}
 	return IF2Rate / 8
@@ -193,6 +207,7 @@ type Chain struct {
 	// IF2 sample and is kept in [0, 2π).
 	offsetHz float64
 	ncoPhase float64
+	amDc     float64 // AM envelope DC tracker
 
 	// Squelch + metering state.
 	sqlOpen  bool
@@ -288,6 +303,22 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 		}
 		c.chRate = IF2Rate / c.chD
 		c.demod = FMDemod{rate: float64(c.chRate)}
+		c.auTaps = DesignLowpass(255, mode.AudioCut, float64(c.chRate))
+		c.auD = c.chRate / c.outRate
+		if c.auD < 1 {
+			c.auD = 1
+		}
+
+	case mode.Name == "AM":
+		// Envelope detection: channel filter (same complex bandpass as
+		// NFM), then |z| with DC blocking, then audio lowpass.
+		c.outRate = SSBRate // 8 kHz
+		c.chTaps = DesignLowpass(255, bw/2, float64(IF2Rate))
+		c.chD = 4
+		for IF2Rate/c.chD < c.outRate && c.chD > 1 {
+			c.chD--
+		}
+		c.chRate = IF2Rate / c.chD
 		c.auTaps = DesignLowpass(255, mode.AudioCut, float64(c.chRate))
 		c.auD = c.chRate / c.outRate
 		if c.auD < 1 {
@@ -427,6 +458,29 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 
 	if c.mode.SSB {
 		c.processSSB(out)
+		return
+	}
+
+	if c.mode.Name == "AM" {
+		// Channel filter, then envelope detection with DC blocking.
+		chanf := c.chScratch[:0]
+		complexFIRDecim(c.chTaps, &c.chHist, c.chD, c.fif2, &chanf)
+		c.chScratch = chanf
+		dn := len(chanf)
+		c.fdem = growFloat(c.fdem, dn)
+		for i, z := range chanf {
+			mag := math.Sqrt(real(z)*real(z) + imag(z)*imag(z))
+			// Slow DC tracker removes the carrier envelope.
+			c.amDc += 0.002 * (mag - c.amDc)
+			c.fdem[i] = (mag - c.amDc) * 4.0
+		}
+		audio := c.audioBuf[:0]
+		realFIRDecim(c.auTaps, &c.auHist, c.auD, c.fdem, &audio)
+		c.audioBuf = audio
+		for _, v := range audio {
+			x := v * c.volume
+			appendOutput(out, x)
+		}
 		return
 	}
 
