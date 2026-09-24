@@ -549,7 +549,11 @@ func abs64(v int64) int64 {
 // before a hardware retune is required: the IF decimation filter
 // passes ~±0.4·IF2Rate; keep a mode-bandwidth of margin.
 func (r *Radio) offsetLimit() int64 {
-	lim := int64(0.35 * float64(dsp.IF2Rate))
+	// The NCO rotates at the FULL IQ rate (before IF2 decimation), so
+	// the window is bounded by the IQ Nyquist minus the IF2 filter's
+	// half-width (the rotated signal must still fit through the
+	// decimation filter without aliasing).
+	lim := int64(0.45 * float64(dsp.IQRate))
 	if bw := int64(r.mode.BwHz); bw*2 < lim {
 		lim -= bw
 	}
