@@ -302,11 +302,13 @@ func main() {
 	}
 	rate := 2_048_000
 	if v, ok := cfg["rate"]; ok {
-		// Only server-verified rates; a stale 512000 from an old build
-		// falls through to the default instead of requesting a rate the
-		// server cannot stream cleanly.
-		if n, err := strconv.Atoi(v); err == nil && (n == 2_048_000 || n == 1_024_000) {
-			rate = n
+		if n, err := strconv.Atoi(v); err == nil {
+			for _, r := range []int{640_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000} {
+				if n == r {
+					rate = n
+					break
+				}
+			}
 		}
 	}
 	if v, ok := cfg["lang"]; ok {
@@ -673,16 +675,21 @@ func main() {
 			r.SetSquelchDb(db)
 			cfg["sql"] = fmt.Sprintf("%g", r.SquelchDb())
 		case menuSample:
-			// Verified rates only (512 kHz removed — the server cannot
-			// stream it cleanly, audio ran time-stretched); the change
-			// reconnects with the new rate as the connection's first
-			// command.
-			var next int
-			if r.IQRate() == 2_048_000 {
-				next = 1_024_000
-			} else {
-				next = 2_048_000
+			// RTL-SDR hardware rates our DSP supports (divisible by
+			// 64 kHz for the SSB decimation chain). 640 kHz is the
+			// bandwidth-saving option for mobile hotspots (1.3 MB/s vs
+			// 2.0 at 1.024M). The change reconnects with the new rate
+			// as the connection's first command.
+			rates := []int{640_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000}
+			cur := r.IQRate()
+			idx := 0
+			for i, v := range rates {
+				if v == cur {
+					idx = i
+					break
+				}
 			}
+			next := rates[(idx+len(rates)+dir)%len(rates)]
 			r.SetCaptureRate(next)
 		case menuBW:
 			bws := r.Bandwidths()
