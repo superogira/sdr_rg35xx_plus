@@ -372,6 +372,12 @@ type UI struct {
 	// still show color.
 	floor float64
 
+	// World map screen: active basemap style (index into mapStyleNames)
+	// and its decoded RGBA cache (one slot — switching re-decodes).
+	mapStyle int
+	mapImg   *image.RGBA
+	mapIdx   int
+
 	stats FrameStats
 }
 
