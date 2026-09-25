@@ -191,6 +191,19 @@ type Chain struct {
 	ssbScratch []complex128
 	sbOut      []complex128
 
+	// FT8 monitor branch: an independent USB-style 8 kHz feed for the
+	// detector. The old feed lived inside processSSB, so enabling FT8
+	// while listening in AM/NFM/WFM (or wide-SSB) starved the detector —
+	// no decodes at all. AM is unfixable via the audio path anyway: its
+	// envelope detector flattens the constant-envelope FSK tones to DC.
+	ft8DecTaps []float64
+	ft8DecHist []complex128
+	ft8DecD    int
+	ft8Taps    []complex128
+	ft8Hist    []complex128
+	ft8Scratch []complex128
+	ft8Side    []complex128
+
 	// Audio decimator: real, IF2Rate -> AudioRate.
 	auTaps []float64
 	auHist []float64
@@ -347,6 +360,26 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 		c.agc = NewAGC()
 		c.agcOn = true
 	}
+
+	// FT8 monitor branch: decimate IF2 -> 8 kHz, then select 200..3200 Hz
+	// (USB-style, shift 1700 / half-bw 1500 — the same band an SSB-8k
+	// listener's FT8 feed sees) so the decoded audio-frequency reports
+	// stay consistent whichever mode is feeding the detector.
+	c.ft8DecTaps = DesignLowpass(255, float64(SSBRate)/2-400, float64(IF2Rate))
+	c.ft8DecD = IF2Rate / SSBRate
+	ft8Half := 1500.0
+	ft8Shift := ft8Half + 200
+	ft8N := int(3.3 * float64(SSBRate) / ft8Half)
+	if ft8N < 127 {
+		ft8N = 127
+	}
+	ft8Lp := DesignLowpass(ft8N, ft8Half, float64(SSBRate))
+	c.ft8Taps = make([]complex128, len(ft8Lp))
+	for n, h := range ft8Lp {
+		ang := 2 * math.Pi * ft8Shift * float64(n) / float64(SSBRate)
+		c.ft8Taps[n] = complex(h*math.Cos(ang), h*math.Sin(ang))
+	}
+
 	c.sqlLevel = 8 // dB above floor
 	c.powerDb = -100
 	c.sqlFloor = -100
@@ -456,6 +489,13 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 		c.fif2 = c.fif2Rot
 	}
 
+	// FT8 monitor: the dedicated branch below feeds the detector in every
+	// mode; the SSB-8k path keeps its in-processSSB feed (identical band,
+	// avoids running the branch twice).
+	if c.ft8 != nil && !(c.mode.SSB && c.outRate == SSBRate) {
+		c.feedFT8()
+	}
+
 	if c.mode.SSB {
 		c.processSSB(out)
 		return
@@ -560,6 +600,29 @@ func appendOutput(out *[]float32, x float64) {
 		x = -0.98
 	}
 	*out = append(*out, float32(x))
+}
+
+// feedFT8 runs the independent FT8 monitor branch: decimate the rotated
+// IF2 stream to 8 kHz, bandpass 200..3200 Hz, and hand the real part to
+// the detector. Used whenever the audio path itself cannot feed FT8
+// (AM/NFM/WFM/wide-SSB listening modes).
+func (c *Chain) feedFT8() {
+	if len(c.ft8Taps) == 0 || c.ft8DecD < 1 {
+		return
+	}
+	slow := c.ft8Scratch[:0]
+	complexFIRDecim(c.ft8DecTaps, &c.ft8DecHist, c.ft8DecD, c.fif2, &slow)
+	c.ft8Scratch = slow
+
+	side := c.ft8Side[:0]
+	complexCIFIR(c.ft8Taps, &c.ft8Hist, slow, &side)
+	c.ft8Side = side
+
+	buf := make([]float64, 0, len(side))
+	for _, z := range side {
+		buf = append(buf, real(z)*3.0)
+	}
+	c.ft8.Feed(buf)
 }
 
 // measure updates the power meter and squelch state from one IF block.
