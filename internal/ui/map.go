@@ -2,70 +2,137 @@ package ui
 
 import (
 	"bytes"
-	_ "embed"
+	"embed"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
-	_ "image/png" // decoder for the embedded basemap
+	_ "image/png" // decoder for the embedded basemaps
+	"io/fs"
 	"math"
-	"os"
-	"sync"
+	"sort"
 	"time"
 )
 
-//go:embed world_map.png
-var worldMapPNG []byte
+//go:embed maps/*.png
+var mapFS embed.FS
 
-var (
-	worldMapOnce sync.Once
-	worldMapImg  *image.RGBA
+// mapStyleNames lists every embedded basemap in lexical order. All of
+// them are the same 640×480 equirectangular template (verified by
+// cmd/mapcheck — coastline edge correlation peaks at offset (0,0)), so
+// one projection formula serves every style:
+// x = (lon+180)/360·W, y = (90-lat)/180·H.
+var mapStyleNames = func() []string {
+	names, err := fs.Glob(mapFS, "maps/*.png")
+	if err != nil {
+		return nil
+	}
+	sort.Strings(names)
+	return names
+}()
+
+// Station roles colour the markers: the SENDING station is red, the
+// RECEIVING station is green. Zero value = sender so bare literals keep
+// the common (CQ / plain QSO) meaning.
+const (
+	RoleSender = iota
+	RoleReceiver
 )
-
-// worldMap decodes the embedded 640×480 equirectangular basemap into an
-// RGBA copy ready for blitting. Calibration verified against landmark
-// pixels: x = (lon+180)/360·W, y = (90-lat)/180·H.
-func worldMap() *image.RGBA {
-	worldMapOnce.Do(func() {
-		img, _, err := image.Decode(bytes.NewReader(worldMapPNG))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "map: basemap decode failed: %v\n", err)
-			return
-		}
-		if rgba, ok := img.(*image.RGBA); ok {
-			worldMapImg = rgba
-			return
-		}
-		rgba := image.NewRGBA(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy()))
-		draw.Draw(rgba, rgba.Bounds(), img, img.Bounds().Min, draw.Src)
-		worldMapImg = rgba
-	})
-	return worldMapImg
-}
 
 // MapEntry describes one FT8 activity marker on the world map.
 type MapEntry struct {
 	Lat, Lon    float64       // marker position (exact grid or country centroid)
 	Arc         bool          // draw a dashed arc from the sender's position
-	FromLat     float64       // arc source
+	FromLat     float64       // arc source (sender, red)
 	FromLon     float64       // arc source
+	Role        int           // RoleSender / RoleReceiver (arc endpoint colour)
 	IsCQ        bool          // true = CQ beacon, false = QSO exchange
 	Approx      bool          // position is a country-level guess (hollow marker)
 	Age         time.Duration // time since decoded
 }
 
-// DrawWorldMap renders the FT8 world map: photographic equirectangular
-// basemap (blitted full-screen — it is 640×480, exactly the framebuffer)
-// with CQ ripples and QSO arcs from the last 10 minutes on top. Markers
+// MapSelection is the station picked with Left/Right on the map screen.
+// Detail (non-nil) opens the info panel with the station's message
+// history; the panel lands on the half of the screen opposite the
+// station marker so it never covers it.
+type MapSelection struct {
+	Call      string
+	Lat, Lon  float64 // station position (grid or country centroid)
+	Approx    bool
+	Grid      string // known Maidenhead grid ("" when only country known)
+	Country   string
+	Index     int      // 1-based position in the sorted station list
+	Total     int      // station count
+	Detail    []string // message-history rows; nil = panel closed
+}
+
+// CycleMap switches the basemap style (L1 = previous, R1 = next).
+func (u *UI) CycleMap(dir int) {
+	n := len(mapStyleNames)
+	if n == 0 {
+		return
+	}
+	u.mapStyle = ((u.mapStyle + dir) % n + n) % n
+	u.mapImg = nil // force re-decode of the new style
+}
+
+// MapStyleName returns a short label for the active basemap.
+func (u *UI) MapStyleName() string {
+	if u.mapStyle < 0 || u.mapStyle >= len(mapStyleNames) {
+		return "?"
+	}
+	n := mapStyleNames[u.mapStyle]
+	n = n[len("maps/world_map"):]
+	n = n[:len(n)-len(".png")]
+	if n == "" {
+		return "base"
+	}
+	return n[1:] // strip the leading '_' / '.'
+}
+
+// basemap decodes the active style into an RGBA copy, caching only the
+// most recent one (switching styles re-decodes, ~tens of ms — fine for
+// a button action, and 21 full-res RGBA copies would be 25 MB).
+func (u *UI) basemap() *image.RGBA {
+	if u.mapImg != nil && u.mapIdx == u.mapStyle {
+		return u.mapImg
+	}
+	if u.mapStyle < 0 || u.mapStyle >= len(mapStyleNames) {
+		return nil
+	}
+	data, err := mapFS.ReadFile(mapStyleNames[u.mapStyle])
+	if err != nil {
+		return nil
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		fmt.Printf("map: basemap decode failed: %v\n", err)
+		return nil
+	}
+	rgba, ok := img.(*image.RGBA)
+	if !ok {
+		rgba = image.NewRGBA(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy()))
+		draw.Draw(rgba, rgba.Bounds(), img, img.Bounds().Min, draw.Src)
+	}
+	u.mapImg, u.mapIdx = rgba, u.mapStyle
+	return rgba
+}
+
+// DrawWorldMap renders the FT8 world map: the active equirectangular
+// basemap with red sender / green receiver markers, CQ ripples and
+// animated dashed QSO arcs from the last 10 minutes on top. Markers
 // whose position is only a country guess draw as hollow rings until the
 // real grid is learned.
-func (u *UI) DrawWorldMap(entries []MapEntry) {
+func (u *UI) DrawWorldMap(entries []MapEntry, sel *MapSelection) {
 	if !u.blitWorldMap() {
 		// Decode failure fallback: plain dark background.
 		u.fillBlend(0, 0, u.W, u.H, 15, 17, 23, 255)
 	}
 
-	// Draw activity markers.
+	// Travelling-dash phase: advances ~1 px per 30 ms along the
+	// sender→receiver direction, wrapping over the 12 px dash period.
+	phase := float64(time.Now().UnixMilli() % 12000) / 30.0
+
 	for _, e := range entries {
 		x, y := u.latLonToScreen(e.Lat, e.Lon)
 
@@ -77,21 +144,41 @@ func (u *UI) DrawWorldMap(entries []MapEntry) {
 
 		if e.Arc {
 			x1, y1 := u.latLonToScreen(e.FromLat, e.FromLon)
-			u.drawArc(x1, y1, x, y, fade)
-			u.marker(x, y, fade, e.Approx)
-			u.marker(x1, y1, fade*0.7, false)
+			u.drawArc(x1, y1, x, y, fade, phase)
+			u.marker(x1, y1, fade*0.7, false, RoleSender)
+			u.marker(x, y, fade, e.Approx, e.Role)
 		} else if e.IsCQ {
 			// CQ: expanding ripple (the rings self-cap at 55 px, so after
 			// ~7 s the marker settles to a slowly fading dot).
 			radius := float64(e.Age) / float64(time.Second) * 8 // 8px/second expansion
 			if e.Approx {
-				u.marker(x, y, fade, true)
+				u.marker(x, y, fade, true, RoleSender)
 			} else {
 				u.drawRipple(x, y, radius, fade)
 			}
 		} else {
-			u.marker(x, y, fade, e.Approx)
+			u.marker(x, y, fade, e.Approx, e.Role)
 		}
+	}
+
+	// Selection highlight on top of the markers.
+	if sel != nil {
+		x, y := u.latLonToScreen(sel.Lat, sel.Lon)
+		u.drawCircle(x, y, 8, color.RGBA{255, 255, 255, 230})
+		u.drawCircle(x, y, 9, color.RGBA{0, 0, 0, 160})
+		// Callsign chip above the marker.
+		cf := Face(12, true)
+		cw := cf.TextWidth(sel.Call)
+		cx := x - cw/2 - 5
+		if cx < 2 {
+			cx = 2
+		}
+		cy := y - 26
+		if cy < 30 {
+			cy = y + 12
+		}
+		u.fillBlend(cx, cy, cw+10, 17, 0, 0, 0, 200)
+		cf.DrawString(u.img, color.RGBA{255, 255, 255, 255}, cx+5, cy+13, sel.Call)
 	}
 
 	// Title chip.
@@ -99,27 +186,116 @@ func (u *UI) DrawWorldMap(entries []MapEntry) {
 	tf := Face(13, false)
 	tf.DrawString(u.img, color.RGBA{255, 255, 255, 255}, 16, 26, "FT8 World Map - 10min")
 
-	// Legend chip (below the title): exact vs approximate positions.
-	// The markers are drawn graphically — the font has no circle glyphs.
-	u.fillBlend(8, 38, 190, 20, 0, 0, 0, 150)
-	u.marker(18, 47, 1.0, false)
-	lf := Face(10, false)
-	lf.DrawString(u.img, color.RGBA{220, 220, 220, 255}, 28, 52, "grid")
-	u.marker(66, 47, 1.0, true)
-	lf.DrawString(u.img, color.RGBA{220, 220, 220, 255}, 76, 52, "country (approx)")
+	// Active basemap chip (top-right).
+	mn := fmt.Sprintf("map %d/%d %s", u.mapStyle+1, len(mapStyleNames), u.MapStyleName())
+	mw := tf.TextWidth(mn)
+	u.fillBlend(u.W-mw-24, 8, mw+16, 26, 0, 0, 0, 170)
+	tf.DrawString(u.img, color.RGBA{200, 220, 255, 255}, u.W-mw-16, 26, mn)
 
-	// Hint chip (bottom-right, clear of the map action).
-	hint := "B close"
+	// Legend chip (below the title): sender / receiver / approximate.
+	// The markers are drawn graphically — the font has no circle glyphs.
+	u.fillBlend(8, 38, 210, 20, 0, 0, 0, 150)
+	lf := Face(10, false)
+	u.marker(18, 47, 1.0, false, RoleSender)
+	lf.DrawString(u.img, color.RGBA{220, 220, 220, 255}, 28, 52, "TX")
+	u.marker(52, 47, 1.0, false, RoleReceiver)
+	lf.DrawString(u.img, color.RGBA{220, 220, 220, 255}, 62, 52, "RX")
+	u.marker(86, 47, 1.0, true, RoleSender)
+	lf.DrawString(u.img, color.RGBA{220, 220, 220, 255}, 96, 52, "approx")
+
+	// Station counter + hints (bottom, clear of the map action).
 	hf := Face(11, false)
+	if sel != nil {
+		cnt := fmt.Sprintf("%s  %d/%d", sel.Call, sel.Index, sel.Total)
+		cw := hf.TextWidth(cnt)
+		u.fillBlend(8, u.H-30, cw+16, 22, 0, 0, 0, 170)
+		hf.DrawString(u.img, color.RGBA{120, 255, 120, 255}, 16, u.H-13, cnt)
+	}
+	hint := "L/R station  A info  B close"
 	hw := hf.TextWidth(hint)
 	u.fillBlend(u.W-hw-24, u.H-30, hw+16, 22, 0, 0, 0, 170)
 	hf.DrawString(u.img, color.RGBA{220, 220, 220, 255}, u.W-hw-16, u.H-13, hint)
+	styleHint := "L1/R1 map style"
+	sw := hf.TextWidth(styleHint)
+	sx := u.W - hw - 24 - sw - 16
+	if sx > 4 {
+		u.fillBlend(sx, u.H-30, sw+16, 22, 0, 0, 0, 170)
+		hf.DrawString(u.img, color.RGBA{220, 220, 220, 255}, sx+8, u.H-13, styleHint)
+	}
+
+	// Detail panel last, over everything.
+	if sel != nil && len(sel.Detail) > 0 {
+		u.drawMapDetail(sel)
+	}
 }
 
-// blitWorldMap copies the basemap over the whole frame, scaling if the
-// screen size differs from the image (in practice 1:1 — both 640×480).
+// drawMapDetail renders the station info panel on the half of the
+// screen opposite the station marker.
+func (u *UI) drawMapDetail(sel *MapSelection) {
+	x, _ := u.latLonToScreen(sel.Lat, sel.Lon)
+
+	pw := u.W/2 - 12 // panel width
+	px := 6          // station on the right half → panel on the left
+	if x <= u.W/2 {
+		px = u.W/2 + 6 // station on the left → panel on the right
+	}
+	py := 64 // below title + legend
+	ph := u.H - py - 40
+
+	// Panel background + border.
+	u.fillBlend(px, py, pw, ph, 8, 10, 14, 235)
+	for d := 0; d < pw; d++ {
+		u.setPixel(px+d, py, color.RGBA{90, 120, 160, 255})
+		u.setPixel(px+d, py+ph-1, color.RGBA{90, 120, 160, 255})
+	}
+	for d := 0; d < ph; d++ {
+		u.setPixel(px, py+d, color.RGBA{90, 120, 160, 255})
+		u.setPixel(px+pw-1, py+d, color.RGBA{90, 120, 160, 255})
+	}
+
+	txf := px + 10
+	ty := py + 22
+	// Callsign header.
+	hf := Face(16, true)
+	hf.DrawString(u.img, color.RGBA{255, 255, 255, 255}, txf, ty, sel.Call)
+	ty += 20
+
+	sf := Face(11, false)
+	g := sel.Grid
+	if g == "" {
+		g = "- (country approx)"
+	}
+	sf.DrawString(u.img, color.RGBA{200, 200, 200, 255}, txf, ty, "Grid: "+g)
+	ty += 16
+	if sel.Country != "" {
+		sf.DrawString(u.img, color.RGBA{200, 200, 200, 255}, txf, ty, sel.Country)
+		ty += 16
+	}
+	// Separator.
+	for d := 0; d < pw-20; d++ {
+		u.setPixel(txf+d, ty, color.RGBA{90, 120, 160, 200})
+	}
+	ty += 8
+
+	// Message history: newest at the bottom (chat style). Show as many
+	// as fit; the caller pre-sorts and pre-truncates the rows.
+	rowH := 15
+	maxRows := (py + ph - 12 - ty) / rowH
+	rows := sel.Detail
+	if len(rows) > maxRows {
+		rows = rows[len(rows)-maxRows:]
+	}
+	for _, ln := range rows {
+		sf.DrawString(u.img, color.RGBA{230, 230, 230, 255}, txf, ty, ln)
+		ty += rowH
+	}
+}
+
+// blitWorldMap copies the active basemap over the whole frame, scaling
+// if the screen size differs from the image (in practice 1:1 — both
+// 640×480).
 func (u *UI) blitWorldMap() bool {
-	m := worldMap()
+	m := u.basemap()
 	if m == nil {
 		return false
 	}
@@ -147,33 +323,45 @@ func (u *UI) blitWorldMap() bool {
 }
 
 // latLonToScreen converts lat/lon to screen coordinates (equirectangular
-// — matches the embedded basemap's projection).
+// — matches every embedded basemap's projection).
 func (u *UI) latLonToScreen(lat, lon float64) (int, int) {
 	x := int((lon + 180) * float64(u.W) / 360)
 	y := int((90 - lat) * float64(u.H) / 180)
 	return x, y
 }
 
-// marker draws a station position: a filled amber dot when the grid is
-// known, a hollow ring when the position is only a country guess (it
-// moves to the exact spot once the station is heard with a grid).
-func (u *UI) marker(x, y int, fade float64, approx bool) {
-	if approx {
-		u.drawRing(x, y, fade)
-		return
+// roleColour returns (core, rim) for a station role.
+func roleColour(role int) (color.RGBA, color.RGBA) {
+	if role == RoleReceiver {
+		return color.RGBA{0, 255, 0, 255}, color.RGBA{0, 60, 0, 255}
 	}
-	u.drawDot(x, y, fade)
+	return color.RGBA{255, 0, 0, 255}, color.RGBA{70, 0, 0, 255}
 }
 
-// drawRing draws a hollow circle (country-level approximate position).
-func (u *UI) drawRing(cx, cy int, fade float64) {
+// marker draws a station position: a filled dot when the grid is known,
+// a hollow ring when the position is only a country guess (it moves to
+// the exact spot once the station is heard with a grid).
+func (u *UI) marker(x, y int, fade float64, approx bool, role int) {
+	if approx {
+		u.drawRing(x, y, fade, role)
+		return
+	}
+	u.drawDot(x, y, fade, role)
+}
+
+// drawRing draws a hollow circle (country-level approximate position),
+// tinted by the station role.
+func (u *UI) drawRing(cx, cy int, fade float64, role int) {
 	alpha := uint8(fade * 230)
 	if alpha < 40 {
 		alpha = 40
 	}
+	core, _ := roleColour(role)
+	rim := color.RGBA{core.R / 3, core.G / 3, core.B / 3, alpha}
+	core.A = alpha
 	// Double ring for weight.
-	u.drawCircle(cx, cy, 4, color.RGBA{255, 200, 100, alpha})
-	u.drawCircle(cx, cy, 3, color.RGBA{60, 30, 0, alpha})
+	u.drawCircle(cx, cy, 4, core)
+	u.drawCircle(cx, cy, 3, rim)
 }
 
 // drawRipple draws an expanding circle (CQ beacon indicator).
@@ -194,11 +382,14 @@ func (u *UI) drawRipple(cx, cy int, radius, fade float64) {
 		u.drawCircle(cx, cy, r, color.RGBA{34, 211, 238, alpha})
 	}
 
-	u.drawDot(cx, cy, fade)
+	u.drawDot(cx, cy, fade, RoleSender)
 }
 
-// drawArc draws a dashed line between two points (QSO exchange).
-func (u *UI) drawArc(x1, y1, x2, y2 int, fade float64) {
+// drawArc draws a dashed line between two points (QSO exchange). The
+// dashes travel from (x1,y1) — the sender — towards (x2,y2): a pixel at
+// distance d is on when (d+phase) mod 12 < 6, and phase grows with wall
+// time, pushing the bright segments forward.
+func (u *UI) drawArc(x1, y1, x2, y2 int, fade, phase float64) {
 	alpha := uint8(fade * 230)
 	if alpha < 35 {
 		alpha = 35
@@ -212,33 +403,28 @@ func (u *UI) drawArc(x1, y1, x2, y2 int, fade float64) {
 		steps = 2
 	}
 
-	// Dash pattern: 6px on, 6px off.
-	for i := 0; i < steps; i += 6 {
-		if i+3 > steps {
-			break
+	// Walk the line in sub-pixel steps so the dash phase advances
+	// smoothly regardless of the line's slope.
+	for i := 0; i <= steps; i++ {
+		d := float64(i) + phase
+		if math.Mod(d, 12) >= 6 {
+			continue
 		}
-		t1 := float64(i) / float64(steps)
-		t2 := float64(i+3) / float64(steps)
-		sx := x1 + int(float64(dx)*t1)
-		sy := y1 + int(float64(dy)*t1)
-		ex := x1 + int(float64(dx)*t2)
-		ey := y1 + int(float64(dy)*t2)
-		u.drawLine(sx, sy, ex, ey, c)
+		t := float64(i) / float64(steps)
+		u.setPixel(x1+int(float64(dx)*t), y1+int(float64(dy)*t), c)
 	}
-
-	u.drawDot(x1, y1, fade*0.7)
-	u.drawDot(x2, y2, fade)
 }
 
 // drawDot draws a small filled circle with a dark rim so it reads on
-// both ocean and land colours.
-func (u *UI) drawDot(cx, cy int, fade float64) {
+// both ocean and land colours; the core colour encodes the role.
+func (u *UI) drawDot(cx, cy int, fade float64, role int) {
 	alpha := uint8(fade * 255)
 	if alpha < 45 {
 		alpha = 45
 	}
-	rim := color.RGBA{0, 0, 0, alpha}
-	core := color.RGBA{255, 170, 60, alpha}
+	core, rim := roleColour(role)
+	core.A = alpha
+	rim.A = alpha
 	for dy := -3; dy <= 3; dy++ {
 		for dx := -3; dx <= 3; dx++ {
 			d := dx*dx + dy*dy
@@ -281,46 +467,6 @@ func (u *UI) drawCircle(cx, cy int, radius float64, c color.RGBA) {
 			y--
 		}
 		x++
-	}
-}
-
-// drawLine draws a line between two points (Bresenham).
-func (u *UI) drawLine(x1, y1, x2, y2 int, c color.RGBA) {
-	dx := x2 - x1
-	if dx < 0 {
-		dx = -dx
-	}
-	dy := y2 - y1
-	if dy < 0 {
-		dy = -dy
-	}
-
-	sx := 1
-	if x1 > x2 {
-		sx = -1
-	}
-	sy := 1
-	if y1 > y2 {
-		sy = -1
-	}
-
-	err := dx - dy
-	x, y := x1, y1
-
-	for {
-		u.setPixel(x, y, c)
-		if x == x2 && y == y2 {
-			break
-		}
-		e2 := 2 * err
-		if e2 > -dy {
-			err -= dy
-			x += sx
-		}
-		if e2 < dx {
-			err += dx
-			y += sy
-		}
 	}
 }
 
