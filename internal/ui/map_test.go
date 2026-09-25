@@ -76,6 +76,7 @@ func TestWorldMapArc(t *testing.T) {
 	}, nil)
 
 	arc := 0
+	orange := 0
 	x1, y1 := u.latLonToScreen(lat1, lon1)
 	x2, y2 := u.latLonToScreen(lat2, lon2)
 	for _, p := range arcPoints(x1, y1, x2, y2) {
@@ -85,11 +86,17 @@ func TestWorldMapArc(t *testing.T) {
 				if r>>8 == 255 && g>>8 == 223 && b>>8 == 89 {
 					arc++
 				}
+				if r>>8 == 255 && g>>8 == 140 && b>>8 == 0 {
+					orange++
+				}
 			}
 		}
 	}
 	if arc < 8 {
-		t.Fatalf("arc from OK04 to JO65 not drawn (only %d coloured samples)", arc)
+		t.Fatalf("arc from OK04 to JO65 not drawn (only %d yellow samples)", arc)
+	}
+	if orange < 8 {
+		t.Fatalf("alternating orange dashes missing (only %d samples) — direction colour pattern broken", orange)
 	}
 	if !findCore(u, x1, y1, RoleSender) && !findCoreTolerant(u, x1, y1, RoleSender) {
 		t.Fatalf("no red marker at sender end")
