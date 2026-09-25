@@ -8,7 +8,9 @@
 //
 //	←/→   tune down/up by step     ↑/↓  tune ±10× step
 //	A     cycle WFM/NFM            X    cycle gain (AGC → 0…max)
-//	L1/R1 volume −/+               START/SELECT  quit
+//	L1/R1 volume −/+               Y    FT8 slot sync (FT8 on)
+//	SELECT FT8 history · MENU settings (hold 3 s = exit)
+//	MENU+START together = screenshot (any screen)
 package main
 
 import (
@@ -776,6 +778,11 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 	// opens/closes the settings menu.
 	var menuDownAt, startDownAt time.Time
 	exitHint := ""
+	// MENU+START held together = screenshot (any screen). Latches once
+	// per joint press; menuInCombo suppresses Menu's short-tap toggle on
+	// release so the combo doesn't also open the settings menu.
+	shotCombo := false
+	menuInCombo := false
 
 	adjustItem := func(idx, dir int) {
 		switch idx {
@@ -1402,16 +1409,17 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 					if ev.Down {
 						menuDownAt = time.Now()
 					} else {
-						if time.Since(menuDownAt) < 3*time.Second {
+						if !menuInCombo && time.Since(menuDownAt) < 3*time.Second {
 							// Short tap: toggle the settings menu
 							// (or back out of the freq editor).
 							switch uiMode {
-								case uiFreqEdit, uiMenu, uiFT8Log, uiHostEdit, uiHostList, uiSysMon, uiLogs, uiBmList, uiMap:
-									uiMode = uiMain
+							case uiFreqEdit, uiMenu, uiFT8Log, uiHostEdit, uiHostList, uiSysMon, uiLogs, uiBmList, uiMap:
+								uiMode = uiMain
 							default:
 								uiMode = uiMenu
 							}
 						}
+						menuInCombo = false
 						menuDownAt = time.Time{}
 					}
 					continue
@@ -1444,6 +1452,21 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 					}
 					lastRepeat[ev.Button] = time.Now()
 				}
+			}
+			// MENU+START together = screenshot from ANY screen (the
+			// frame is already composed everywhere — menu, keyboard, FT8
+			// log, map, sysmon). Fires once per joint press; the exit
+			// timers restart at the shot so a quick press captures and
+			// only a further 3 s hold exits.
+			if held[input.Menu] && held[input.Start] {
+				if !shotCombo {
+					shotCombo = true
+					menuInCombo = true
+					menuDownAt, startDownAt = time.Now(), time.Now()
+					capture()
+				}
+			} else {
+				shotCombo = false
 			}
 			// Hold-to-exit: MENU or START held 3 s.
 			exitHint = ""
