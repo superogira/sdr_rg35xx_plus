@@ -715,8 +715,9 @@ func (u *UI) drawBottomBar() {
 	// Big frequency (left).
 	big := Face(38, true)
 	freqMHz := float64(s.FreqHz) / 1e6
-	dec := 3 // WFM shows kHz resolution, NFM 10 Hz
-	if s.Mode == "NFM" {
+	dec := 3 // WFM shows kHz resolution, NFM 100 Hz
+	switch s.Mode {
+	case "NFM", "USB", "LSB", "CW":
 		dec = 4
 	}
 	freqText := fmt.Sprintf("%.*f", dec, freqMHz)

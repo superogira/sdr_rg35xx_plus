@@ -485,6 +485,24 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		}
 		return fmt.Sprintf("%d Hz", hz)
 	}
+	// autoStep pulls the tune step to sane per-mode defaults after a mode
+	// switch — only when the current step is COARSER (a hand-picked finer
+	// step survives): WFM channels are 100 kHz apart, USB/LSB want 1 kHz,
+	// CW 100 Hz.
+	autoStep := func(m dsp.Mode) {
+		switch {
+		case m == dsp.ModeWFM && stepHz < 25_000:
+			stepHz = 100_000
+		case m == dsp.ModeCW && stepHz > 100:
+			stepHz = 100
+		case m == dsp.ModeUSB || m == dsp.ModeLSB:
+			if stepHz > 1_000 {
+				stepHz = 1_000
+			}
+		case m != dsp.ModeWFM && stepHz > 25_000:
+			stepHz = 12_500
+		}
+	}
 	quit := func() {
 		langPref := i18n.Lang()
 		agcPref := "on"
@@ -744,6 +762,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				m = dsp.NextMode(dsp.NextMode(dsp.NextMode(dsp.NextMode(r.Mode()))))
 			}
 			r.SetMode(m)
+			autoStep(m)
 		case menuGain:
 			r.SetGainDb(radio.GainStepDb(r.GainDb(), dir))
 		case menuSQL:
@@ -802,9 +821,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		case menuFT8:
 			if !r.FT8Enabled() {
 				saveBwNow(cfg, r) // keep old mode's bw before the USB jump
-				if stepHz > 25_000 {
-					stepHz = 12_500 // WFM 100k steps are useless on FT8
-				}
+				autoStep(dsp.ModeUSB)
 			}
 			r.SetFT8Enabled(!r.FT8Enabled())
 		case menuAGC:
@@ -873,9 +890,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		case menuFT8:
 			if !r.FT8Enabled() {
 				saveBwNow(cfg, r) // keep old mode's bw before the USB jump
-				if stepHz > 25_000 {
-					stepHz = 12_500 // WFM 100k steps are useless on FT8
-				}
+				autoStep(dsp.ModeUSB)
 			}
 			r.SetFT8Enabled(!r.FT8Enabled())
 		case menuLang:
@@ -968,13 +983,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 					r.SetBandwidth(v)
 				}
 			}
-			// Broadcast FM channels are 100 kHz apart — fine steps are
-			// noise there; other modes want the usual 12.5 kHz.
-			if m == dsp.ModeWFM && stepHz < 25_000 {
-				stepHz = 100_000
-			} else if m != dsp.ModeWFM && stepHz > 25_000 {
-				stepHz = 12_500
-			}
+			autoStep(m)
 		case input.Select:
 			// Big scrollable FT8 history window (mode cycling moved to
 			// A alone).
@@ -1072,7 +1081,9 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				} else {
 					bm := bookmarks[bmSel]
 					r.SetFreq(bm.freqHz)
-					r.SetMode(dsp.ModeByName(bm.mode))
+					m := dsp.ModeByName(bm.mode)
+					r.SetMode(m)
+					autoStep(m)
 					uiMode = uiMain
 				}
 			case input.X:
@@ -1666,8 +1677,15 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"},
 				ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"})
 		case pageRx:
+			freqDec := 5
+			switch r.Mode().Name {
+			case "WFM", "AM":
+				freqDec = 3
+			case "NFM", "USB", "LSB", "CW":
+				freqDec = 4
+			}
 			items = append(items,
-				ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.5f MHz >", float64(r.Freq())/1e6)},
+				ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.*f MHz >", freqDec, float64(r.Freq())/1e6)},
 				func() ui.MenuItem {
 					m := ui.MenuItem{Label: i18n.T("m_mode"), Value: r.Mode().Name}
 					if r.FT8Enabled() {
