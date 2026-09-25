@@ -1883,6 +1883,19 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				// Build map entries from the last 10 minutes of FT8 log.
 				now := time.Now()
 				mapEntries := []ui.MapEntry{}
+				// stationPos resolves a callsign to a map position: the
+				// exact grid when known (message tail or cache), else the
+				// country centroid from the DXCC prefix — a coarse
+				// placeholder that upgrades to the real grid as soon as
+				// that station is heard with one.
+				stationPos := func(call, grid string) (lat, lon float64, approx, ok bool) {
+					if grid != "" {
+						lat, lon, ok = geo.GridToLatLon(grid)
+						return lat, lon, false, ok
+					}
+					lat, lon, ok = geo.CountryLatLon(call)
+					return lat, lon, true, ok
+				}
 				for _, e := range ft8Log {
 					t, err := time.Parse("15:04:05", e.Time)
 					if err != nil {
@@ -1915,27 +1928,23 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 					} else if g, ok := gridCache[toks[1]]; ok {
 						senderGrid = g
 					}
-					if senderGrid == "" {
+					slat, slon, sApprox, sok := stationPos(toks[1], senderGrid)
+					if !sok {
 						continue
 					}
+					ent := ui.MapEntry{Lat: slat, Lon: slon, IsCQ: isCQ, Approx: sApprox, Age: age}
 					// QSO arc: SENDER -> RECIPIENT. The recipient (toks[0])
-					// never carries a grid inside QSO texts — the arc only
-					// resolves when the recipient was heard earlier with a
-					// grid (their CQ or contact), via the cache. The old
-					// code looked up the SENDER's own grid for both ends,
-					// which always collided and never drew anything.
-					grid, fromGrid := senderGrid, ""
+					// never carries a grid inside QSO texts — exact cached
+					// grid when heard before, else their country centroid.
 					if !isCQ {
-						if g, ok := gridCache[toks[0]]; ok && g != senderGrid {
-							grid, fromGrid = g, senderGrid
+						if rlat, rlon, rApprox, rok := stationPos(toks[0], gridCache[toks[0]]); rok &&
+							(rlat != slat || rlon != slon) {
+							ent.Lat, ent.Lon, ent.Approx = rlat, rlon, rApprox
+							ent.Arc = true
+							ent.FromLat, ent.FromLon = slat, slon
 						}
 					}
-					mapEntries = append(mapEntries, ui.MapEntry{
-						Grid:     grid,
-						IsCQ:     isCQ,
-						FromGrid: fromGrid,
-						Age:      age,
-					})
+					mapEntries = append(mapEntries, ent)
 				}
 				u.DrawWorldMap(mapEntries)
 			}
