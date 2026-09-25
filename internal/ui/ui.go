@@ -799,7 +799,7 @@ func (u *UI) drawBottomBar() {
 	status.DrawString(u.img, col, 12, u.H-8, statusText)
 
 	// Step + button hints (bottom right). The CPU/MEM/SWAP readout
-	// moved to the system monitor window (menu ▸ System).
+	// moved to the system monitor window (menu > System).
 	hint := Face(12, false)
 	hintText := i18n.T("hint")
 	hint.DrawString(u.img, grey, u.W-hint.TextWidth(hintText)-8, u.H-8, hintText)
