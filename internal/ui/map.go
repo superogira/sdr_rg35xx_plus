@@ -1,12 +1,49 @@
 package ui
 
 import (
+	"bytes"
+	_ "embed"
+	"fmt"
+	"image"
 	"image/color"
+	"image/draw"
+	_ "image/png" // decoder for the embedded basemap
 	"math"
+	"os"
+	"sync"
 	"time"
 
 	"sdr35/internal/geo"
 )
+
+//go:embed world_map.png
+var worldMapPNG []byte
+
+var (
+	worldMapOnce sync.Once
+	worldMapImg  *image.RGBA
+)
+
+// worldMap decodes the embedded 640×480 equirectangular basemap into an
+// RGBA copy ready for blitting. Calibration verified against landmark
+// pixels: x = (lon+180)/360·W, y = (90-lat)/180·H.
+func worldMap() *image.RGBA {
+	worldMapOnce.Do(func() {
+		img, _, err := image.Decode(bytes.NewReader(worldMapPNG))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "map: basemap decode failed: %v\n", err)
+			return
+		}
+		if rgba, ok := img.(*image.RGBA); ok {
+			worldMapImg = rgba
+			return
+		}
+		rgba := image.NewRGBA(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy()))
+		draw.Draw(rgba, rgba.Bounds(), img, img.Bounds().Min, draw.Src)
+		worldMapImg = rgba
+	})
+	return worldMapImg
+}
 
 // MapEntry describes one FT8 activity point on the world map.
 type MapEntry struct {
@@ -16,25 +53,23 @@ type MapEntry struct {
 	Age      time.Duration // time since decoded
 }
 
-// DrawWorldMap renders a world map with FT8 activity from the last minute.
-// CQ messages show as expanding ripples over their grid location.
-// QSO exchanges (signal reports, 73, etc.) show as dashed arcs between
-// sender and recipient grids when both are known.
+// DrawWorldMap renders the FT8 world map: photographic equirectangular
+// basemap (blitted full-screen — it is 640×480, exactly the framebuffer)
+// with CQ ripples and QSO arcs from the last minute on top.
 func (u *UI) DrawWorldMap(entries []MapEntry) {
-	// Full-screen dark background
-	u.fillBlend(0, 0, u.W, u.H, 15, 17, 23, 255)
+	if !u.blitWorldMap() {
+		// Decode failure fallback: plain dark background.
+		u.fillBlend(0, 0, u.W, u.H, 15, 17, 23, 255)
+	}
 
-	// Draw simplified world map outline (Equirectangular projection)
-	u.drawMapOutline()
-
-	// Draw activity markers
+	// Draw activity markers.
 	for _, e := range entries {
 		lat, lon, ok := geo.GridToLatLon(e.Grid)
 		if !ok {
 			continue
 		}
 		x, y := u.latLonToScreen(lat, lon)
-		
+
 		fade := 1.0 - (float64(e.Age) / (60 * float64(time.Second)))
 		if fade < 0 {
 			fade = 0
@@ -59,53 +94,52 @@ func (u *UI) DrawWorldMap(entries []MapEntry) {
 		}
 	}
 
-	// Title overlay
-	u.fillBlend(8, 8, 200, 28, 0, 0, 0, 200)
-	tf := Face(14, false)
-	tf.DrawString(u.img, color.RGBA{200, 200, 200, 255}, 16, 26, "FT8 World Map")
-	
-	// Hint bar
-	hintY := u.H - 24
-	u.fillBlend(0, hintY, u.W, 24, 0, 0, 0, 200)
-	hint := "Any button to close"
-	hw := Face(11, false).TextWidth(hint)
-	Face(11, false).DrawString(u.img, color.RGBA{180, 180, 180, 255}, (u.W-hw)/2, hintY+17, hint)
+	// Title chip.
+	u.fillBlend(8, 8, 210, 26, 0, 0, 0, 170)
+	tf := Face(13, false)
+	tf.DrawString(u.img, color.RGBA{255, 255, 255, 255}, 16, 26, "FT8 World Map - 60s")
+
+	// Hint chip (bottom-right, clear of the map action).
+	hint := "B close"
+	hf := Face(11, false)
+	hw := hf.TextWidth(hint)
+	u.fillBlend(u.W-hw-24, u.H-30, hw+16, 22, 0, 0, 0, 170)
+	hf.DrawString(u.img, color.RGBA{220, 220, 220, 255}, u.W-hw-16, u.H-13, hint)
 }
 
-// drawMapOutline draws a simplified world coastline (Equirectangular projection).
-func (u *UI) drawMapOutline() {
-	// Simplified continents as lat/lon polygons
-	// This is a very basic outline - just major landmasses
-	coastlines := [][]struct{ lat, lon float64 }{
-		// Africa (simplified)
-		{{35, -5}, {32, 10}, {15, 20}, {5, 40}, {-10, 40}, {-25, 30}, {-30, 20}, {-32, 15}, {-25, 15}, {-15, 10}, {0, 5}, {10, -10}, {20, -15}, {30, -10}, {35, -5}},
-		// Europe (simplified)
-		{{40, -10}, {45, 0}, {55, 5}, {60, 10}, {65, 20}, {70, 25}, {65, 30}, {55, 30}, {50, 35}, {45, 40}, {40, 35}, {38, 25}, {40, 15}, {40, -10}},
-		// Asia (simplified)
-		{{70, 30}, {65, 50}, {55, 80}, {50, 100}, {40, 120}, {35, 130}, {30, 140}, {20, 120}, {10, 100}, {0, 90}, {10, 70}, {20, 60}, {30, 50}, {40, 40}, {50, 35}, {60, 30}, {70, 30}},
-		// Australia
-		{{-10, 115}, {-15, 125}, {-25, 135}, {-35, 140}, {-38, 145}, {-35, 150}, {-28, 153}, {-20, 148}, {-15, 140}, {-12, 130}, {-10, 115}},
-		// North America
-		{{70, -100}, {65, -110}, {55, -130}, {50, -140}, {45, -125}, {40, -120}, {32, -115}, {30, -110}, {28, -95}, {25, -80}, {30, -75}, {35, -75}, {40, -70}, {45, -60}, {50, -55}, {55, -60}, {60, -70}, {65, -80}, {70, -100}},
-		// South America
-		{{10, -80}, {5, -75}, {-5, -70}, {-15, -72}, {-25, -70}, {-35, -65}, {-45, -70}, {-55, -68}, {-50, -75}, {-40, -75}, {-30, -80}, {-20, -78}, {-10, -78}, {0, -80}, {10, -80}},
+// blitWorldMap copies the basemap over the whole frame, scaling if the
+// screen size differs from the image (in practice 1:1 — both 640×480).
+func (u *UI) blitWorldMap() bool {
+	m := worldMap()
+	if m == nil {
+		return false
 	}
-
-	lineColor := color.RGBA{60, 70, 80, 255}
-	for _, coast := range coastlines {
-		for i := 0; i < len(coast)-1; i++ {
-			x1, y1 := u.latLonToScreen(coast[i].lat, coast[i].lon)
-			x2, y2 := u.latLonToScreen(coast[i+1].lat, coast[i+1].lon)
-			u.drawLine(x1, y1, x2, y2, lineColor)
+	mw, mh := m.Bounds().Dx(), m.Bounds().Dy()
+	if mw == u.W && mh == u.H && m.Stride == u.img.Stride {
+		// Fast path: whole rows at once.
+		copy(u.img.Pix, m.Pix)
+		return true
+	}
+	for y := 0; y < u.H; y++ {
+		sy := y * mh / u.H
+		dp := y * u.img.Stride
+		sp := sy * m.Stride
+		for x := 0; x < u.W; x++ {
+			sx := x * mw / u.W
+			o := dp + x*4
+			s := sp + sx*4
+			u.img.Pix[o+0] = m.Pix[s+0]
+			u.img.Pix[o+1] = m.Pix[s+1]
+			u.img.Pix[o+2] = m.Pix[s+2]
+			u.img.Pix[o+3] = 255
 		}
 	}
+	return true
 }
 
-// latLonToScreen converts lat/lon to screen coordinates (Equirectangular).
+// latLonToScreen converts lat/lon to screen coordinates (equirectangular
+// — matches the embedded basemap's projection).
 func (u *UI) latLonToScreen(lat, lon float64) (int, int) {
-	// Equirectangular: x = lon, y = lat (with scaling)
-	// lon: -180 to +180 → 0 to W
-	// lat: +90 to -90 → 0 to H
 	x := int((lon + 180) * float64(u.W) / 360)
 	y := int((90 - lat) * float64(u.H) / 180)
 	return x, y
@@ -116,41 +150,39 @@ func (u *UI) drawRipple(cx, cy int, radius, fade float64) {
 	if radius < 1 {
 		radius = 1
 	}
-	alpha := uint8(fade * 200)
-	if alpha < 20 {
-		alpha = 20
+	alpha := uint8(fade * 220)
+	if alpha < 25 {
+		alpha = 25
 	}
-	
-	// Draw 3 concentric circles (ripple effect)
+
+	// Three concentric rings trailing the wavefront.
 	for _, r := range []float64{radius, radius + 4, radius + 8} {
-		if r > 50 {
+		if r > 55 {
 			continue
 		}
-		c := color.RGBA{255, 200, 60, alpha}
-		u.drawCircle(cx, cy, r, c)
+		u.drawCircle(cx, cy, r, color.RGBA{34, 211, 238, alpha})
 	}
-	
-	// Center dot
+
 	u.drawDot(cx, cy, fade)
 }
 
-// drawArc draws a great-circle arc (dashed line) between two points.
+// drawArc draws a dashed line between two points (QSO exchange).
 func (u *UI) drawArc(x1, y1, x2, y2 int, fade float64) {
-	alpha := uint8(fade * 220)
-	if alpha < 30 {
-		alpha = 30
+	alpha := uint8(fade * 230)
+	if alpha < 35 {
+		alpha = 35
 	}
-	c := color.RGBA{100, 200, 255, alpha}
-	
-	// Simple dashed line (not true great circle, but good enough)
+	c := color.RGBA{255, 223, 89, alpha}
+
 	dx := x2 - x1
 	dy := y2 - y1
 	steps := int(math.Sqrt(float64(dx*dx + dy*dy)))
 	if steps < 2 {
 		steps = 2
 	}
-	
-	for i := 0; i < steps; i += 6 { // dash pattern: 6px line, 6px gap
+
+	// Dash pattern: 6px on, 6px off.
+	for i := 0; i < steps; i += 6 {
 		if i+3 > steps {
 			break
 		}
@@ -162,24 +194,30 @@ func (u *UI) drawArc(x1, y1, x2, y2 int, fade float64) {
 		ey := y1 + int(float64(dy)*t2)
 		u.drawLine(sx, sy, ex, ey, c)
 	}
-	
-	// End markers
+
 	u.drawDot(x1, y1, fade*0.7)
 	u.drawDot(x2, y2, fade)
 }
 
-// drawDot draws a small filled circle.
+// drawDot draws a small filled circle with a dark rim so it reads on
+// both ocean and land colours.
 func (u *UI) drawDot(cx, cy int, fade float64) {
 	alpha := uint8(fade * 255)
-	if alpha < 40 {
-		alpha = 40
+	if alpha < 45 {
+		alpha = 45
 	}
-	c := color.RGBA{255, 150, 80, alpha}
-	
-	for dy := -2; dy <= 2; dy++ {
-		for dx := -2; dx <= 2; dx++ {
-			if dx*dx+dy*dy <= 4 {
-				u.setPixel(cx+dx, cy+dy, c)
+	rim := color.RGBA{0, 0, 0, alpha}
+	core := color.RGBA{255, 170, 60, alpha}
+	for dy := -3; dy <= 3; dy++ {
+		for dx := -3; dx <= 3; dx++ {
+			d := dx*dx + dy*dy
+			if d > 9 {
+				continue
+			}
+			if d >= 5 {
+				u.setPixel(cx+dx, cy+dy, rim)
+			} else {
+				u.setPixel(cx+dx, cy+dy, core)
 			}
 		}
 	}
@@ -191,11 +229,10 @@ func (u *UI) drawCircle(cx, cy int, radius float64, c color.RGBA) {
 	if r < 1 {
 		r = 1
 	}
-	
-	// Bresenham-style circle
+
 	x, y := 0, r
 	d := 3 - 2*r
-	
+
 	for x <= y {
 		u.setPixel(cx+x, cy+y, c)
 		u.setPixel(cx-x, cy+y, c)
@@ -205,7 +242,7 @@ func (u *UI) drawCircle(cx, cy int, radius float64, c color.RGBA) {
 		u.setPixel(cx-y, cy+x, c)
 		u.setPixel(cx+y, cy-x, c)
 		u.setPixel(cx-y, cy-x, c)
-		
+
 		if d < 0 {
 			d += 4*x + 6
 		} else {
@@ -226,7 +263,7 @@ func (u *UI) drawLine(x1, y1, x2, y2 int, c color.RGBA) {
 	if dy < 0 {
 		dy = -dy
 	}
-	
+
 	sx := 1
 	if x1 > x2 {
 		sx = -1
@@ -235,10 +272,10 @@ func (u *UI) drawLine(x1, y1, x2, y2 int, c color.RGBA) {
 	if y1 > y2 {
 		sy = -1
 	}
-	
+
 	err := dx - dy
 	x, y := x1, y1
-	
+
 	for {
 		u.setPixel(x, y, c)
 		if x == x2 && y == y2 {
@@ -265,5 +302,5 @@ func (u *UI) setPixel(x, y int, c color.RGBA) {
 	u.img.Pix[o+0] = c.R
 	u.img.Pix[o+1] = c.G
 	u.img.Pix[o+2] = c.B
-	u.img.Pix[o+3] = c.A
+	u.img.Pix[o+3] = 255
 }

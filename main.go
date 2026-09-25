@@ -589,6 +589,8 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		uiMode = uiMenu
 	case "freq":
 		uiMode = uiFreqEdit
+	case "map":
+		uiMode = uiMap
 	}
 	menuSel := 0
 	// Row indexes MUST match the items slice built for DrawMenu below.
