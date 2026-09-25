@@ -560,6 +560,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		uiSysMon
 		uiLogs
 		uiBmList
+		uiMap
 	)
 	uiMode := uiMain
 	// Dev aid for PNG screenshot testing of the overlays.
@@ -598,6 +599,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		menuWFMax
 		menuLogs
 		menuBM
+		menuMap
 	)
 	// The flat 16-row menu outgrew the screen, so it is now three
 	// subpages reached from a 3-row root. pageItems maps (page → row)
@@ -610,13 +612,13 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		pageBM
 	)
 	menuPage := pageRoot
-	pageItems := [][]int{
-		{0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
-		{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
-		{menuFT8, menuCall, menuGrid, menuAnt, menuRig, menuPSK},
-		{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
-		{menuBM},
-	}
+		pageItems := [][]int{
+			{0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
+			{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
+			{menuFT8, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap},
+			{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
+			{menuBM},
+		}
 	spanSteps := []int{1000, 750, 500, 250, 125, 100, 50, 25, 12, 10, 5, 3}
 	spanIdx := func() int {
 		want := u.SpanFull / 1000
@@ -886,14 +888,16 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			psk.SetEnabled(pskOn)
 		case menuSysMon:
 			uiMode = uiSysMon
-		case menuLogs:
-			uiMode = uiLogs
-		case menuBM:
-			bmSel = 0
-			uiMode = uiBmList
-		case menuHost:
-			hostSel = 0
-			uiMode = uiHostList
+			case menuLogs:
+				uiMode = uiLogs
+			case menuBM:
+				bmSel = 0
+				uiMode = uiBmList
+			case menuMap:
+				uiMode = uiMap
+			case menuHost:
+				hostSel = 0
+				uiMode = uiHostList
 		case menuFreq:
 			editDigits = freqDigits()
 			uiMode = uiFreqEdit
@@ -1013,13 +1017,13 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			case input.B, input.Start, input.Select:
 				uiMode = uiMain
 			}
-			if ft8Scroll > len(ft8Log) {
-				ft8Scroll = len(ft8Log)
-			}
-			if ft8Scroll < 0 {
-				ft8Scroll = 0
-			}
-		case uiSysMon:
+				if ft8Scroll > len(ft8Log) {
+					ft8Scroll = len(ft8Log)
+				}
+					if ft8Scroll < 0 {
+						ft8Scroll = 0
+					}
+				case uiSysMon:
 			// Any of the usual close keys backs out of the monitor.
 			switch b {
 			case input.B, input.Start, input.Select, input.A:
@@ -1063,27 +1067,33 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			case input.B, input.Start:
 				uiMode, menuPage, menuSel = uiMenu, pageRoot, 3
 			}
-		case uiLogs:
-			// d-pad scrolls (line/page), close keys back to the menu.
-			switch b {
-			case input.Up:
-				logScroll++
-			case input.Down:
-				logScroll--
-			case input.Left:
-				logScroll += 16
-			case input.Right:
-				logScroll -= 16
-			case input.B, input.Start, input.Select, input.A:
-				uiMode, menuPage, menuSel = uiMenu, pageSys, 3
-			}
-			if logScroll > 5000 {
-				logScroll = 5000
-			}
-			if logScroll < 0 {
-				logScroll = 0
-			}
-		case uiHostList:
+			case uiLogs:
+				// d-pad scrolls (line/page), close keys back to the menu.
+				switch b {
+				case input.Up:
+					logScroll++
+				case input.Down:
+					logScroll--
+				case input.Left:
+					logScroll += 16
+				case input.Right:
+					logScroll -= 16
+				case input.B, input.Start, input.Select, input.A:
+					uiMode, menuPage, menuSel = uiMenu, pageSys, 3
+				}
+				if logScroll > 5000 {
+					logScroll = 5000
+				}
+				if logScroll < 0 {
+					logScroll = 0
+				}
+			case uiMap:
+				// Map screen: any button returns to menu
+				switch b {
+				case input.B, input.Start, input.Select, input.A:
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, 6
+				}
+			case uiHostList:
 			// Rows: saved hosts + "add new" at the bottom.
 			rows := len(hostList) + 1
 			switch b {
@@ -1330,8 +1340,8 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 							// Short tap: toggle the settings menu
 							// (or back out of the freq editor).
 							switch uiMode {
-							case uiFreqEdit, uiMenu, uiFT8Log, uiHostEdit, uiHostList, uiSysMon, uiLogs:
-								uiMode = uiMain
+								case uiFreqEdit, uiMenu, uiFT8Log, uiHostEdit, uiHostList, uiSysMon, uiLogs, uiBmList, uiMap:
+									uiMode = uiMain
 							default:
 								uiMode = uiMenu
 							}
@@ -1649,13 +1659,14 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			if pskOn {
 				pskVal = i18n.T("on")
 			}
-			items = append(items,
-				ui.MenuItem{Label: i18n.T("m_ft8"), Value: ft8Label(r.FT8Enabled())},
-				ui.MenuItem{Label: i18n.T("m_call"), Value: myCall},
-				ui.MenuItem{Label: i18n.T("m_grid"), Value: myGrid},
-				ui.MenuItem{Label: i18n.T("m_ant"), Value: myAnt},
-				ui.MenuItem{Label: i18n.T("m_rig"), Value: myRig},
-				ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal})
+				items = append(items,
+					ui.MenuItem{Label: i18n.T("m_ft8"), Value: ft8Label(r.FT8Enabled())},
+					ui.MenuItem{Label: i18n.T("m_call"), Value: myCall},
+					ui.MenuItem{Label: i18n.T("m_grid"), Value: myGrid},
+					ui.MenuItem{Label: i18n.T("m_ant"), Value: myAnt},
+					ui.MenuItem{Label: i18n.T("m_rig"), Value: myRig},
+					ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal},
+					ui.MenuItem{Label: i18n.T("m_map"), Value: i18n.T("press_a")})
 		case pageSys:
 			items = append(items,
 				ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
@@ -1733,38 +1744,93 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				}
 			}
 			u.DrawSysMon(rows)
-		} else if uiMode == uiLogs {
-			// Re-read the log file every 2 seconds while the viewer
-			// is open (cheap: one ReadFile of a few hundred KB).
-			if time.Since(logReadAt) >= 2*time.Second {
-				logReadAt = time.Now()
-				if data, err := os.ReadFile(filepath.Join(filepath.Dir(mustExe()), "..", "SDRg35xx-logfile.txt")); err == nil {
-					lines := strings.Split(string(data), "\n")
-					if len(lines) > 300 {
-						lines = lines[len(lines)-300:]
+			} else if uiMode == uiLogs {
+				// Re-read the log file every 2 seconds while the viewer
+				// is open (cheap: one ReadFile of a few hundred KB).
+				if time.Since(logReadAt) >= 2*time.Second {
+					logReadAt = time.Now()
+					if data, err := os.ReadFile(filepath.Join(filepath.Dir(mustExe()), "..", "SDRg35xx-logfile.txt")); err == nil {
+						lines := strings.Split(string(data), "\n")
+						if len(lines) > 300 {
+							lines = lines[len(lines)-300:]
+						}
+						logLines = lines
 					}
-					logLines = lines
 				}
-			}
-			rows := []string{"# Log"}
-			vis := (u.WaterfallRows - 80) / 16
-			if vis < 1 {
-				vis = 1
-			}
-			start := len(logLines) - vis - logScroll
-			if start < 0 {
-				start = 0
-			}
-			for i := start; i < start+vis && i < len(logLines); i++ {
-				ln := logLines[i]
-				if len(ln) > 80 {
-					ln = ln[:80]
+				rows := []string{"# Log"}
+				vis := (u.WaterfallRows - 80) / 16
+				if vis < 1 {
+					vis = 1
 				}
-				rows = append(rows, ln)
+				start := len(logLines) - vis - logScroll
+				if start < 0 {
+					start = 0
+				}
+				for i := start; i < start+vis && i < len(logLines); i++ {
+					ln := logLines[i]
+					if len(ln) > 80 {
+						ln = ln[:80]
+					}
+					rows = append(rows, ln)
+				}
+				rows = append(rows, fmt.Sprintf("%d–%d / %d", start+1, start+vis, len(logLines)))
+				u.DrawSysMon(rows)
+			} else if uiMode == uiMap {
+				// Build map entries from the last 60 seconds of FT8 log.
+				now := time.Now()
+				mapEntries := []ui.MapEntry{}
+				for _, e := range ft8Log {
+					// Parse time from "15:04:05" format
+					t, err := time.Parse("15:04:05", e.Time)
+					if err != nil {
+						continue
+					}
+					// Adjust for today's date
+					eTime := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), t.Second(), 0, now.Location())
+					// Handle messages that crossed midnight
+					if eTime.After(now.Add(time.Hour)) {
+						eTime = eTime.Add(-24 * time.Hour)
+					}
+					age := now.Sub(eTime)
+					if age < 0 || age > 60*time.Second {
+						continue
+					}
+					// Extract grid from message
+					toks := strings.Fields(e.Text)
+					if len(toks) < 2 {
+						continue
+					}
+					isCQ := toks[0] == "CQ" || strings.HasPrefix(toks[0], "CQ_")
+					var grid, fromGrid string
+					lastTok := toks[len(toks)-1]
+					isTail := lastTok == "RR73" || lastTok == "RRR" || lastTok == "73" || lastTok == "CQ"
+					hasGrid := !isTail && len(lastTok) >= 4 && lastTok[0] >= 'A' && lastTok[0] <= 'R' &&
+						lastTok[1] >= 'A' && lastTok[1] <= 'R' &&
+						lastTok[2] >= '0' && lastTok[2] <= '9' && lastTok[3] >= '0' && lastTok[3] <= '9'
+					if hasGrid {
+						grid = lastTok
+					} else if g, ok := gridCache[toks[1]]; ok {
+						grid = g
+					}
+					if grid == "" {
+						continue
+					}
+					// For QSO (non-CQ), try to find sender's previous grid
+					if !isCQ && len(toks) >= 3 {
+						sender := toks[1]
+						if g, ok := gridCache[sender]; ok && g != grid {
+							fromGrid = g
+						}
+					}
+					mapEntries = append(mapEntries, ui.MapEntry{
+						Grid:     grid,
+						IsCQ:     isCQ,
+						FromGrid: fromGrid,
+						Age:      age,
+					})
+				}
+				u.DrawWorldMap(mapEntries)
 			}
-			rows = append(rows, fmt.Sprintf("%d–%d / %d", start+1, start+vis, len(logLines)))
-			u.DrawSysMon(rows)
-		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
 			u.DrawFT8Log(ft8Log)
