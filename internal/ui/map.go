@@ -55,7 +55,7 @@ type MapEntry struct {
 
 // DrawWorldMap renders the FT8 world map: photographic equirectangular
 // basemap (blitted full-screen — it is 640×480, exactly the framebuffer)
-// with CQ ripples and QSO arcs from the last minute on top.
+// with CQ ripples and QSO arcs from the last 10 minutes on top.
 func (u *UI) DrawWorldMap(entries []MapEntry) {
 	if !u.blitWorldMap() {
 		// Decode failure fallback: plain dark background.
@@ -70,13 +70,15 @@ func (u *UI) DrawWorldMap(entries []MapEntry) {
 		}
 		x, y := u.latLonToScreen(lat, lon)
 
-		fade := 1.0 - (float64(e.Age) / (60 * float64(time.Second)))
+		// Linear fade across the whole 10-minute window.
+		fade := 1.0 - (float64(e.Age) / (10 * float64(time.Minute)))
 		if fade < 0 {
 			fade = 0
 		}
 
 		if e.IsCQ {
-			// CQ: expanding ripple
+			// CQ: expanding ripple (the rings self-cap at 55 px, so after
+			// ~7 s the marker settles to a slowly fading dot).
 			radius := float64(e.Age) / float64(time.Second) * 8 // 8px/second expansion
 			u.drawRipple(x, y, radius, fade)
 		} else if e.FromGrid != "" {
@@ -95,9 +97,9 @@ func (u *UI) DrawWorldMap(entries []MapEntry) {
 	}
 
 	// Title chip.
-	u.fillBlend(8, 8, 210, 26, 0, 0, 0, 170)
+	u.fillBlend(8, 8, 220, 26, 0, 0, 0, 170)
 	tf := Face(13, false)
-	tf.DrawString(u.img, color.RGBA{255, 255, 255, 255}, 16, 26, "FT8 World Map - 60s")
+	tf.DrawString(u.img, color.RGBA{255, 255, 255, 255}, 16, 26, "FT8 World Map - 10min")
 
 	// Hint chip (bottom-right, clear of the map action).
 	hint := "B close"

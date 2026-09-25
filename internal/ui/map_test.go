@@ -70,6 +70,39 @@ func TestWorldMapBasemapAndMarkers(t *testing.T) {
 	}
 }
 
+// TestWorldMapArc: a QSO entry with a known FromGrid must draw dashed
+// arc pixels along the sender→recipient line (regression: the arc
+// condition never fired before the sender/recipient mix-up was fixed).
+func TestWorldMapArc(t *testing.T) {
+	u := New(640, 480)
+	u.DrawWorldMap([]MapEntry{
+		{Grid: "JO65", FromGrid: "OK04", Age: 3 * time.Second}, // Thailand → Belgium
+	})
+
+	arc := 0
+	// Sample the line between the two endpoints for the arc colour.
+	lat1, lon1, _ := geo.GridToLatLon("OK04")
+	lat2, lon2, _ := geo.GridToLatLon("JO65")
+	x1, y1 := u.latLonToScreen(lat1, lon1)
+	x2, y2 := u.latLonToScreen(lat2, lon2)
+	for i := 1; i < 16; i++ {
+		t := float64(i) / 16
+		x := x1 + int(float64(x2-x1)*t)
+		y := y1 + int(float64(y2-y1)*t)
+		for dy := -1; dy <= 1; dy++ {
+			for dx := -1; dx <= 1; dx++ {
+				r, g, b, _ := u.img.At(x+dx, y+dy).RGBA()
+				if r>>8 == 255 && g>>8 == 223 && b>>8 == 89 {
+					arc++
+				}
+			}
+		}
+	}
+	if arc < 4 {
+		t.Fatalf("arc from OK04 to JO65 not drawn (only %d coloured samples)", arc)
+	}
+}
+
 // TestWorldMapFallback covers the nil-basemap path (flat background,
 // no panic, markers still drawn). The Once is left in its consumed
 // state so worldMap() returns the nilled cache without re-decoding.

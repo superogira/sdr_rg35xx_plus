@@ -1880,50 +1880,54 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				rows = append(rows, fmt.Sprintf("%d–%d / %d", start+1, start+vis, len(logLines)))
 				u.DrawSysMon(rows)
 			} else if uiMode == uiMap {
-				// Build map entries from the last 60 seconds of FT8 log.
+				// Build map entries from the last 10 minutes of FT8 log.
 				now := time.Now()
 				mapEntries := []ui.MapEntry{}
 				for _, e := range ft8Log {
-					// Parse time from "15:04:05" format
 					t, err := time.Parse("15:04:05", e.Time)
 					if err != nil {
 						continue
 					}
-					// Adjust for today's date
 					eTime := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), t.Second(), 0, now.Location())
-					// Handle messages that crossed midnight
 					if eTime.After(now.Add(time.Hour)) {
 						eTime = eTime.Add(-24 * time.Hour)
 					}
 					age := now.Sub(eTime)
-					if age < 0 || age > 60*time.Second {
+					if age < 0 || age > 10*time.Minute {
 						continue
 					}
-					// Extract grid from message
 					toks := strings.Fields(e.Text)
 					if len(toks) < 2 {
 						continue
 					}
 					isCQ := toks[0] == "CQ" || strings.HasPrefix(toks[0], "CQ_")
-					var grid, fromGrid string
+					// The message grid (tail token) belongs to the SENDER
+					// (toks[1]); report/RRR/73 tails carry none and fall
+					// back to the sender's cached grid.
 					lastTok := toks[len(toks)-1]
 					isTail := lastTok == "RR73" || lastTok == "RRR" || lastTok == "73" || lastTok == "CQ"
 					hasGrid := !isTail && len(lastTok) >= 4 && lastTok[0] >= 'A' && lastTok[0] <= 'R' &&
 						lastTok[1] >= 'A' && lastTok[1] <= 'R' &&
 						lastTok[2] >= '0' && lastTok[2] <= '9' && lastTok[3] >= '0' && lastTok[3] <= '9'
+					senderGrid := ""
 					if hasGrid {
-						grid = lastTok
+						senderGrid = lastTok
 					} else if g, ok := gridCache[toks[1]]; ok {
-						grid = g
+						senderGrid = g
 					}
-					if grid == "" {
+					if senderGrid == "" {
 						continue
 					}
-					// For QSO (non-CQ), try to find sender's previous grid
-					if !isCQ && len(toks) >= 3 {
-						sender := toks[1]
-						if g, ok := gridCache[sender]; ok && g != grid {
-							fromGrid = g
+					// QSO arc: SENDER -> RECIPIENT. The recipient (toks[0])
+					// never carries a grid inside QSO texts — the arc only
+					// resolves when the recipient was heard earlier with a
+					// grid (their CQ or contact), via the cache. The old
+					// code looked up the SENDER's own grid for both ends,
+					// which always collided and never drew anything.
+					grid, fromGrid := senderGrid, ""
+					if !isCQ {
+						if g, ok := gridCache[toks[0]]; ok && g != senderGrid {
+							grid, fromGrid = g, senderGrid
 						}
 					}
 					mapEntries = append(mapEntries, ui.MapEntry{
