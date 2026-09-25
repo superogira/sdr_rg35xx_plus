@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"math"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -286,7 +287,19 @@ func (u *UI) drawMapDetail(sel *MapSelection) {
 		rows = rows[len(rows)-maxRows:]
 	}
 	for _, ln := range rows {
-		sf.DrawString(u.img, color.RGBA{230, 230, 230, 255}, txf, ty, ln)
+		// Message rows ("HH:MM:SS > text") carry the same colouring as
+		// the FT8 decode window, classified on the message part alone.
+		col := color.RGBA{230, 230, 230, 255}
+		msg := ""
+		if i := strings.Index(ln, " > "); i >= 0 {
+			msg = ln[i+3:]
+		} else if i := strings.Index(ln, " < "); i >= 0 {
+			msg = ln[i+3:]
+		}
+		if msg != "" {
+			col = ft8TextColor(msg)
+		}
+		sf.DrawString(u.img, col, txf, ty, ln)
 		ty += rowH
 	}
 }
