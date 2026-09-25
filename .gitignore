@@ -16,3 +16,6 @@ thai_test.png
 
 # FTP credentials for upload.sh (never commit)
 ftp.env
+
+# Source basemap copy (embedded from internal/ui/world_map.png)
+/world_map.png
