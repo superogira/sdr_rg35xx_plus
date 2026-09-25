@@ -265,6 +265,30 @@ func syncDir(dir string) {
 	}
 }
 
+// ft8Bands: standard FT8 dial frequencies (sigidwiki FT8 wiki, the
+// "All"/WSJT-X default column). Thailand is IARU Region 3, where the
+// "All" entries are the convention, so Region-1 alternates are left out
+// to keep the picker to one screen.
+var ft8Bands = []struct {
+	label string
+	hz    int64
+}{
+	{"160m    1.840 MHz", 1_840_000},
+	{"80m     3.573 MHz", 3_573_000},
+	{"60m     5.357 MHz", 5_357_000},
+	{"40m     7.074 MHz", 7_074_000},
+	{"30m    10.136 MHz", 10_136_000},
+	{"20m    14.074 MHz", 14_074_000},
+	{"17m    18.100 MHz", 18_100_000},
+	{"15m    21.074 MHz", 21_074_000},
+	{"12m    24.915 MHz", 24_915_000},
+	{"10m    28.074 MHz", 28_074_000},
+	{"6m     50.313 MHz", 50_313_000},
+	{"2m    144.174 MHz", 144_174_000},
+	{"70cm  432.174 MHz", 432_174_000},
+	{"23cm 1296.174 MHz", 1_296_174_000},
+}
+
 func main() {
 	host := flag.String("host", defaultHost, "rtl_tcp server address host:port")
 	freq := flag.Int64("freq", 145_500_000, "startup frequency in Hz")
@@ -582,6 +606,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		uiLogs
 		uiBmList
 		uiMap
+		uiFT8Bands
 	)
 	uiMode := uiMain
 	// Map screen: selected station (index into mapStationNames, -1 =
@@ -589,6 +614,8 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 	// rebuilt by the map renderer each frame and read by handlePress.
 	mapSel, mapDetail := -1, false
 	mapStationNames := []string{}
+	// FT8 band picker: selected row (up/down walk the ft8Bands table).
+	ft8BandSel := 0
 	// Dev aid for PNG screenshot testing of the overlays.
 	switch os.Getenv("SDR_UI") {
 	case "menu":
@@ -597,6 +624,8 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		uiMode = uiFreqEdit
 	case "map":
 		uiMode = uiMap
+	case "ft8bands":
+		uiMode = uiFT8Bands
 	}
 	menuSel := 0
 	// Row indexes MUST match the items slice built for DrawMenu below.
@@ -628,6 +657,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		menuLogs
 		menuBM
 		menuMap
+		menuBands
 	)
 	// The flat 16-row menu outgrew the screen, so it is now three
 	// subpages reached from a 3-row root. pageItems maps (page → row)
@@ -643,9 +673,20 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		pageItems := [][]int{
 			{0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
 			{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
-			{menuFT8, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap},
+			{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap},
 			{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 			{menuBM},
+		}
+		// menuRow maps an item id to its row on a page. Hardcoded row
+		// numbers drifted every time a row was inserted — this replaces
+		// the "pageFT8, N" literals.
+		menuRow := func(page, item int) int {
+			for i, it := range pageItems[page] {
+				if it == item {
+					return i
+				}
+			}
+			return 0
 		}
 	// Span options, finest → widest, so RIGHT widens the span (the value
 	// goes UP on right like every other numeric row; the old list ran
@@ -971,9 +1012,12 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			case menuBM:
 				bmSel = 0
 				uiMode = uiBmList
-			case menuMap:
-				mapSel, mapDetail = -1, false
-				uiMode = uiMap
+		case menuMap:
+			mapSel, mapDetail = -1, false
+			uiMode = uiMap
+		case menuBands:
+			ft8BandSel = 0
+			uiMode = uiFT8Bands
 			case menuHost:
 				hostSel = 0
 				uiMode = uiHostList
@@ -1207,11 +1251,33 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 						mapSel = -1
 					} else {
 						mapSel, mapDetail = -1, false
-						uiMode, menuPage, menuSel = uiMenu, pageFT8, 6
+						uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuMap)
 					}
 				case input.Start, input.Select:
 					mapSel, mapDetail = -1, false
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, 6
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuMap)
+				}
+			case uiFT8Bands:
+				// Band picker: up/down walk the list, A tunes there (and
+				// turns FT8 decode on), B/Start back to the FT8 page.
+				switch b {
+				case input.Up:
+					ft8BandSel = (ft8BandSel + len(ft8Bands) - 1) % len(ft8Bands)
+				case input.Down:
+					ft8BandSel = (ft8BandSel + 1) % len(ft8Bands)
+				case input.A:
+					band := ft8Bands[ft8BandSel]
+					if !r.FT8Enabled() {
+						saveBwNow(cfg, r) // keep old mode's bw before the USB jump
+						autoStep(dsp.ModeUSB)
+						r.SetFT8Enabled(true)
+					}
+					r.SetFreq(band.hz)
+					capturedMsg = fmt.Sprintf("FT8 %s", band.label)
+					capturedAt = time.Now()
+					uiMode = uiMain
+				case input.B, input.Start, input.Select:
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuBands)
 				}
 			case uiHostList:
 			// Rows: saved hosts + "add new" at the bottom.
@@ -1293,7 +1359,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 						psk.SetStation(myCall, myGrid, myAnt, myRig)
 					}
 					hostText = ""
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, 1
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuCall)
 				case "grid":
 					if hostText != "" {
 						myGrid = strings.ToUpper(hostText)
@@ -1301,19 +1367,19 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 						psk.SetStation(myCall, myGrid, myAnt, myRig)
 					}
 					hostText = ""
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, 2
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuGrid)
 				case "ant":
 					myAnt = hostText
 					cfg["antenna"] = myAnt
 					psk.SetStation(myCall, myGrid, myAnt, myRig)
 					hostText = ""
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, 3
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuAnt)
 				case "rig":
 					myRig = hostText
 					cfg["rig"] = myRig
 					psk.SetStation(myCall, myGrid, myAnt, myRig)
 					hostText = ""
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, 4
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuRig)
 				case "bm":
 					if bmSel < len(bookmarks) {
 						bookmarks[bmSel].label = hostText
@@ -1344,7 +1410,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				if kbTarget == "host" {
 					uiMode = uiHostList
 				} else {
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, 0
+					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuFT8)
 				}
 			}
 		case uiFreqEdit:
@@ -1803,13 +1869,14 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				ui.MenuItem{Label: i18n.T("m_step"), Value: stepLabel(stepHz)},
 				ui.MenuItem{Label: i18n.T("m_wfmin"), Value: fmt.Sprintf("+%.0f dB", wfMin)},
 				ui.MenuItem{Label: i18n.T("m_wfmax"), Value: fmt.Sprintf("%.0f dB", wfMax)})
-		case pageFT8:
-			pskVal := i18n.T("off")
-			if pskOn {
-				pskVal = i18n.T("on")
-			}
+			case pageFT8:
+				pskVal := i18n.T("off")
+				if pskOn {
+					pskVal = i18n.T("on")
+				}
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_ft8"), Value: ft8Label(r.FT8Enabled())},
+					ui.MenuItem{Label: i18n.T("m_bands"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_call"), Value: myCall},
 					ui.MenuItem{Label: i18n.T("m_grid"), Value: myGrid},
 					ui.MenuItem{Label: i18n.T("m_ant"), Value: myAnt},
@@ -2074,8 +2141,24 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				} else {
 					u.DrawWorldMap(mapEntries, mapSelUI)
 				}
+			} else if uiMode == uiFT8Bands {
+				// FT8 band picker; the green row is the band currently
+				// tuned (within ±2 kHz of the dial frequency).
+				labels := make([]string, len(ft8Bands))
+				active := -1
+				for i, band := range ft8Bands {
+					labels[i] = band.label
+					d := r.Freq() - band.hz
+					if d < 0 {
+						d = -d
+					}
+					if d <= 2000 {
+						active = i
+					}
+				}
+				u.DrawBandList(labels, ft8BandSel, active)
 			}
-		if r.FT8Enabled() && uiMode == uiMain {
+			if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
 			u.DrawFT8Log(ft8Log)
 		}

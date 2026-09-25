@@ -960,6 +960,54 @@ func (u *UI) DrawHostList(hosts []string, sel, activeIdx int) {
 	Face(14, sel == len(hosts)).DrawString(u.img, cyan, px+38, y, i18n.T("host_add"))
 }
 
+// DrawBandList renders the FT8 band picker: one row per band, the
+// currently-tuned band marked with a drawn square (the font has no
+// symbol glyphs) and green text.
+func (u *UI) DrawBandList(bands []string, sel, activeIdx int) {
+	rowH := 24
+	pw := 440
+	ph := 70 + rowH*len(bands) + 30
+	if ph > u.H-10 {
+		ph = u.H - 10
+	}
+	px := (u.W - pw) / 2
+	py := (u.H - ph) / 2
+
+	u.fillBlend(px+4, py+4, pw, ph, 0, 0, 0, 120)
+	u.fillBlend(px, py, pw, ph, 14, 20, 28, 242)
+
+	white := color.RGBA{240, 240, 240, 255}
+	grey := color.RGBA{150, 160, 170, 255}
+	cyan := color.RGBA{80, 220, 255, 255}
+	yellow := color.RGBA{255, 230, 120, 255}
+	green := color.RGBA{120, 230, 140, 255}
+
+	Face(16, true).DrawString(u.img, cyan, px+16, py+28, i18n.T("band_title"))
+	Face(11, false).DrawString(u.img, grey, px+16, py+ph-12, i18n.T("band_hint"))
+
+	for i, b := range bands {
+		y := py + 54 + i*rowH
+		if y > py+ph-26 {
+			break // more bands than rows (shouldn't happen with 14)
+		}
+		if i == sel {
+			u.fillBlend(px+8, y-16, pw-16, rowH-2, 40, 96, 128, 210)
+		}
+		if i == activeIdx {
+			// Drawn marker: green square beside the active band.
+			u.fillBlend(px+16, y-9, 9, 9, 60, 220, 120, 255)
+		}
+		fc := white
+		if i == activeIdx {
+			fc = green
+		}
+		if i == sel {
+			fc = yellow
+		}
+		Face(14, i == sel).DrawString(u.img, fc, px+34, y, b)
+	}
+}
+
 // FT8 message-kind colours: CQ = red, directed call = orange, signal
 // report = green, sign-off (RRR/RR73/73) = blue.
 var (
