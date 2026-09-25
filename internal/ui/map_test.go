@@ -226,7 +226,12 @@ func TestWorldMapCycleAndSelection(t *testing.T) {
 	sel := &MapSelection{
 		Call: "HS0ZKO", Lat: lat, Lon: lon, Grid: "OK04", Country: "Thailand",
 		Index: 1, Total: 3,
-		Detail: []string{"12:00:15 > CQ HS0ZKO OK04"},
+		Detail: []string{
+			"12:00:15 > CQ HS0ZKO OK04",     // CQ → red
+			"12:00:30 < ON4ABC HS0ZKO R-07", // report → green
+			"12:00:45 > ON4ABC HS0ZKO RR73", // sign-off → blue
+			"12:00:50 < ON4ABC HS0ZKO JO65", // directed → orange
+		},
 	}
 	u.CycleMap(n - 1 - u.mapStyle) // back to style 0
 	u.DrawWorldMap(nil, sel)
@@ -240,5 +245,28 @@ func TestWorldMapCycleAndSelection(t *testing.T) {
 	}
 	if !border {
 		t.Fatal("detail panel not drawn on the left half for a right-half station")
+	}
+	// Message rows are coloured like the decode window: all four FT8
+	// classes must appear inside the panel (left half, below the header).
+	classes := map[string][3]uint8{
+		"cq":      {255, 90, 90},
+		"report":  {100, 255, 100},
+		"signoff": {110, 170, 255},
+		"call":    {255, 170, 60},
+	}
+	for name, want := range classes {
+		found := false
+		for y := 110; y < u.H-60 && !found; y++ {
+			for x := 10; x < u.W/2-10; x++ {
+				r, g, b, _ := u.img.At(x, y).RGBA()
+				if uint8(r>>8) == want[0] && uint8(g>>8) == want[1] && uint8(b>>8) == want[2] {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("detail panel row colour for %s (%v) not found", name, want)
+		}
 	}
 }

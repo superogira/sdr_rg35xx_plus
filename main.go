@@ -2136,6 +2136,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 							"12:00:15 > CQ HS0ZKO OK04",
 							"12:00:30 < ON4ABC HS0ZKO R-07",
 							"12:00:45 > ON4ABC HS0ZKO RR73",
+							"12:00:50 < ON4ABC HS0ZKO JO65",
 						},
 					})
 				} else {
