@@ -1626,13 +1626,13 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		switch menuPage {
 		case pageRoot:
 			items = append(items,
-				ui.MenuItem{Label: i18n.T("m_rxpage"), Value: "▸"},
-				ui.MenuItem{Label: i18n.T("m_ft8page"), Value: "▸"},
-				ui.MenuItem{Label: i18n.T("m_syspage"), Value: "▸"},
-				ui.MenuItem{Label: i18n.T("m_bm"), Value: "▸"})
+				ui.MenuItem{Label: i18n.T("m_rxpage"), Value: ">"},
+				ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
+				ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"},
+				ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"})
 		case pageRx:
 			items = append(items,
-				ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.5f MHz ▸", float64(r.Freq())/1e6)},
+				ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.5f MHz >", float64(r.Freq())/1e6)},
 				ui.MenuItem{Label: i18n.T("m_mode"), Value: r.Mode().Name},
 				ui.MenuItem{Label: i18n.T("m_gain"), Value: fmt.Sprintf("%.1f dB", r.GainDb())},
 				ui.MenuItem{Label: i18n.T("m_sql"), Value: sq},
