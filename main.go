@@ -637,16 +637,47 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 			{menuBM},
 		}
-	spanSteps := []int{1000, 750, 500, 250, 125, 100, 50, 25, 12, 10, 5, 3}
-	spanIdx := func() int {
-		want := u.SpanFull / 1000
-		for i, v := range spanSteps {
-			if v == want {
-				return i
+	// Span options, finest → widest, so RIGHT widens the span (the value
+	// goes UP on right like every other numeric row; the old list ran
+	// big→small and right shrank the number). Entries wider than the
+	// current capture rate are filtered out per press — SetSpanKHz
+	// clamps them anyway, which used to swallow 2-3 presses dead at low
+	// rates before the list suddenly wrapped to the finest zoom.
+	spanSteps := []int{3, 5, 10, 12, 25, 50, 100, 125, 250, 500, 750, 1000}
+	spanStep := func(dir int) {
+		maxK := dsp.IQRate / 1000
+		allowed := make([]int, 0, len(spanSteps))
+		for _, v := range spanSteps {
+			if v <= maxK {
+				allowed = append(allowed, v)
 			}
 		}
-		return 2 // default 500k if unset
-	}()
+		if len(allowed) == 0 {
+			return
+		}
+		// Anchor on the LIVE span (clamping may have moved it off any
+		// list entry), stepping from the nearest entry at/below it.
+		cur := u.SpanFull / 1000
+		idx := -1
+		for i, v := range allowed {
+			if v == cur {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			for i := len(allowed) - 1; i >= 0; i-- {
+				if allowed[i] <= cur {
+					idx = i
+					break
+				}
+			}
+			if idx < 0 {
+				idx = 0
+			}
+		}
+		u.SetSpanKHz(allowed[(idx+len(allowed)+dir)%len(allowed)])
+	}
 
 	freqDigits := func() string {
 		hz := r.Freq()
@@ -834,8 +865,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				i18n.SetLang("th")
 			}
 		case menuSpan:
-			spanIdx = (spanIdx + len(spanSteps) + dir) % len(spanSteps)
-			u.SetSpanKHz(spanSteps[spanIdx])
+			spanStep(dir)
 		case menuStep:
 			for i, s := range stepSteps {
 				if s == stepHz {
