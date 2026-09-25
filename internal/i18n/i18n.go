@@ -57,6 +57,7 @@ var strings = map[string][2]string{
 	"m_rig":    {"เครื่องรับ (PSK)", "Rig (PSK)"},
 	"m_wfmin":  {"Waterfall ระดับต่ำสุด", "Waterfall min level"},
 	"m_wfmax":  {"Waterfall ระดับสูงสุด", "Waterfall max level"},
+	"m_map":    {"แผนที่โลก FT8 >", "FT8 World Map >"},
 	"m_rxpage":  {"การรับ", "Receive"},
 	"m_ft8page": {"FT8 / รายงาน", "FT8 / Reporting"},
 	"m_syspage": {"ระบบ", "System"},
