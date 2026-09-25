@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"image"
+	"math"
 	"testing"
 	"time"
 
@@ -61,13 +63,14 @@ func TestWorldMapBasemapAndMarkers(t *testing.T) {
 }
 
 // TestWorldMapArc: a QSO entry with Arc set must draw dashed arc pixels
-// along the sender→recipient line, a red dot at the sender end and a
-// green dot at the recipient end. The dash phase travels with wall
-// time, so the assertion counts samples over the whole line.
+// along the curved sender→recipient path (north-bowing Bézier), a red
+// dot at the sender end and a green dot at the recipient end. The dash
+// phase travels with wall time, so the assertion counts samples over
+// the whole curve.
 func TestWorldMapArc(t *testing.T) {
 	u := New(640, 480)
 	lat1, lon1, _ := geo.GridToLatLon("OK04") // Thailand (sender)
-	lat2, lon2, _ := geo.GridToLatLon("JO65") // Belgium (recipient)
+	lat2, lon2, _ := geo.GridToLatLon("JO65") // Denmark (recipient)
 	u.DrawWorldMap([]MapEntry{
 		{Lat: lat2, Lon: lon2, Arc: true, Role: RoleReceiver, FromLat: lat1, FromLon: lon1, Age: 3 * time.Second},
 	}, nil)
@@ -75,13 +78,10 @@ func TestWorldMapArc(t *testing.T) {
 	arc := 0
 	x1, y1 := u.latLonToScreen(lat1, lon1)
 	x2, y2 := u.latLonToScreen(lat2, lon2)
-	for i := 1; i < 40; i++ {
-		tt := float64(i) / 40
-		x := x1 + int(float64(x2-x1)*tt)
-		y := y1 + int(float64(y2-y1)*tt)
+	for _, p := range arcPoints(x1, y1, x2, y2) {
 		for dy := -1; dy <= 1; dy++ {
 			for dx := -1; dx <= 1; dx++ {
-				r, g, b, _ := u.img.At(x+dx, y+dy).RGBA()
+				r, g, b, _ := u.img.At(p.X+dx, p.Y+dy).RGBA()
 				if r>>8 == 255 && g>>8 == 223 && b>>8 == 89 {
 					arc++
 				}
@@ -97,6 +97,59 @@ func TestWorldMapArc(t *testing.T) {
 	if !findCore(u, x2, y2, RoleReceiver) {
 		t.Fatalf("no green marker at recipient end")
 	}
+}
+
+// TestArcCurvature: the arc must bow north of the straight chord —
+// higher for longer links — and stay clamped on screen.
+func TestArcCurvature(t *testing.T) {
+	// Short link (Thailand → Japan): mild bow.
+	tx, ty := 499, 203 // OK04 screen pos
+	jx, jy := 628, 180 // PM95-ish (Japan)
+	short := arcPoints(tx, ty, jx, jy)
+	shortLift := chordLift(short, tx, ty, jx, jy)
+
+	// Long link (Thailand → JO65): the bow must be clearly higher.
+	long := arcPoints(tx, ty, 343, 92)
+	longLift := chordLift(long, tx, ty, 343, 92)
+
+	if shortLift < 3 {
+		t.Fatalf("short arc barely curves (lift %d px)", shortLift)
+	}
+	if longLift <= shortLift {
+		t.Fatalf("long arc should bow higher than short: %d vs %d px", longLift, shortLift)
+	}
+	// Apex stays on screen.
+	for _, p := range long {
+		if p.Y < 0 || p.Y > 479 || p.X < 0 || p.X > 639 {
+			t.Fatalf("arc point off screen: %v", p)
+		}
+	}
+	// Endpoints preserved.
+	if short[0].X != tx || short[0].Y != ty || short[len(short)-1].X != jx || short[len(short)-1].Y != jy {
+		t.Fatalf("arc endpoints moved: %+v", short)
+	}
+}
+
+// chordLift measures how far above the straight chord the arc's apex
+// rises (pixels).
+func chordLift(pts []image.Point, x1, y1, x2, y2 int) int {
+	best := 0
+	for _, p := range pts {
+		// Distance from the chord line: |(y2-y1)x - (x2-x1)y + x2*y1 - y2*x1| / len
+		num := abs((y2-y1)*p.X - (x2-x1)*p.Y + x2*y1 - y2*x1)
+		d := num / int(math.Sqrt(float64((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1))))
+		if d > best {
+			best = d
+		}
+	}
+	return best
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // TestWorldMapApproxMarker: an Approx entry draws the hollow ring, not

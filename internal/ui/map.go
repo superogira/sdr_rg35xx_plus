@@ -385,10 +385,57 @@ func (u *UI) drawRipple(cx, cy int, radius, fade float64) {
 	u.drawDot(cx, cy, fade, RoleSender)
 }
 
-// drawArc draws a dashed line between two points (QSO exchange). The
-// dashes travel from (x1,y1) — the sender — towards (x2,y2): a pixel at
-// distance d is on when (d+phase) mod 12 < 6, and phase grows with wall
-// time, pushing the bright segments forward.
+// arcPoints samples a quadratic Bézier from (x1,y1) to (x2,y2) that
+// bows towards the top of the screen (north), rising higher the longer
+// the link — the classic long-path radio look. The control point sits
+// on the chord's perpendicular at height h = 22% of the distance
+// (capped at 140 px and clamped so the arc's apex stays on screen; a
+// quadratic's apex reaches h/2 above the chord midpoint).
+func arcPoints(x1, y1, x2, y2 int) []image.Point {
+	fx1, fy1 := float64(x1), float64(y1)
+	fx2, fy2 := float64(x2), float64(y2)
+	dx, dy := fx2-fx1, fy2-fy1
+	length := math.Hypot(dx, dy)
+	if length < 2 {
+		return []image.Point{{x1, y1}, {x2, y2}}
+	}
+
+	nx, ny := -dy/length, dx/length // unit perpendicular
+	if ny > 0 {                     // prefer bowing "up"
+		nx, ny = -nx, -ny
+	}
+	h := 0.22 * length
+	if h > 140 {
+		h = 140
+	}
+	if ny < 0 { // apex (midpoint − h/2·|ny|) must stay on screen
+		if apex := (fy1+fy2)/2 + ny*h/2; apex < 4 {
+			h = 2 * ((fy1+fy2)/2 - 4) / -ny
+		}
+	}
+	cx := (fx1+fx2)/2 + nx*h
+	cy := (fy1+fy2)/2 + ny*h
+
+	steps := int(length)
+	if steps < 8 {
+		steps = 8
+	}
+	pts := make([]image.Point, 0, steps+1)
+	for i := 0; i <= steps; i++ {
+		t := float64(i) / float64(steps)
+		mt := 1 - t
+		bx := mt*mt*fx1 + 2*mt*t*cx + t*t*fx2
+		by := mt*mt*fy1 + 2*mt*t*cy + t*t*fy2
+		pts = append(pts, image.Point{int(bx), int(by)})
+	}
+	return pts
+}
+
+// drawArc draws a curved dashed link between two points (QSO
+// exchange). The arc bows north, higher for longer distances. The
+// dashes travel from (x1,y1) — the sender — towards (x2,y2): a pixel
+// at arc-length d is on when (d+phase) mod 12 < 6, and phase grows
+// with wall time, pushing the bright segments forward.
 func (u *UI) drawArc(x1, y1, x2, y2 int, fade, phase float64) {
 	alpha := uint8(fade * 230)
 	if alpha < 35 {
@@ -396,22 +443,16 @@ func (u *UI) drawArc(x1, y1, x2, y2 int, fade, phase float64) {
 	}
 	c := color.RGBA{255, 223, 89, alpha}
 
-	dx := x2 - x1
-	dy := y2 - y1
-	steps := int(math.Sqrt(float64(dx*dx + dy*dy)))
-	if steps < 2 {
-		steps = 2
-	}
-
-	// Walk the line in sub-pixel steps so the dash phase advances
-	// smoothly regardless of the line's slope.
-	for i := 0; i <= steps; i++ {
-		d := float64(i) + phase
-		if math.Mod(d, 12) >= 6 {
+	pts := arcPoints(x1, y1, x2, y2)
+	dist := -phase // distance travelled along the arc so far
+	px, py := float64(pts[0].X), float64(pts[0].Y)
+	for _, p := range pts {
+		dist += math.Hypot(float64(p.X)-px, float64(p.Y)-py)
+		px, py = float64(p.X), float64(p.Y)
+		if math.Mod(dist, 12) >= 6 {
 			continue
 		}
-		t := float64(i) / float64(steps)
-		u.setPixel(x1+int(float64(dx)*t), y1+int(float64(dy)*t), c)
+		u.setPixel(p.X, p.Y, c)
 	}
 }
 
