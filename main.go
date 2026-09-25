@@ -731,6 +731,12 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 	adjustItem := func(idx, dir int) {
 		switch idx {
 		case menuMode:
+			if r.FT8Enabled() {
+				// USB-only while FT8 decodes (radio.SetMode enforces it;
+				// skip the switch dance so the bw cfg isn't crossed).
+				capturedMsg, capturedAt = i18n.T("ft8_modelock"), time.Now()
+				return
+			}
 			saveBwNow(cfg, r)
 			m := dsp.NextMode(r.Mode())
 			if dir < 0 {
@@ -794,6 +800,12 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				r.SetDirectSamplingMode(-1)
 			}
 		case menuFT8:
+			if !r.FT8Enabled() {
+				saveBwNow(cfg, r) // keep old mode's bw before the USB jump
+				if stepHz > 25_000 {
+					stepHz = 12_500 // WFM 100k steps are useless on FT8
+				}
+			}
 			r.SetFT8Enabled(!r.FT8Enabled())
 		case menuAGC:
 			r.SetAGCEnabled(!r.AGCEnabled())
@@ -859,6 +871,12 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		}
 		switch idx {
 		case menuFT8:
+			if !r.FT8Enabled() {
+				saveBwNow(cfg, r) // keep old mode's bw before the USB jump
+				if stepHz > 25_000 {
+					stepHz = 12_500 // WFM 100k steps are useless on FT8
+				}
+			}
 			r.SetFT8Enabled(!r.FT8Enabled())
 		case menuLang:
 			if i18n.Lang() == "th" {
@@ -934,6 +952,13 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		case input.Down:
 			r.SetFreq(r.Freq() - 10*stepFor())
 		case input.A:
+			if r.FT8Enabled() {
+				// Mode cycling disabled while FT8 decodes — USB only
+				// (radio.SetMode would reject it anyway; bail out before
+				// the bw/step dance crosses settings between modes).
+				capturedMsg, capturedAt = i18n.T("ft8_modelock"), time.Now()
+				return
+			}
 			// Save current mode's bandwidth before switching.
 			saveBwNow(cfg, r)
 			m := dsp.NextMode(r.Mode())
@@ -1643,7 +1668,13 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		case pageRx:
 			items = append(items,
 				ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.5f MHz >", float64(r.Freq())/1e6)},
-				ui.MenuItem{Label: i18n.T("m_mode"), Value: r.Mode().Name},
+				func() ui.MenuItem {
+					m := ui.MenuItem{Label: i18n.T("m_mode"), Value: r.Mode().Name}
+					if r.FT8Enabled() {
+						m.Value = "USB (FT8)"
+					}
+					return m
+				}(),
 				ui.MenuItem{Label: i18n.T("m_gain"), Value: fmt.Sprintf("%.1f dB", r.GainDb())},
 				ui.MenuItem{Label: i18n.T("m_sql"), Value: sq},
 				ui.MenuItem{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
