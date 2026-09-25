@@ -180,7 +180,7 @@ func (r *Radio) SetCaptureRate(hz int) {
 		r.out.SetInputRate(r.mode.AudioOutRate())
 	}
 	if client != nil {
-		client.Close() // reconnect with the new rate
+		client.CloseGraceful() // reconnect with the new rate
 	}
 	fmt.Fprintf(os.Stderr, "radio: capture rate now %d Hz (IF2 %d, audio %d)\n", hz, dsp.IF2Rate, dsp.AudioRate)
 }
@@ -252,8 +252,11 @@ func (r *Radio) session(ctx context.Context) error {
 
 	client, err := rtltcp.Dial(r.Host, 5*time.Second)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "radio: connect to %s failed: %v\n", r.Host, err)
 		return fmt.Errorf("connect: %v", err)
 	}
+	fmt.Fprintf(os.Stderr, "radio: connected to %s (tuner %d, %d gains, bigEndian=%v)\n",
+		r.Host, client.Info.TunerType, client.Info.GainCount, client.BigEndian())
 
 	setup := func() error {
 		r.mu.Lock()
@@ -351,7 +354,9 @@ func (r *Radio) session(ctx context.Context) error {
 			r.client = nil
 		}
 		r.mu.Unlock()
-		client.Close()
+		// Graceful: FIN + drain leaves the single-client server in its
+		// accept state instead of wedged on a reset mid-stream.
+		client.CloseGraceful()
 		if r.chain != nil {
 			r.chain.SetMute(true)
 		}
@@ -523,14 +528,14 @@ func (r *Radio) SetFreq(hz int64) {
 	if switchHF {
 		if err := client.SetDirectSampling(want); err != nil {
 			fmt.Fprintf(os.Stderr, "radio: direct sampling %d failed: %v\n", want, err)
-			client.Close()
+			client.CloseGraceful()
 			return
 		}
 		fmt.Fprintf(os.Stderr, "radio: direct sampling mode %d (freq %.4f MHz)\n", want, float64(hz)/1e6)
 	}
 	if err := client.SetFrequency(uint32(hz)); err != nil {
 		fmt.Fprintf(os.Stderr, "radio: tune %d failed: %v — reconnecting\n", hz, err)
-		client.Close()
+		client.CloseGraceful()
 		return
 	}
 	// Logged so the app log can be compared against the rtl_tcp server's
@@ -677,7 +682,7 @@ func (r *Radio) SetHost(host string) {
 	client := r.client
 	r.mu.Unlock()
 	if client != nil {
-		client.Close() // reconnect to the new address
+		client.CloseGraceful() // reconnect to the new address
 	}
 	fmt.Fprintf(os.Stderr, "radio: host now %s (reconnecting)\n", host)
 }
