@@ -441,11 +441,15 @@ func arcPoints(x1, y1, x2, y2 int) []image.Point {
 
 // drawArc draws a curved dashed link between two points (QSO
 // exchange). The arc bows north, higher for longer distances. The
-// dashes travel from (x1,y1) — the sender — towards (x2,y2): a pixel
-// at arc-length d is on when (d+phase) mod 12 < 6, and phase grows
-// with wall time, pushing the bright segments forward.
+// dashes travel from (x1,y1) — the sender — towards (x2,y2) and
+// ALTERNATE COLOURS every dash (yellow, orange, yellow, …) so the
+// direction of travel stays readable even where arcs overlap: the
+// colour sequence orders the dashes along the path. Pattern period is
+// 24 px of arc length: 6 on (yellow), 6 off, 6 on (orange), 6 off;
+// phase grows with wall time, pushing both colours forward.
 func (u *UI) drawArc(x1, y1, x2, y2 int, fade, phase float64) {
-	c := color.RGBA{255, 223, 89, uint8(fade * 255)}
+	yellow := color.RGBA{255, 223, 89, uint8(fade * 255)}
+	orange := color.RGBA{255, 140, 0, uint8(fade * 255)}
 
 	pts := arcPoints(x1, y1, x2, y2)
 	dist := -phase // distance travelled along the arc so far
@@ -453,10 +457,13 @@ func (u *UI) drawArc(x1, y1, x2, y2 int, fade, phase float64) {
 	for _, p := range pts {
 		dist += math.Hypot(float64(p.X)-px, float64(p.Y)-py)
 		px, py = float64(p.X), float64(p.Y)
-		if math.Mod(dist, 12) >= 6 {
-			continue
+		m := math.Mod(dist, 24)
+		switch {
+		case m < 6:
+			u.setPixel(p.X, p.Y, yellow)
+		case m >= 12 && m < 18:
+			u.setPixel(p.X, p.Y, orange)
 		}
-		u.setPixel(p.X, p.Y, c)
 	}
 }
 
