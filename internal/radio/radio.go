@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"sync"
 	"time"
@@ -213,33 +214,40 @@ func (r *Radio) Run(ctx context.Context) {
 		})
 		return
 	}
-	backoff := time.Second
+	// Reconnect pacing tuned to this server's restart cycle: every client
+	// departure kills the rtl_tcp process and the .bat wrapper takes
+	// several seconds to bring it back ("all threads dead.. → listening"),
+	// so retrying after 1 s just hammers the dead window and can re-trigger
+	// the exit cycle. Start at 5 s, ramp to 15 s, jitter ±20%.
+	backoff := 5 * time.Second
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 		if err := r.session(ctx); err != nil {
+			wait := backoff + time.Duration(rand.Int63n(int64(backoff)/5))
 			r.mu.Lock()
 			r.state = stateDisconnected
 			r.lastErr = err.Error()
-			r.reconAt = time.Now().Add(backoff)
+			r.reconAt = time.Now().Add(wait)
 			r.mu.Unlock()
+			fmt.Fprintf(os.Stderr, "radio: session ended (%v) — retrying in %s\n", err, wait)
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(backoff):
+			case <-time.After(wait):
 			}
-			if backoff < 8*time.Second {
-				backoff *= 2
+			if backoff < 15*time.Second {
+				backoff += 5 * time.Second
 			}
 			// Feed silence to the player while waiting so it never
 			// underruns audibly.
 			if r.out != nil {
-				r.out.Silence(int(backoff.Milliseconds()))
+				r.out.Silence(int(wait.Milliseconds()))
 			}
 			continue
 		}
-		backoff = time.Second
+		backoff = 5 * time.Second
 	}
 }
 
@@ -287,6 +295,12 @@ func (r *Radio) session(ctx context.Context) error {
 				return fmt.Errorf("sample rate: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "radio: requested %d Hz sample rate\n", r.iqRate)
+		}
+		// Stream kick: this server holds the IQ stream until the first
+		// command arrives (a silent connect can sit at zero bytes), and
+		// SDRSharp opens with the same harmless freq-correction command.
+		if err := client.SetFreqCorrection(0); err != nil {
+			return fmt.Errorf("freq correction kick: %w", err)
 		}
 		// Dongle bring-up. Configure once, then only ever retune:
 		// this server build (fixed 2.048 Msps, big-endian protocol)
