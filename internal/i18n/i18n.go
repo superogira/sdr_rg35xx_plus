@@ -120,6 +120,7 @@ var strings = map[string][2]string{
 	"updated":      {"อัพเดทเป็นเวอร์ชั่น %d แล้ว — กำลังรีสตาร์ท", "Updated to %d — restarting"},
 	"ft8_synced":   {"FT8 sync แล้ว — รอสัญญาณถัดไป…", "FT8 synced — waiting for next signal…"},
 	"ft8_need_sync": {"FT8: กด Y ตอนสัญญาณเริ่ม ก่อนใช้งาน", "FT8: press Y at slot start to sync"},
+	"ft8_modelock": {"FT8 เปิดอยู่ — โหมดล็อคเป็น USB", "FT8 is on — mode locked to USB"},
 	"starting":     {"กำลังเริ่มระบบ…", "Starting…"},
 }
 

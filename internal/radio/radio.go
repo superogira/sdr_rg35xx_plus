@@ -573,10 +573,18 @@ func (r *Radio) Freq() int64 {
 	return r.freqHz
 }
 
-// SetMode swaps the demod chain. The dongle needs no reconfiguration (same
-// sample rate); only the DSP changes.
+// SetMode swaps the demod chain. While FT8 is active the mode is locked
+// to USB — the FT8 operating convention — so the demod can never sit on
+// a mode that fights the monitor branch (and the listener gets the
+// conventional audio). A re-set of the SAME mode is allowed (internal
+// chain rebuilds depend on it).
 func (r *Radio) SetMode(mode dsp.Mode) {
 	r.mu.Lock()
+	if r.ft8On && mode.Name != dsp.ModeUSB.Name && mode.Name != r.mode.Name {
+		r.mu.Unlock()
+		fmt.Fprintf(os.Stderr, "radio: mode change to %s ignored — FT8 locks USB\n", mode.Name)
+		return
+	}
 	r.mode = mode
 	r.chain = dsp.NewChain(mode, r.tap, r.rawTap)
 	r.chain.SetVolume(r.vol)
@@ -681,12 +689,14 @@ func (r *Radio) FT8Enabled() bool {
 	return r.ft8On
 }
 
-// SetFT8Enabled toggles FT8 detection.
+// SetFT8Enabled toggles FT8 detection. Turning it on also switches the
+// demod to USB (FT8 convention; SetMode enforces the lock from then on).
 func (r *Radio) SetFT8Enabled(on bool) {
 	r.mu.Lock()
 	r.ft8On = on
 	r.ft8.SetEnabled(on)
 	chain := r.chain
+	needUSB := on && r.mode.Name != dsp.ModeUSB.Name
 	r.mu.Unlock()
 	if chain != nil {
 		if on {
@@ -694,6 +704,10 @@ func (r *Radio) SetFT8Enabled(on bool) {
 		} else {
 			chain.SetFT8Detector(nil)
 		}
+	}
+	if needUSB {
+		// SetMode rebuilds the chain and re-attaches the detector.
+		r.SetMode(dsp.ModeUSB)
 	}
 	fmt.Fprintf(os.Stderr, "radio: FT8 %v\n", on)
 }
