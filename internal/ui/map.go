@@ -12,8 +12,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
-	"sdr35/internal/geo"
 )
 
 //go:embed world_map.png
@@ -45,17 +43,22 @@ func worldMap() *image.RGBA {
 	return worldMapImg
 }
 
-// MapEntry describes one FT8 activity point on the world map.
+// MapEntry describes one FT8 activity marker on the world map.
 type MapEntry struct {
-	Grid     string        // Maidenhead grid square
-	IsCQ     bool          // true = CQ beacon, false = QSO exchange
-	FromGrid string        // sender's grid for QSO arcs (empty if unknown)
-	Age      time.Duration // time since decoded
+	Lat, Lon    float64       // marker position (exact grid or country centroid)
+	Arc         bool          // draw a dashed arc from the sender's position
+	FromLat     float64       // arc source
+	FromLon     float64       // arc source
+	IsCQ        bool          // true = CQ beacon, false = QSO exchange
+	Approx      bool          // position is a country-level guess (hollow marker)
+	Age         time.Duration // time since decoded
 }
 
 // DrawWorldMap renders the FT8 world map: photographic equirectangular
 // basemap (blitted full-screen — it is 640×480, exactly the framebuffer)
-// with CQ ripples and QSO arcs from the last 10 minutes on top.
+// with CQ ripples and QSO arcs from the last 10 minutes on top. Markers
+// whose position is only a country guess draw as hollow rings until the
+// real grid is learned.
 func (u *UI) DrawWorldMap(entries []MapEntry) {
 	if !u.blitWorldMap() {
 		// Decode failure fallback: plain dark background.
@@ -64,11 +67,7 @@ func (u *UI) DrawWorldMap(entries []MapEntry) {
 
 	// Draw activity markers.
 	for _, e := range entries {
-		lat, lon, ok := geo.GridToLatLon(e.Grid)
-		if !ok {
-			continue
-		}
-		x, y := u.latLonToScreen(lat, lon)
+		x, y := u.latLonToScreen(e.Lat, e.Lon)
 
 		// Linear fade across the whole 10-minute window.
 		fade := 1.0 - (float64(e.Age) / (10 * float64(time.Minute)))
@@ -76,23 +75,22 @@ func (u *UI) DrawWorldMap(entries []MapEntry) {
 			fade = 0
 		}
 
-		if e.IsCQ {
+		if e.Arc {
+			x1, y1 := u.latLonToScreen(e.FromLat, e.FromLon)
+			u.drawArc(x1, y1, x, y, fade)
+			u.marker(x, y, fade, e.Approx)
+			u.marker(x1, y1, fade*0.7, false)
+		} else if e.IsCQ {
 			// CQ: expanding ripple (the rings self-cap at 55 px, so after
 			// ~7 s the marker settles to a slowly fading dot).
 			radius := float64(e.Age) / float64(time.Second) * 8 // 8px/second expansion
-			u.drawRipple(x, y, radius, fade)
-		} else if e.FromGrid != "" {
-			// QSO: arc from sender to recipient
-			fromLat, fromLon, okFrom := geo.GridToLatLon(e.FromGrid)
-			if !okFrom {
-				u.drawDot(x, y, fade)
-				continue
+			if e.Approx {
+				u.marker(x, y, fade, true)
+			} else {
+				u.drawRipple(x, y, radius, fade)
 			}
-			x1, y1 := u.latLonToScreen(fromLat, fromLon)
-			u.drawArc(x1, y1, x, y, fade)
 		} else {
-			// QSO but sender grid unknown: just a dot
-			u.drawDot(x, y, fade)
+			u.marker(x, y, fade, e.Approx)
 		}
 	}
 
@@ -100,6 +98,15 @@ func (u *UI) DrawWorldMap(entries []MapEntry) {
 	u.fillBlend(8, 8, 220, 26, 0, 0, 0, 170)
 	tf := Face(13, false)
 	tf.DrawString(u.img, color.RGBA{255, 255, 255, 255}, 16, 26, "FT8 World Map - 10min")
+
+	// Legend chip (below the title): exact vs approximate positions.
+	// The markers are drawn graphically — the font has no circle glyphs.
+	u.fillBlend(8, 38, 190, 20, 0, 0, 0, 150)
+	u.marker(18, 47, 1.0, false)
+	lf := Face(10, false)
+	lf.DrawString(u.img, color.RGBA{220, 220, 220, 255}, 28, 52, "grid")
+	u.marker(66, 47, 1.0, true)
+	lf.DrawString(u.img, color.RGBA{220, 220, 220, 255}, 76, 52, "country (approx)")
 
 	// Hint chip (bottom-right, clear of the map action).
 	hint := "B close"
@@ -145,6 +152,28 @@ func (u *UI) latLonToScreen(lat, lon float64) (int, int) {
 	x := int((lon + 180) * float64(u.W) / 360)
 	y := int((90 - lat) * float64(u.H) / 180)
 	return x, y
+}
+
+// marker draws a station position: a filled amber dot when the grid is
+// known, a hollow ring when the position is only a country guess (it
+// moves to the exact spot once the station is heard with a grid).
+func (u *UI) marker(x, y int, fade float64, approx bool) {
+	if approx {
+		u.drawRing(x, y, fade)
+		return
+	}
+	u.drawDot(x, y, fade)
+}
+
+// drawRing draws a hollow circle (country-level approximate position).
+func (u *UI) drawRing(cx, cy int, fade float64) {
+	alpha := uint8(fade * 230)
+	if alpha < 40 {
+		alpha = 40
+	}
+	// Double ring for weight.
+	u.drawCircle(cx, cy, 4, color.RGBA{255, 200, 100, alpha})
+	u.drawCircle(cx, cy, 3, color.RGBA{60, 30, 0, alpha})
 }
 
 // drawRipple draws an expanding circle (CQ beacon indicator).

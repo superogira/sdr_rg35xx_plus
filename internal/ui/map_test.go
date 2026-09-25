@@ -23,8 +23,7 @@ func TestWorldMapBasemapAndMarkers(t *testing.T) {
 	wantY := int((90 - lat) * 480 / 180)
 
 	u.DrawWorldMap([]MapEntry{
-		{Grid: "OK04", IsCQ: true, Age: 1 * time.Second},
-		{Grid: "JO65", FromGrid: "OK04", Age: 2 * time.Second}, // QSO arc DE→BE
+		{Lat: lat, Lon: lon, IsCQ: true, Age: 1 * time.Second},
 	})
 
 	// Basemap present: mid-Pacific (lon -140, lat -20) must not be the
@@ -37,58 +36,42 @@ func TestWorldMapBasemapAndMarkers(t *testing.T) {
 
 	// Marker dot: the amber core must appear within 3px of the computed
 	// position (dot radius 2 + quantisation).
-	found := false
-	for dy := -3; dy <= 3 && !found; dy++ {
-		for dx := -3; dx <= 3; dx++ {
-			mr, mg, mb, _ := u.img.At(wantX+dx, wantY+dy).RGBA()
-			if mr>>8 == 255 && mg>>8 == 170 && mb>>8 == 60 {
-				found = true
-				break
-			}
-		}
-	}
+	found := findCore(u, wantX, wantY)
 	if !found {
 		t.Fatalf("no marker core near (%d,%d) for OK04", wantX, wantY)
 	}
+}
 
-	// Arc endpoint: JO65 (Belgium) also gets a dot.
-	lat2, lon2, _ := geo.GridToLatLon("JO65")
-	x2 := int((lon2 + 180) * 640 / 360)
-	y2 := int((90 - lat2) * 480 / 180)
-	found2 := false
-	for dy := -3; dy <= 3 && !found2; dy++ {
+// findCore scans ±3px for the amber dot core colour.
+func findCore(u *UI, x, y int) bool {
+	for dy := -3; dy <= 3; dy++ {
 		for dx := -3; dx <= 3; dx++ {
-			mr, mg, mb, _ := u.img.At(x2+dx, y2+dy).RGBA()
-			if mr>>8 == 255 && mg>>8 == 170 && mb>>8 == 60 {
-				found2 = true
-				break
+			r, g, b, _ := u.img.At(x+dx, y+dy).RGBA()
+			if r>>8 == 255 && g>>8 == 170 && b>>8 == 60 {
+				return true
 			}
 		}
 	}
-	if !found2 {
-		t.Fatalf("no marker core near (%d,%d) for JO65", x2, y2)
-	}
+	return false
 }
 
-// TestWorldMapArc: a QSO entry with a known FromGrid must draw dashed
-// arc pixels along the sender→recipient line (regression: the arc
-// condition never fired before the sender/recipient mix-up was fixed).
+// TestWorldMapArc: a QSO entry with Arc set must draw dashed arc pixels
+// along the sender→recipient line.
 func TestWorldMapArc(t *testing.T) {
 	u := New(640, 480)
+	lat1, lon1, _ := geo.GridToLatLon("OK04") // Thailand
+	lat2, lon2, _ := geo.GridToLatLon("JO65") // Belgium
 	u.DrawWorldMap([]MapEntry{
-		{Grid: "JO65", FromGrid: "OK04", Age: 3 * time.Second}, // Thailand → Belgium
+		{Lat: lat2, Lon: lon2, Arc: true, FromLat: lat1, FromLon: lon1, Age: 3 * time.Second},
 	})
 
 	arc := 0
-	// Sample the line between the two endpoints for the arc colour.
-	lat1, lon1, _ := geo.GridToLatLon("OK04")
-	lat2, lon2, _ := geo.GridToLatLon("JO65")
 	x1, y1 := u.latLonToScreen(lat1, lon1)
 	x2, y2 := u.latLonToScreen(lat2, lon2)
 	for i := 1; i < 16; i++ {
-		t := float64(i) / 16
-		x := x1 + int(float64(x2-x1)*t)
-		y := y1 + int(float64(y2-y1)*t)
+		tt := float64(i) / 16
+		x := x1 + int(float64(x2-x1)*tt)
+		y := y1 + int(float64(y2-y1)*tt)
 		for dy := -1; dy <= 1; dy++ {
 			for dx := -1; dx <= 1; dx++ {
 				r, g, b, _ := u.img.At(x+dx, y+dy).RGBA()
@@ -101,6 +84,41 @@ func TestWorldMapArc(t *testing.T) {
 	if arc < 4 {
 		t.Fatalf("arc from OK04 to JO65 not drawn (only %d coloured samples)", arc)
 	}
+	// Both endpoints get a marker dot.
+	if !findCore(u, x1, y1) {
+		t.Fatalf("no marker at sender end")
+	}
+	if !findCore(u, x2, y2) {
+		t.Fatalf("no marker at recipient end")
+	}
+}
+
+// TestWorldMapApproxMarker: an Approx entry draws the hollow ring, not
+// the filled dot, at the country centroid position.
+func TestWorldMapApproxMarker(t *testing.T) {
+	u := New(640, 480)
+	// Unknown-grid station resolved via country centroid (Thailand 15,101).
+	x, y := u.latLonToScreen(15, 101)
+	u.DrawWorldMap([]MapEntry{
+		{Lat: 15, Lon: 101, IsCQ: true, Approx: true, Age: 0},
+	})
+	if findCore(u, x, y) {
+		t.Fatalf("approx marker drew a filled core — should be hollow")
+	}
+	// Ring colour (255,200,100) must appear near the position.
+	ring := false
+	for dy := -6; dy <= 6 && !ring; dy++ {
+		for dx := -6; dx <= 6; dx++ {
+			r, g, b, _ := u.img.At(x+dx, y+dy).RGBA()
+			if r>>8 == 255 && g>>8 == 200 && b>>8 == 100 {
+				ring = true
+				break
+			}
+		}
+	}
+	if !ring {
+		t.Fatalf("no hollow ring near (%d,%d)", x, y)
+	}
 }
 
 // TestWorldMapFallback covers the nil-basemap path (flat background,
@@ -111,7 +129,7 @@ func TestWorldMapFallback(t *testing.T) {
 	worldMapImg = nil
 	defer func() { worldMapImg = saved }()
 	u := New(640, 480)
-	u.DrawWorldMap([]MapEntry{{Grid: "OK04", IsCQ: true, Age: 0}})
+	u.DrawWorldMap([]MapEntry{{Lat: 15, Lon: 101, IsCQ: true, Age: 0}})
 	r, g, b, _ := u.img.At(320, 240).RGBA()
 	if r>>8 != 15 || g>>8 != 17 || b>>8 != 23 {
 		t.Fatalf("fallback background wrong: %d %d %d", r>>8, g>>8, b>>8)
