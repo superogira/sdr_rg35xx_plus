@@ -44,7 +44,7 @@ func TestWorldMapBasemapAndMarkers(t *testing.T) {
 	wantY := int((90 - lat) * 480 / 180)
 
 	u.DrawWorldMap([]MapEntry{
-		{Lat: lat, Lon: lon, IsCQ: true, Age: 1 * time.Second},
+		{Lat: lat, Lon: lon, IsCQ: true, Age: 0},
 	}, nil)
 
 	// Basemap present: mid-Pacific (lon -140, lat -20) must not be the
@@ -72,7 +72,7 @@ func TestWorldMapArc(t *testing.T) {
 	lat1, lon1, _ := geo.GridToLatLon("OK04") // Thailand (sender)
 	lat2, lon2, _ := geo.GridToLatLon("JO65") // Denmark (recipient)
 	u.DrawWorldMap([]MapEntry{
-		{Lat: lat2, Lon: lon2, Arc: true, Role: RoleReceiver, FromLat: lat1, FromLon: lon1, Age: 3 * time.Second},
+		{Lat: lat2, Lon: lon2, Arc: true, Role: RoleReceiver, FromLat: lat1, FromLon: lon1, Age: 0},
 	}, nil)
 
 	arc := 0
@@ -91,12 +91,32 @@ func TestWorldMapArc(t *testing.T) {
 	if arc < 8 {
 		t.Fatalf("arc from OK04 to JO65 not drawn (only %d coloured samples)", arc)
 	}
-	if !findCore(u, x1, y1, RoleSender) {
+	if !findCore(u, x1, y1, RoleSender) && !findCoreTolerant(u, x1, y1, RoleSender) {
 		t.Fatalf("no red marker at sender end")
 	}
 	if !findCore(u, x2, y2, RoleReceiver) {
 		t.Fatalf("no green marker at recipient end")
 	}
+}
+
+// findCoreTolerant scans ±3px for a role-tinted pixel: the arc's sender
+// end is drawn at 70% fade, which blends with the basemap instead of
+// hitting the pure role colour.
+func findCoreTolerant(u *UI, x, y int, role int) bool {
+	for dy := -3; dy <= 3; dy++ {
+		for dx := -3; dx <= 3; dx++ {
+			r, g, b, _ := u.img.At(x+dx, y+dy).RGBA()
+			R, G, B := int(r>>8), int(g>>8), int(b>>8)
+			if role == RoleReceiver {
+				if G > 150 && R < 100 && B < 100 {
+					return true
+				}
+			} else if R > 150 && G < 100 && B < 100 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // TestArcCurvature: the arc must bow north of the straight chord —
@@ -194,6 +214,63 @@ func TestWorldMapFallback(t *testing.T) {
 	if r>>8 != 15 || g>>8 != 17 || b>>8 != 23 {
 		t.Fatalf("fallback background wrong: %d %d %d", r>>8, g>>8, b>>8)
 	}
+}
+
+// TestWorldMapFade: the age fade must actually show — a fresh marker
+// paints full-strength colour over the basemap, an old one (age close
+// to the 600 s window) blends most of the way back to the basemap, and
+// at the window edge it is gone entirely.
+func TestWorldMapFade(t *testing.T) {
+	x, y := int((0+180)*640/360), int((90-0)*480/180) // equator, mid-Pacific
+
+	uBase := New(640, 480)
+	uBase.DrawWorldMap(nil, nil)
+	br, bg, bb, _ := uBase.img.At(x, y).RGBA()
+
+	uFresh := New(640, 480)
+	uFresh.DrawWorldMap([]MapEntry{{Lat: 0, Lon: 0, Age: 0}}, nil)
+	fr, fgn, fb, _ := uFresh.img.At(x, y).RGBA()
+
+	uOld := New(640, 480)
+	uOld.DrawWorldMap([]MapEntry{{Lat: 0, Lon: 0, Age: 540 * time.Second}}, nil)
+	or, og, ob, _ := uOld.img.At(x, y).RGBA()
+
+	dFresh := dist(int(br>>8), int(bg>>8), int(bb>>8), int(fr>>8), int(fgn>>8), int(fb>>8))
+	dOld := dist(int(br>>8), int(bg>>8), int(bb>>8), int(or>>8), int(og>>8), int(ob>>8))
+	if dFresh < 100 {
+		t.Fatalf("fresh marker too faint (distance %d from basemap)", dFresh)
+	}
+	// At 540/600 s the fade is 0.1 → the marker must be ~10× closer to
+	// the basemap than the fresh one.
+	if dOld > dFresh/4 {
+		t.Fatalf("aged marker not fading: distance %d vs fresh %d", dOld, dFresh)
+	}
+	if dOld < 1 {
+		t.Fatalf("aged marker vanished entirely before the window ends")
+	}
+
+	// Past the window the marker is fully transparent.
+	uGone := New(640, 480)
+	uGone.DrawWorldMap([]MapEntry{{Lat: 0, Lon: 0, Age: 599 * time.Second}}, nil)
+	gr, gg, gb, _ := uGone.img.At(x, y).RGBA()
+	dGone := dist(int(br>>8), int(bg>>8), int(bb>>8), int(gr>>8), int(gg>>8), int(gb>>8))
+	if dGone > 3 {
+		t.Fatalf("marker at window edge still visible (distance %d)", dGone)
+	}
+}
+
+func dist(r1, g1, b1, r2, g2, b2 int) int {
+	dr, dg, db := r1-r2, g1-g2, b1-b2
+	if dr < 0 {
+		dr = -dr
+	}
+	if dg < 0 {
+		dg = -dg
+	}
+	if db < 0 {
+		db = -db
+	}
+	return dr + dg + db
 }
 
 // TestWorldMapCycleAndSelection: CycleMap wraps in both directions and

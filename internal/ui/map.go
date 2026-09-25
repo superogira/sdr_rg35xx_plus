@@ -363,12 +363,10 @@ func (u *UI) marker(x, y int, fade float64, approx bool, role int) {
 }
 
 // drawRing draws a hollow circle (country-level approximate position),
-// tinted by the station role.
+// tinted by the station role. Alpha follows the age fade (1.0 → 0 over
+// the 10-minute window).
 func (u *UI) drawRing(cx, cy int, fade float64, role int) {
-	alpha := uint8(fade * 230)
-	if alpha < 40 {
-		alpha = 40
-	}
+	alpha := uint8(fade * 255)
 	core, _ := roleColour(role)
 	rim := color.RGBA{core.R / 3, core.G / 3, core.B / 3, alpha}
 	core.A = alpha
@@ -382,10 +380,7 @@ func (u *UI) drawRipple(cx, cy int, radius, fade float64) {
 	if radius < 1 {
 		radius = 1
 	}
-	alpha := uint8(fade * 220)
-	if alpha < 25 {
-		alpha = 25
-	}
+	alpha := uint8(fade * 255)
 
 	// Three concentric rings trailing the wavefront.
 	for _, r := range []float64{radius, radius + 4, radius + 8} {
@@ -450,11 +445,7 @@ func arcPoints(x1, y1, x2, y2 int) []image.Point {
 // at arc-length d is on when (d+phase) mod 12 < 6, and phase grows
 // with wall time, pushing the bright segments forward.
 func (u *UI) drawArc(x1, y1, x2, y2 int, fade, phase float64) {
-	alpha := uint8(fade * 230)
-	if alpha < 35 {
-		alpha = 35
-	}
-	c := color.RGBA{255, 223, 89, alpha}
+	c := color.RGBA{255, 223, 89, uint8(fade * 255)}
 
 	pts := arcPoints(x1, y1, x2, y2)
 	dist := -phase // distance travelled along the arc so far
@@ -470,12 +461,10 @@ func (u *UI) drawArc(x1, y1, x2, y2 int, fade, phase float64) {
 }
 
 // drawDot draws a small filled circle with a dark rim so it reads on
-// both ocean and land colours; the core colour encodes the role.
+// both ocean and land colours; the core colour encodes the role. Alpha
+// follows the age fade (1.0 → 0 over the 10-minute window).
 func (u *UI) drawDot(cx, cy int, fade float64, role int) {
 	alpha := uint8(fade * 255)
-	if alpha < 45 {
-		alpha = 45
-	}
 	core, rim := roleColour(role)
 	core.A = alpha
 	rim.A = alpha
@@ -524,14 +513,25 @@ func (u *UI) drawCircle(cx, cy int, radius float64, c color.RGBA) {
 	}
 }
 
-// setPixel sets a single pixel if within bounds.
+// setPixel sets a single pixel if within bounds. Semi-transparent
+// colours blend with what is already there — this is what makes the
+// age fade (alpha 1.0 → 0 over the 10-minute window) visible: the
+// markers and arcs dissolve into the basemap as they age.
 func (u *UI) setPixel(x, y int, c color.RGBA) {
 	if x < 0 || x >= u.W || y < 0 || y >= u.H {
 		return
 	}
 	o := y*u.img.Stride + x*4
-	u.img.Pix[o+0] = c.R
-	u.img.Pix[o+1] = c.G
-	u.img.Pix[o+2] = c.B
+	if c.A == 255 {
+		u.img.Pix[o+0] = c.R
+		u.img.Pix[o+1] = c.G
+		u.img.Pix[o+2] = c.B
+	} else {
+		a := float64(c.A) / 255.0
+		ia := 1.0 - a
+		u.img.Pix[o+0] = uint8(float64(c.R)*a + float64(u.img.Pix[o+0])*ia)
+		u.img.Pix[o+1] = uint8(float64(c.G)*a + float64(u.img.Pix[o+1])*ia)
+		u.img.Pix[o+2] = uint8(float64(c.B)*a + float64(u.img.Pix[o+2])*ia)
+	}
 	u.img.Pix[o+3] = 255
 }
