@@ -80,6 +80,9 @@ func Dial(address string, timeout time.Duration) (*Client, error) {
 func (c *Client) handshake() error {
 	var buf [52]byte
 	if _, err := io.ReadFull(c.conn, buf[:]); err != nil {
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			return fmt.Errorf("handshake timeout — server busy or still serving a stale client (no RTL0 header in time)")
+		}
 		return fmt.Errorf("handshake read: %w", err)
 	}
 	c.Info.Magic = string(buf[0:4])
@@ -172,6 +175,10 @@ func (c *Client) ReadIQ(buf []byte) (int, error) {
 // of freezing the audio silently.
 func (c *Client) SetReadDeadline(t time.Time) { c.conn.SetReadDeadline(t) }
 
+// BigEndian reports the wire byte order negotiated from the handshake
+// (diagnostics).
+func (c *Client) BigEndian() bool { return c.bigEndian }
+
 // ReadIQFull blocks until buf is completely filled with IQ bytes.
 func (c *Client) ReadIQFull(buf []byte) error {
 	_, err := io.ReadFull(c.conn, buf)
@@ -179,3 +186,45 @@ func (c *Client) ReadIQFull(buf []byte) error {
 }
 
 func (c *Client) Close() error { return c.conn.Close() }
+
+// CloseGraceful tears the connection down the way rtl_tcp expects:
+// FIN first (the server's command reader sees EOF and immediately goes
+// back to accept), then a short drain of the still-incoming IQ stream
+// so the server's sample writer can flush instead of hitting an abrupt
+// reset, and only then the final close.
+//
+// A bare Close() on this protocol is almost always an RST: the server
+// streams ~4 MB/s, so the client receive buffer virtually always holds
+// unread data, and closing a socket with unread data makes the OS send
+// a reset instead of a FIN. On a single-client rtl_tcp behind CGNAT
+// that reset can be lost on the way, leaving the server blocked in
+// send() to a dead peer — every later connect times out at the
+// handshake until the server is restarted. Symptom seen in the field:
+// the first session works, reconnects fail, but connecting once with
+// SDRSharp (which shuts its source down cleanly) frees the server and
+// the app connects again right after.
+func (c *Client) CloseGraceful() {
+	if tc, ok := c.conn.(*net.TCPConn); ok {
+		tc.CloseWrite() // FIN: server returns to accept state
+	}
+	c.drain(1200 * time.Millisecond)
+	c.conn.Close()
+}
+
+// drain reads and discards incoming bytes for at most d, letting the
+// peer finish writing after our FIN.
+func (c *Client) drain(d time.Duration) {
+	buf := make([]byte, 65536)
+	deadline := time.Now().Add(d)
+	for {
+		c.conn.SetReadDeadline(deadline)
+		n, err := c.conn.Read(buf)
+		if err != nil || n == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+	}
+	c.conn.SetReadDeadline(time.Time{})
+}
