@@ -24,12 +24,11 @@ const (
 	CmdSetGainByIndex    = 0x0d
 )
 
-// DongleInfo is the 52-byte header the server sends right after accept.
+// DongleInfo is the 12-byte header the server sends right after accept.
 type DongleInfo struct {
 	Magic     string // "RTL0"
 	TunerType int32
 	GainCount int32
-	Extra     [10]int32
 }
 
 // Client is one rtl_tcp connection. It is safe for one writer goroutine to
@@ -78,7 +77,12 @@ func Dial(address string, timeout time.Duration) (*Client, error) {
 }
 
 func (c *Client) handshake() error {
-	var buf [52]byte
+	// The real rtl_tcp header is 12 bytes ("RTL0" + tuner + gain count);
+	// everything after it is already IQ stream. Waiting for 52 bytes
+	// here deadlocks against servers that hold the stream until the
+	// first command arrives (this server does — connect, send nothing,
+	// get nothing): read the header only and let ReadIQ take the rest.
+	var buf [12]byte
 	if _, err := io.ReadFull(c.conn, buf[:]); err != nil {
 		if ne, ok := err.(net.Error); ok && ne.Timeout() {
 			return fmt.Errorf("handshake timeout — server busy or still serving a stale client (no RTL0 header in time)")
@@ -150,6 +154,14 @@ func (c *Client) SetRTLAGC(on bool) error {
 }
 func (c *Client) SetGainTenthsDB(tenths int32) error {
 	return c.send(CmdSetGain, uint32(tenths))
+}
+
+// SetFreqCorrection sets the tuner ppm. Sending it (even as 0) right
+// after the handshake kicks this server's IQ stream into flowing — a
+// connect with no command at all can sit at zero bytes indefinitely.
+// SDRSharp opens with the same command.
+func (c *Client) SetFreqCorrection(ppm int32) error {
+	return c.send(CmdSetFreqCorrection, uint32(ppm))
 }
 func (c *Client) SetGainByIndex(idx int) error {
 	return c.send(CmdSetGainByIndex, uint32(idx))
