@@ -708,6 +708,19 @@ func main() {
 		menuHP
 		menuLP
 	)
+
+// pageItems is package-level so a test can pin it: one row list per
+// page, indexed by the page ids above. A silent edit once left the
+// root page at four rows while a fifth page existed — the Audio row
+// was unreachable from the d-pad.
+var pageItems = [][]int{
+	{0, 0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
+	{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
+	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap},
+	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
+	{menuBM},
+	{menuNR, menuHP, menuLP},
+}
 	// The flat 16-row menu outgrew the screen, so it is now three
 	// subpages reached from a 3-row root. pageItems maps (page → row)
 	// to the item ids that adjustItem/activateItem already dispatch on.
@@ -720,13 +733,6 @@ func main() {
 		pageAudio
 	)
 	menuPage := pageRoot
-	pageItems := [][]int{
-		{0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
-		{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
-		{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap},
-		{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
-		{menuBM},
-	}
 	// menuRow maps an item id to its row on a page. Hardcoded row
 	// numbers drifted every time a row was inserted — this replaces
 	// the "pageFT8, N" literals.
