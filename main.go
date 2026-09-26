@@ -316,6 +316,66 @@ func lp2(r *radio.Radio) int {
 	return lp
 }
 
+// Menu row ids: MUST match the items slices built for DrawMenu.
+const menuFreq = 0
+const (
+	menuMode = iota + 1
+	menuGain
+	menuSQL
+	menuSample
+	menuBW
+	menuDS
+	menuFT8
+	menuAGC
+	menuHost
+	menuLang
+	menuSpan
+	menuStep
+	menuVolume
+	menuShot
+	menuUpdate
+	menuCall
+	menuGrid
+	menuPSK
+	menuSysMon
+	menuAnt
+	menuRig
+	menuWFMin
+	menuWFMax
+	menuLogs
+	menuBM
+	menuMap
+	menuBands
+	menuNR
+	menuHP
+	menuLP
+)
+
+// pageItems is package-level so a test can pin it: one row list per
+// page, indexed by the page ids above. A silent edit once left the
+// root page at four rows while a fifth page existed — the Audio row
+// was unreachable from the d-pad.
+var pageItems = [][]int{
+	{0, 0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
+	{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
+	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap},
+	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
+	{menuBM},
+	{menuNR, menuHP, menuLP},
+}
+
+// The flat 16-row menu outgrew the screen, so it is now three
+// subpages reached from a 3-row root. pageItems maps (page → row)
+// to the item ids that adjustItem/activateItem already dispatch on.
+const (
+	pageRoot = iota
+	pageRx
+	pageFT8
+	pageSys
+	pageBM
+	pageAudio
+)
+
 func main() {
 	host := flag.String("host", defaultHost, "rtl_tcp server address host:port")
 	freq := flag.Int64("freq", 145_500_000, "startup frequency in Hz")
@@ -674,64 +734,6 @@ func main() {
 		uiMode = uiFT8Bands
 	}
 	menuSel := 0
-	// Row indexes MUST match the items slice built for DrawMenu below.
-	const menuFreq = 0
-	const (
-		menuMode = iota + 1
-		menuGain
-		menuSQL
-		menuSample
-		menuBW
-		menuDS
-		menuFT8
-		menuAGC
-		menuHost
-		menuLang
-		menuSpan
-		menuStep
-		menuVolume
-		menuShot
-		menuUpdate
-		menuCall
-		menuGrid
-		menuPSK
-		menuSysMon
-		menuAnt
-		menuRig
-		menuWFMin
-		menuWFMax
-		menuLogs
-		menuBM
-		menuMap
-		menuBands
-		menuNR
-		menuHP
-		menuLP
-	)
-
-// pageItems is package-level so a test can pin it: one row list per
-// page, indexed by the page ids above. A silent edit once left the
-// root page at four rows while a fifth page existed — the Audio row
-// was unreachable from the d-pad.
-var pageItems = [][]int{
-	{0, 0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
-	{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
-	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap},
-	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
-	{menuBM},
-	{menuNR, menuHP, menuLP},
-}
-	// The flat 16-row menu outgrew the screen, so it is now three
-	// subpages reached from a 3-row root. pageItems maps (page → row)
-	// to the item ids that adjustItem/activateItem already dispatch on.
-	const (
-		pageRoot = iota
-		pageRx
-		pageFT8
-		pageSys
-		pageBM
-		pageAudio
-	)
 	menuPage := pageRoot
 	// menuRow maps an item id to its row on a page. Hardcoded row
 	// numbers drifted every time a row was inserted — this replaces
