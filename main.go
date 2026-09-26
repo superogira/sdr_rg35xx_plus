@@ -331,7 +331,7 @@ func main() {
 	rate := 2_048_000
 	if v, ok := cfg["rate"]; ok {
 		if n, err := strconv.Atoi(v); err == nil {
-			for _, r := range []int{256_000, 640_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000} {
+			for _, r := range []int{256_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000} {
 				if n == r {
 					rate = n
 					break
@@ -349,7 +349,7 @@ func main() {
 	pskOn := cfg["psk"] == "on"
 	sqlPref := 0.0
 	if v, ok := cfg["sql"]; ok {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 4 && f <= 40 {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= -100 && f <= 40 {
 			sqlPref = f
 		}
 	}
@@ -865,11 +865,12 @@ func main() {
 			cfg["sql"] = fmt.Sprintf("%g", r.SquelchDb())
 		case menuSample:
 			// RTL-SDR hardware rates our DSP supports (divisible by
-			// 64 kHz for the SSB decimation chain). 640 kHz is the
-			// bandwidth-saving option for mobile hotspots (1.3 MB/s vs
-			// 2.0 at 1.024M). The change reconnects with the new rate
-			// as the connection's first command.
-			rates := []int{256_000, 640_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000}
+			// 64 kHz for the SSB decimation chain). 256 kHz is the
+			// bandwidth-saving option for mobile hotspots (0.5 MB/s);
+			// 640 kHz was dropped — this server streams it broken.
+			// The change reconnects with the new rate as the
+			// connection's first command.
+			rates := []int{256_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000}
 			cur := r.IQRate()
 			idx := 0
 			for i, v := range rates {
@@ -1839,7 +1840,7 @@ func main() {
 			Squelch:     r.Mode().Squelch,
 			SquelchOpen: snap.SquelchOpen,
 			Volume:      r.Volume(),
-			GainText:    r.GainText() + " · " + r.SquelchLabel(),
+			GainText:    r.SquelchLabel(),
 			Host:        r.Hostname(),
 			LOHz:        loHz,
 			BwHz:        r.Bandwidth(),
