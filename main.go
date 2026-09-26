@@ -853,12 +853,13 @@ func main() {
 		case menuGain:
 			r.SetGainDb(radio.GainStepDb(r.GainDb(), dir))
 		case menuSQL:
-			db := r.SquelchDb() + float64(dir)*4
-			if db < 4 {
-				db = 4
+			// Absolute dBFS, 2 dB per press, −100..0 (0 = off).
+			db := r.SquelchDb() + float64(dir)*2
+			if db < -100 {
+				db = -100
 			}
-			if db > 40 {
-				db = 40
+			if db > 0 {
+				db = 0
 			}
 			r.SetSquelchDb(db)
 			cfg["sql"] = fmt.Sprintf("%g", r.SquelchDb())

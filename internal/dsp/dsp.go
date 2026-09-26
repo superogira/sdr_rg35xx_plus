@@ -224,7 +224,6 @@ type Chain struct {
 
 	// Squelch + metering state.
 	sqlOpen  bool
-	sqlFloor float64 // slowly tracked noise floor, dBFS
 	sqlLevel float64 // open threshold above floor, dB
 	powerDb  float64 // smoothed IF power, dBFS
 	sqlRamp  float64 // output gain ramp 0..1
@@ -380,9 +379,8 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 		c.ft8Taps[n] = complex(h*math.Cos(ang), h*math.Sin(ang))
 	}
 
-	c.sqlLevel = 8 // dB above floor
+	c.sqlLevel = -40 // dBFS absolute
 	c.powerDb = -100
-	c.sqlFloor = -100
 	return c
 }
 
@@ -418,21 +416,9 @@ func (c *Chain) SetAGCEnabled(on bool) {
 // SquelchOpen reports whether the squelch is currently open.
 func (c *Chain) SquelchOpen() bool { return c.sqlOpen }
 
-// SetSquelchDb sets the squelch open threshold in dB above the tracked
-// noise floor (NFM only). 40 or more means "squelch disabled".
+// SetSquelchDb sets the absolute dBFS squelch open threshold (NFM
+// only), on the same meter the status bar shows. ≥ 0 means "off".
 func (c *Chain) SetSquelchDb(db float64) { c.sqlLevel = db }
-
-// ResetSqlFloor forgets the tracked noise floor so the next block
-// re-learns it from the live power. The floor is deliberately frozen
-// while the squelch is open (a held carrier must not walk it up), but
-// that means any PERMANENT level shift that happened while open —
-// monitoring with SQL off across a band or gain change, then setting a
-// threshold — left the floor stale and the squelch stuck open forever
-// ("36 dB and the hiss never stops"). Re-learning on every user change
-// of the SQL level or gain closes that hole; adjusting squelch during
-// a transmission briefly chops that transmission, which is how real
-// radios behave too.
-func (c *Chain) ResetSqlFloor() { c.sqlFloor = -100 }
 
 // SetVolume sets software volume 0..1.5.
 func (c *Chain) SetVolume(v float64) {
@@ -655,39 +641,23 @@ func (c *Chain) measureIF(block []complex128) {
 	}
 	c.powerDb += a * (db - c.powerDb)
 
-	if !c.mode.Squelch || c.sqlLevel >= 40 {
+	// Absolute dBFS squelch: the threshold is compared against the SAME
+	// smoothed channel-power meter the status bar displays, so what the
+	// user reads on the meter is exactly what the setting means ("set it
+	// a few dB above where the noise sits"). ≥ 0 dBFS (full scale) is
+	// unreachable and means "off". A relative-to-tracked-floor squelch
+	// lived here before and kept confusing: the floor froze while open,
+	// high thresholds could never open, and a level shift during SQL-off
+	// monitoring left it stuck open on static.
+	if !c.mode.Squelch || c.sqlLevel >= 0 {
 		c.sqlOpen = true
 		return
 	}
-	// Noise-floor tracking runs ONLY while the squelch is closed (then
-	// only noise should be present): converge down fast, up very slowly.
-	// The up-rate must stay far below the meter's attack (0.25/block):
-	// at the old 0.05 the floor chased the signal almost as fast as the
-	// meter rose, capping the reachable headroom at ~22 dB — thresholds
-	// above that could never open, and the only way one ever read open
-	// was inheriting a stale frozen floor from a SQL-off session, which
-	// then never closed ("36 dB and the hiss never stops"). While open
-	// the floor is frozen — a carrier held for minutes must not walk the
-	// floor up and chop the tail of a long transmission.
-	// Fresh floor: first block after a chain build or ResetSqlFloor —
-	// including a reset issued while stuck open, so the sentinel must
-	// be consumed here, not inside the closed-only branch.
-	if c.sqlFloor < -99 {
-		c.sqlFloor = db
-	}
 	if !c.sqlOpen {
-		if db < c.sqlFloor {
-			c.sqlFloor += 0.3 * (db - c.sqlFloor)
-		} else {
-			c.sqlFloor += 0.002 * (db - c.sqlFloor)
-		}
-		if c.sqlFloor < -120 {
-			c.sqlFloor = -120
-		}
-		if c.powerDb > c.sqlFloor+c.sqlLevel {
+		if c.powerDb > c.sqlLevel {
 			c.sqlOpen = true
 		}
-	} else if c.powerDb < c.sqlFloor+c.sqlLevel-6 { // hysteresis
+	} else if c.powerDb < c.sqlLevel-6 { // hysteresis
 		c.sqlOpen = false
 	}
 }

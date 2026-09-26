@@ -120,7 +120,7 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		mode:   mode,
 		gainDb: gainDb,
 		vol:    1,
-		sqlDb:  8,
+		sqlDb:  -40,
 		iqRate: 2_048_000,
 		agcOn:  true,
 		ft8:    dsp.NewFT8Detector(),
@@ -628,26 +628,26 @@ func (r *Radio) SetMode(mode dsp.Mode) {
 	}
 }
 
-// CycleSquelch steps the NFM squelch threshold 4 → 8 → 12 → 16 → off and
-// returns the new label for the UI. Pure DSP — no server commands.
+// CycleSquelch steps the NFM squelch threshold through useful dBFS
+// presets and returns the new label for the UI. Pure DSP — no server
+// commands.
 func (r *Radio) CycleSquelch() string {
 	r.mu.Lock()
 	var next float64
 	switch r.sqlDb {
-	case 4:
-		next = 8
-	case 8:
-		next = 12
-	case 12:
-		next = 16
-	case 16:
-		next = 40
+	case -60:
+		next = -50
+	case -50:
+		next = -40
+	case -40:
+		next = -30
+	case -30:
+		next = 0
 	default:
-		next = 4
+		next = -60
 	}
 	r.sqlDb = next
 	r.chain.SetSquelchDb(next)
-	r.chain.ResetSqlFloor()
 	r.mu.Unlock()
 	return r.SquelchLabel()
 }
@@ -656,10 +656,10 @@ func (r *Radio) CycleSquelch() string {
 func (r *Radio) SquelchLabel() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.sqlDb >= 40 {
+	if r.sqlDb >= 0 {
 		return "SQL OFF"
 	}
-	return fmt.Sprintf("SQL %.0fdB", r.sqlDb)
+	return fmt.Sprintf("SQL %.0fdBFS", r.sqlDb)
 }
 
 func (r *Radio) Mode() dsp.Mode {
@@ -965,13 +965,7 @@ func (r *Radio) SetGainDb(db float64) {
 	}
 	if err := client.SetGainTenthsDB(int32(math.Round(db * 10))); err != nil {
 		client.Close() // poisoned stream — reconnect with the new gain
-		return
 	}
-	// Gain moved the whole noise floor; re-learn it so the squelch
-	// threshold stays meaningful against the new level.
-	r.mu.Lock()
-	r.chain.ResetSqlFloor()
-	r.mu.Unlock()
 }
 
 // GainStepDb moves db one entry up (dir>0) or down the RTL-SDR V4 gain
@@ -995,20 +989,25 @@ func (r *Radio) SquelchDb() float64 {
 	return r.sqlDb
 }
 
-// SetSquelchDb applies a new NFM squelch threshold (clamped 4-40; 40 = off).
-// The noise floor is re-learned from the live signal so a floor that
-// went stale while the squelch was open can never keep it stuck open.
+// SetSquelchDb applies a new NFM squelch threshold in absolute dBFS
+// (clamped −100..0; ≥ 0 = off — full scale is unreachable). Legacy
+// configs from the old relative scheme stored positive values: "off"
+// (40) stays off, and the relative presets map to −40 dBFS, a quiet
+// default the user can then fine-tune against the meter.
 func (r *Radio) SetSquelchDb(db float64) {
-	if db < 4 {
-		db = 4
+	if db > 0 {
+		if db >= 40 {
+			db = 0
+		} else {
+			db = -40
+		}
 	}
-	if db > 40 {
-		db = 40
+	if db < -100 {
+		db = -100
 	}
 	r.mu.Lock()
 	r.sqlDb = db
 	r.chain.SetSquelchDb(db)
-	r.chain.ResetSqlFloor()
 	r.mu.Unlock()
 }
 

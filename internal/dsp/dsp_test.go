@@ -178,7 +178,7 @@ func TestChainRecoversNFMTone(t *testing.T) {
 
 func TestSquelchCycle(t *testing.T) {
 	ch := NewChain(ModeNFM, nil, nil)
-	ch.SetSquelchDb(8)
+	ch.SetSquelchDb(-30)
 	var audio []float32
 	// 0.3s noise → squelch must be closed and audio silent.
 	processChunked(ch, genNoise(0.3, 0.004), &audio)
