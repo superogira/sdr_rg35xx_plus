@@ -266,6 +266,35 @@ func TestWorldMapFade(t *testing.T) {
 	}
 }
 
+// TestArcNoLeadingSolidSegment: regression for the solid yellow bar
+// that used to cover the first stretch of every arc — math.Mod on a
+// negative distance matched "m < 6" for the whole leading run. With a
+// large phase the longest consecutive yellow run along the path must
+// stay within one dash (≤ 7 px).
+func TestArcNoLeadingSolidSegment(t *testing.T) {
+	u := New(640, 480)
+	u.mapStyle = -1 // flat fallback background
+	for _, phase := range []float64{0, 7.3, 100, 390} {
+		u.fillBlend(0, 0, u.W, u.H, 15, 17, 23, 255)
+		u.drawArc(80, 400, 560, 100, 1.0, phase)
+		run, best := 0, 0
+		for _, p := range arcPoints(80, 400, 560, 100) {
+			r, g, b, _ := u.img.At(p.X, p.Y).RGBA()
+			if r>>8 == 255 && g>>8 == 223 && b>>8 == 89 {
+				run++
+				if run > best {
+					best = run
+				}
+			} else {
+				run = 0
+			}
+		}
+		if best > 7 {
+			t.Fatalf("phase %.1f: solid yellow run of %d px — leading-segment bug is back", phase, best)
+		}
+	}
+}
+
 func dist(r1, g1, b1, r2, g2, b2 int) int {
 	dr, dg, db := r1-r2, g1-g2, b1-b2
 	if dr < 0 {
