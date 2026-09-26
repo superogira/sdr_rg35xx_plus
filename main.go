@@ -1793,6 +1793,28 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				}
 			}
 		}
+		if panelState == 2 {
+			// Screen off: skip the ENTIRE render pipeline — spectrum
+			// FFT, waterfall scroll, overlay drawing and sysinfo
+			// sampling all burn CPU for pixels nobody sees. Input
+			// polling, FT8 decode + PSK Reporter spotting, the audio
+			// DSP and the heartbeat keep running. The extra sleep
+			// stretches the loop from ~30 Hz to ~10 Hz; the power key
+			// still wakes within ~0.1 s.
+			time.Sleep(70 * time.Millisecond)
+			frames++
+			if time.Since(lastBeat) >= 10*time.Second {
+				s := r.Snapshot()
+				var af, astall int64
+				if out != nil {
+					af, astall = out.Stats()
+				}
+				fmt.Fprintf(os.Stderr, "alive(screen-off): frames=%d connected=%v freq=%.4f MHz mode=%s bytes=%d audioFrames=%d maxStall=%dms\n",
+					atomic.LoadUint64(&frames), s.Connected, float64(r.Freq())/1e6, r.Mode().Name, s.BytesRx, af, astall)
+				lastBeat = time.Now()
+			}
+			continue
+		}
 		cpu, mem, swp := sysinfo.Snapshot()
 		// Passband tuning: pan the view so the listening bracket stays
 		// on screen — the view centre trails the listening offset,
@@ -2167,12 +2189,6 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			u.DrawSysBadge(cpu, mem, sysinfo.SensorSnapshot().BattPct)
 		}
 		lastFrame = frame
-		if panelState == 2 {
-			// Screen fully off: skip the (expensive) Present — the fb is
-			// blanked anyway; the DSP, FT8 and PSK Reporter keep running.
-			frames++
-			continue
-		}
 		if err := disp.Present(frame); err != nil {
 			fmt.Fprintf(os.Stderr, "present: %v\n", err)
 			return
