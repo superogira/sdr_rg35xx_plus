@@ -130,9 +130,12 @@ func (u *UI) DrawWorldMap(entries []MapEntry, sel *MapSelection) {
 		u.fillBlend(0, 0, u.W, u.H, 15, 17, 23, 255)
 	}
 
-	// Travelling-dash phase: advances ~1 px per 30 ms along the
-	// sender→receiver direction, wrapping over the 12 px dash period.
-	phase := float64(time.Now().UnixMilli() % 12000) / 30.0
+	// Travelling-dash phase in [0, 24): 1 px per 30 ms, wrapping exactly
+	// at the pattern period (24 px × 30 ms = 720 ms) so the animation
+	// never jumps — the old %12000 ms wrap left 400 mod 24 = 16 px of
+	// backwards skip every 12 s, which read as a fresh long yellow bar
+	// charging out of the sender.
+	phase := float64(time.Now().UnixMilli()%720) / 30.0
 
 	for _, e := range entries {
 		x, y := u.latLonToScreen(e.Lat, e.Lon)
@@ -446,18 +449,20 @@ func arcPoints(x1, y1, x2, y2 int) []image.Point {
 // direction of travel stays readable even where arcs overlap: the
 // colour sequence orders the dashes along the path. Pattern period is
 // 24 px of arc length: 6 on (yellow), 6 off, 6 on (orange), 6 off;
-// phase grows with wall time, pushing both colours forward.
+// phase advances the pattern forward. dist+phase is always ≥ 0, so
+// math.Mod never returns the negative values that used to paint a
+// solid yellow bar over the first stretch of the arc.
 func (u *UI) drawArc(x1, y1, x2, y2 int, fade, phase float64) {
 	yellow := color.RGBA{255, 223, 89, uint8(fade * 255)}
 	orange := color.RGBA{255, 140, 0, uint8(fade * 255)}
 
 	pts := arcPoints(x1, y1, x2, y2)
-	dist := -phase // distance travelled along the arc so far
+	dist := 0.0 // arc length travelled so far
 	px, py := float64(pts[0].X), float64(pts[0].Y)
 	for _, p := range pts {
 		dist += math.Hypot(float64(p.X)-px, float64(p.Y)-py)
 		px, py = float64(p.X), float64(p.Y)
-		m := math.Mod(dist, 24)
+		m := math.Mod(dist+phase, 24)
 		switch {
 		case m < 6:
 			u.setPixel(p.X, p.Y, yellow)
