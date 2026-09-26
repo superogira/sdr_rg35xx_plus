@@ -43,8 +43,8 @@ import (
 	"sdr35/internal/geo"
 	"sdr35/internal/i18n"
 	"sdr35/internal/input"
-	"sdr35/internal/radio"
 	"sdr35/internal/pskreporter"
+	"sdr35/internal/radio"
 	"sdr35/internal/sysinfo"
 	"sdr35/internal/ui"
 )
@@ -344,7 +344,7 @@ func main() {
 	}
 	myCall := strings.ToUpper(strings.TrimSpace(cfg["call"]))
 	myGrid := strings.ToUpper(strings.TrimSpace(cfg["grid"]))
-myAnt := strings.TrimSpace(cfg["antenna"])
+	myAnt := strings.TrimSpace(cfg["antenna"])
 	myRig := strings.TrimSpace(cfg["rig"])
 	pskOn := cfg["psk"] == "on"
 	sqlPref := 0.0
@@ -670,24 +670,24 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 		pageBM
 	)
 	menuPage := pageRoot
-		pageItems := [][]int{
-			{0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
-			{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
-			{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap},
-			{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
-			{menuBM},
-		}
-		// menuRow maps an item id to its row on a page. Hardcoded row
-		// numbers drifted every time a row was inserted — this replaces
-		// the "pageFT8, N" literals.
-		menuRow := func(page, item int) int {
-			for i, it := range pageItems[page] {
-				if it == item {
-					return i
-				}
+	pageItems := [][]int{
+		{0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
+		{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
+		{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap},
+		{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
+		{menuBM},
+	}
+	// menuRow maps an item id to its row on a page. Hardcoded row
+	// numbers drifted every time a row was inserted — this replaces
+	// the "pageFT8, N" literals.
+	menuRow := func(page, item int) int {
+		for i, it := range pageItems[page] {
+			if it == item {
+				return i
 			}
-			return 0
 		}
+		return 0
+	}
 	// Span options, finest → widest, so RIGHT widens the span (the value
 	// goes UP on right like every other numeric row; the old list ran
 	// big→small and right shrank the number). Entries wider than the
@@ -1007,20 +1007,20 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			psk.SetEnabled(pskOn)
 		case menuSysMon:
 			uiMode = uiSysMon
-			case menuLogs:
-				uiMode = uiLogs
-			case menuBM:
-				bmSel = 0
-				uiMode = uiBmList
+		case menuLogs:
+			uiMode = uiLogs
+		case menuBM:
+			bmSel = 0
+			uiMode = uiBmList
 		case menuMap:
 			mapSel, mapDetail = -1, false
 			uiMode = uiMap
 		case menuBands:
 			ft8BandSel = 0
 			uiMode = uiFT8Bands
-			case menuHost:
-				hostSel = 0
-				uiMode = uiHostList
+		case menuHost:
+			hostSel = 0
+			uiMode = uiHostList
 		case menuFreq:
 			editDigits = freqDigits()
 			uiMode = uiFreqEdit
@@ -1141,13 +1141,13 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			case input.B, input.Start, input.Select:
 				uiMode = uiMain
 			}
-				if ft8Scroll > len(ft8Log) {
-					ft8Scroll = len(ft8Log)
-				}
-					if ft8Scroll < 0 {
-						ft8Scroll = 0
-					}
-				case uiSysMon:
+			if ft8Scroll > len(ft8Log) {
+				ft8Scroll = len(ft8Log)
+			}
+			if ft8Scroll < 0 {
+				ft8Scroll = 0
+			}
+		case uiSysMon:
 			// Any of the usual close keys backs out of the monitor.
 			switch b {
 			case input.B, input.Start, input.Select, input.A:
@@ -1193,93 +1193,98 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			case input.B, input.Start:
 				uiMode, menuPage, menuSel = uiMenu, pageRoot, 3
 			}
-			case uiLogs:
-				// d-pad scrolls (line/page), close keys back to the menu.
-				switch b {
-				case input.Up:
-					logScroll++
-				case input.Down:
-					logScroll--
-				case input.Left:
-					logScroll += 16
-				case input.Right:
-					logScroll -= 16
-				case input.B, input.Start, input.Select, input.A:
-					uiMode, menuPage, menuSel = uiMenu, pageSys, 3
-				}
-				if logScroll > 5000 {
-					logScroll = 5000
-				}
-				if logScroll < 0 {
-					logScroll = 0
-				}
-			case uiMap:
-				// Map screen: L1/R1 cycle the basemap style, Left/Right
-				// walk the sorted station list, A toggles the info panel,
-				// B backs out stepwise (panel → selection → close).
-				switch b {
-				case input.L1:
-					u.CycleMap(-1)
-				case input.R1:
-					u.CycleMap(1)
-				case input.Left:
-					if n := len(mapStationNames); n > 0 {
-						mapDetail = false
-						if mapSel < 0 {
-							mapSel = n - 1
-						} else {
-							mapSel = (mapSel + n - 1) % n
-						}
-					}
-				case input.Right:
-					if n := len(mapStationNames); n > 0 {
-						mapDetail = false
-						if mapSel < 0 {
-							mapSel = 0
-						} else {
-							mapSel = (mapSel + 1) % n
-						}
-					}
-				case input.A:
-					if mapSel >= 0 && mapSel < len(mapStationNames) {
-						mapDetail = !mapDetail
-					}
-				case input.B:
-					if mapDetail {
-						mapDetail = false
-					} else if mapSel >= 0 {
-						mapSel = -1
+		case uiLogs:
+			// d-pad scrolls (line/page), close keys back to the menu.
+			switch b {
+			case input.Up:
+				logScroll++
+			case input.Down:
+				logScroll--
+			case input.Left:
+				logScroll += 16
+			case input.Right:
+				logScroll -= 16
+			case input.B, input.Start, input.Select, input.A:
+				uiMode, menuPage, menuSel = uiMenu, pageSys, 3
+			}
+			if logScroll > 5000 {
+				logScroll = 5000
+			}
+			if logScroll < 0 {
+				logScroll = 0
+			}
+		case uiMap:
+			// Map screen: L1/R1 cycle the basemap style, L2/R2 the
+			// overlay colour set, Left/Right walk the sorted station
+			// list, A toggles the info panel, B backs out stepwise
+			// (panel → selection → close).
+			switch b {
+			case input.L1:
+				u.CycleMap(-1)
+			case input.R1:
+				u.CycleMap(1)
+			case input.L2:
+				u.CycleMapPalette(-1)
+			case input.R2:
+				u.CycleMapPalette(1)
+			case input.Left:
+				if n := len(mapStationNames); n > 0 {
+					mapDetail = false
+					if mapSel < 0 {
+						mapSel = n - 1
 					} else {
-						mapSel, mapDetail = -1, false
-						uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuMap)
+						mapSel = (mapSel + n - 1) % n
 					}
-				case input.Start, input.Select:
+				}
+			case input.Right:
+				if n := len(mapStationNames); n > 0 {
+					mapDetail = false
+					if mapSel < 0 {
+						mapSel = 0
+					} else {
+						mapSel = (mapSel + 1) % n
+					}
+				}
+			case input.A:
+				if mapSel >= 0 && mapSel < len(mapStationNames) {
+					mapDetail = !mapDetail
+				}
+			case input.B:
+				if mapDetail {
+					mapDetail = false
+				} else if mapSel >= 0 {
+					mapSel = -1
+				} else {
 					mapSel, mapDetail = -1, false
 					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuMap)
 				}
-			case uiFT8Bands:
-				// Band picker: up/down walk the list, A tunes there (and
-				// turns FT8 decode on), B/Start back to the FT8 page.
-				switch b {
-				case input.Up:
-					ft8BandSel = (ft8BandSel + len(ft8Bands) - 1) % len(ft8Bands)
-				case input.Down:
-					ft8BandSel = (ft8BandSel + 1) % len(ft8Bands)
-				case input.A:
-					band := ft8Bands[ft8BandSel]
-					if !r.FT8Enabled() {
-						saveBwNow(cfg, r) // keep old mode's bw before the USB jump
-						autoStep(dsp.ModeUSB)
-						r.SetFT8Enabled(true)
-					}
-					r.SetFreq(band.hz)
-					capturedMsg = fmt.Sprintf("FT8 %s", band.label)
-					capturedAt = time.Now()
-					uiMode = uiMain
-				case input.B, input.Start, input.Select:
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuBands)
+			case input.Start, input.Select:
+				mapSel, mapDetail = -1, false
+				uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuMap)
+			}
+		case uiFT8Bands:
+			// Band picker: up/down walk the list, A tunes there (and
+			// turns FT8 decode on), B/Start back to the FT8 page.
+			switch b {
+			case input.Up:
+				ft8BandSel = (ft8BandSel + len(ft8Bands) - 1) % len(ft8Bands)
+			case input.Down:
+				ft8BandSel = (ft8BandSel + 1) % len(ft8Bands)
+			case input.A:
+				band := ft8Bands[ft8BandSel]
+				if !r.FT8Enabled() {
+					saveBwNow(cfg, r) // keep old mode's bw before the USB jump
+					autoStep(dsp.ModeUSB)
+					r.SetFT8Enabled(true)
 				}
-			case uiHostList:
+				r.SetFreq(band.hz)
+				capturedMsg = fmt.Sprintf("FT8 %s", band.label)
+				capturedAt = time.Now()
+				uiMode = uiMain
+			case input.B, input.Start, input.Select:
+				uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuBands)
+			}
+		case uiHostList:
 			// Rows: saved hosts + "add new" at the bottom.
 			rows := len(hostList) + 1
 			switch b {
@@ -1838,7 +1843,7 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			LOHz:        loHz,
 			BwHz:        r.Bandwidth(),
 			SSBOneSided: r.Mode().SSB && r.Mode().Name != "LSB",
-			AmMode:   r.Mode().Name == "AM",
+			AmMode:      r.Mode().Name == "AM",
 			CpuPct:      cpu,
 			MemPct:      mem,
 			SwpPct:      swp,
@@ -1856,41 +1861,41 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 			} else {
 				sq = fmt.Sprintf("%.0f dB", v)
 			}
-		items := []ui.MenuItem{}
-		switch menuPage {
-		case pageRoot:
-			items = append(items,
-				ui.MenuItem{Label: i18n.T("m_rxpage"), Value: ">"},
-				ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
-				ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"},
-				ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"})
-		case pageRx:
-			freqDec := 5
-			switch r.Mode().Name {
-			case "WFM", "AM":
-				freqDec = 3
-			case "NFM", "USB", "LSB", "CW":
-				freqDec = 4
-			}
-			items = append(items,
-				ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.*f MHz >", freqDec, float64(r.Freq())/1e6)},
-				func() ui.MenuItem {
-					m := ui.MenuItem{Label: i18n.T("m_mode"), Value: r.Mode().Name}
-					if r.FT8Enabled() {
-						m.Value = "USB (FT8)"
-					}
-					return m
-				}(),
-				ui.MenuItem{Label: i18n.T("m_gain"), Value: fmt.Sprintf("%.1f dB", r.GainDb())},
-				ui.MenuItem{Label: i18n.T("m_sql"), Value: sq},
-				ui.MenuItem{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
-				ui.MenuItem{Label: i18n.T("m_bw"), Value: bwLabel(r.Bandwidth())},
-				ui.MenuItem{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
-				ui.MenuItem{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
-				ui.MenuItem{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
-				ui.MenuItem{Label: i18n.T("m_step"), Value: stepLabel(stepHz)},
-				ui.MenuItem{Label: i18n.T("m_wfmin"), Value: fmt.Sprintf("+%.0f dB", wfMin)},
-				ui.MenuItem{Label: i18n.T("m_wfmax"), Value: fmt.Sprintf("%.0f dB", wfMax)})
+			items := []ui.MenuItem{}
+			switch menuPage {
+			case pageRoot:
+				items = append(items,
+					ui.MenuItem{Label: i18n.T("m_rxpage"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"})
+			case pageRx:
+				freqDec := 5
+				switch r.Mode().Name {
+				case "WFM", "AM":
+					freqDec = 3
+				case "NFM", "USB", "LSB", "CW":
+					freqDec = 4
+				}
+				items = append(items,
+					ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.*f MHz >", freqDec, float64(r.Freq())/1e6)},
+					func() ui.MenuItem {
+						m := ui.MenuItem{Label: i18n.T("m_mode"), Value: r.Mode().Name}
+						if r.FT8Enabled() {
+							m.Value = "USB (FT8)"
+						}
+						return m
+					}(),
+					ui.MenuItem{Label: i18n.T("m_gain"), Value: fmt.Sprintf("%.1f dB", r.GainDb())},
+					ui.MenuItem{Label: i18n.T("m_sql"), Value: sq},
+					ui.MenuItem{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
+					ui.MenuItem{Label: i18n.T("m_bw"), Value: bwLabel(r.Bandwidth())},
+					ui.MenuItem{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
+					ui.MenuItem{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
+					ui.MenuItem{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
+					ui.MenuItem{Label: i18n.T("m_step"), Value: stepLabel(stepHz)},
+					ui.MenuItem{Label: i18n.T("m_wfmin"), Value: fmt.Sprintf("+%.0f dB", wfMin)},
+					ui.MenuItem{Label: i18n.T("m_wfmax"), Value: fmt.Sprintf("%.0f dB", wfMax)})
 			case pageFT8:
 				pskVal := i18n.T("off")
 				if pskOn {
@@ -1905,17 +1910,17 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 					ui.MenuItem{Label: i18n.T("m_rig"), Value: myRig},
 					ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal},
 					ui.MenuItem{Label: i18n.T("m_map"), Value: i18n.T("press_a")})
-		case pageSys:
-			items = append(items,
-				ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
-				ui.MenuItem{Label: i18n.T("m_lang"), Value: langLabel()},
-				ui.MenuItem{Label: i18n.T("m_sysmon"), Value: i18n.T("press_a")},
-				ui.MenuItem{Label: i18n.T("m_logs"), Value: i18n.T("press_a")},
-				ui.MenuItem{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
-				ui.MenuItem{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
-				ui.MenuItem{Label: i18n.T("m_update"), Value: i18n.T("press_a")})
-		}
-		u.DrawMenu(items, menuSel, fmt.Sprintf(i18n.T("menu_ver"), buildStamp, strings.ReplaceAll(buildTime, "_", " ")))
+			case pageSys:
+				items = append(items,
+					ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
+					ui.MenuItem{Label: i18n.T("m_lang"), Value: langLabel()},
+					ui.MenuItem{Label: i18n.T("m_sysmon"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_logs"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
+					ui.MenuItem{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_update"), Value: i18n.T("press_a")})
+			}
+			u.DrawMenu(items, menuSel, fmt.Sprintf(i18n.T("menu_ver"), buildStamp, strings.ReplaceAll(buildTime, "_", " ")))
 		} else if uiMode == uiFreqEdit {
 			u.DrawFreqEditor(editDigits, editCursor)
 		} else if uiMode == uiHostEdit {
@@ -1982,206 +1987,216 @@ myAnt := strings.TrimSpace(cfg["antenna"])
 				}
 			}
 			u.DrawSysMon(rows)
-			} else if uiMode == uiLogs {
-				// Re-read the log file every 2 seconds while the viewer
-				// is open (cheap: one ReadFile of a few hundred KB).
-				if time.Since(logReadAt) >= 2*time.Second {
-					logReadAt = time.Now()
-					if data, err := os.ReadFile(filepath.Join(filepath.Dir(mustExe()), "..", "SDRg35xx-logfile.txt")); err == nil {
-						lines := strings.Split(string(data), "\n")
-						if len(lines) > 300 {
-							lines = lines[len(lines)-300:]
-						}
-						logLines = lines
+		} else if uiMode == uiLogs {
+			// Re-read the log file every 2 seconds while the viewer
+			// is open (cheap: one ReadFile of a few hundred KB).
+			if time.Since(logReadAt) >= 2*time.Second {
+				logReadAt = time.Now()
+				if data, err := os.ReadFile(filepath.Join(filepath.Dir(mustExe()), "..", "SDRg35xx-logfile.txt")); err == nil {
+					lines := strings.Split(string(data), "\n")
+					if len(lines) > 300 {
+						lines = lines[len(lines)-300:]
 					}
+					logLines = lines
 				}
-				rows := []string{"# Log"}
-				vis := (u.WaterfallRows - 80) / 16
-				if vis < 1 {
-					vis = 1
-				}
-				start := len(logLines) - vis - logScroll
-				if start < 0 {
-					start = 0
-				}
-				for i := start; i < start+vis && i < len(logLines); i++ {
-					ln := logLines[i]
-					if len(ln) > 80 {
-						ln = ln[:80]
-					}
-					rows = append(rows, ln)
-				}
-				rows = append(rows, fmt.Sprintf("%d–%d / %d", start+1, start+vis, len(logLines)))
-				u.DrawSysMon(rows)
-			} else if uiMode == uiMap {
-				// Build map entries and the station index from the last
-				// 10 minutes of FT8 log. The sender (toks[1]) draws red,
-				// the recipient (toks[0]) green; positions resolve to the
-				// exact grid when known (message tail or cache), else the
-				// country centroid — a coarse placeholder that upgrades
-				// to the real grid as soon as that station is heard with
-				// one.
-				now := time.Now()
-				mapEntries := []ui.MapEntry{}
-				type mapStation struct {
-					grid string
-					msgs []string
-				}
-				stations := map[string]*mapStation{}
-				station := func(call string) *mapStation {
-					s := stations[call]
-					if s == nil {
-						s = &mapStation{}
-						stations[call] = s
-					}
-					return s
-				}
-				stationPos := func(call, grid string) (lat, lon float64, approx, ok bool) {
-					if grid != "" {
-						lat, lon, ok = geo.GridToLatLon(grid)
-						return lat, lon, false, ok
-					}
-					lat, lon, ok = geo.CountryLatLon(call)
-					return lat, lon, true, ok
-				}
-				for _, e := range ft8Log {
-					t, err := time.Parse("15:04:05", e.Time)
-					if err != nil {
-						continue
-					}
-					eTime := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), t.Second(), 0, now.Location())
-					if eTime.After(now.Add(time.Hour)) {
-						eTime = eTime.Add(-24 * time.Hour)
-					}
-					age := now.Sub(eTime)
-					if age < 0 || age > 10*time.Minute {
-						continue
-					}
-					toks := strings.Fields(e.Text)
-					if len(toks) < 2 {
-						continue
-					}
-					isCQ := toks[0] == "CQ" || strings.HasPrefix(toks[0], "CQ_")
-					// The message grid (tail token) belongs to the SENDER
-					// (toks[1]); report/RRR/73 tails carry none and fall
-					// back to the sender's cached grid.
-					lastTok := toks[len(toks)-1]
-					isTail := lastTok == "RR73" || lastTok == "RRR" || lastTok == "73" || lastTok == "CQ"
-					hasGrid := !isTail && len(lastTok) >= 4 && lastTok[0] >= 'A' && lastTok[0] <= 'R' &&
-						lastTok[1] >= 'A' && lastTok[1] <= 'R' &&
-						lastTok[2] >= '0' && lastTok[2] <= '9' && lastTok[3] >= '0' && lastTok[3] <= '9'
-					senderGrid := ""
-					if hasGrid {
-						senderGrid = lastTok
-					} else if g, ok := gridCache[toks[1]]; ok {
-						senderGrid = g
-					}
-					// Station bookkeeping for the selector: ">" rows are
-					// messages this station SENT, "<" ones addressed TO it.
-					txt := e.Text
-					if len(txt) > 36 {
-						txt = txt[:36]
-					}
-					s := station(toks[1])
-					if hasGrid {
-						s.grid = lastTok
-					}
-					s.msgs = append(s.msgs, e.Time+" > "+txt)
-					if !isCQ {
-						rcp := station(toks[0])
-						if rcp.grid == "" {
-							if g, ok := gridCache[toks[0]]; ok {
-								rcp.grid = g
-							}
-						}
-						rcp.msgs = append(rcp.msgs, e.Time+" < "+txt)
-					}
-					slat, slon, sApprox, sok := stationPos(toks[1], senderGrid)
-					if !sok {
-						continue
-					}
-					ent := ui.MapEntry{Lat: slat, Lon: slon, Role: ui.RoleSender, IsCQ: isCQ, Approx: sApprox, Age: age}
-					// QSO arc: SENDER -> RECIPIENT. The recipient (toks[0])
-					// never carries a grid inside QSO texts — exact cached
-					// grid when heard before, else their country centroid.
-					if !isCQ {
-						if rlat, rlon, rApprox, rok := stationPos(toks[0], gridCache[toks[0]]); rok &&
-							(rlat != slat || rlon != slon) {
-							ent.Lat, ent.Lon, ent.Approx = rlat, rlon, rApprox
-							ent.Arc = true
-							ent.Role = ui.RoleReceiver
-							ent.FromLat, ent.FromLon = slat, slon
-						}
-					}
-					mapEntries = append(mapEntries, ent)
-				}
-				// The sorted station list drives Left/Right selection.
-				mapStationNames = mapStationNames[:0]
-				for call := range stations {
-					mapStationNames = append(mapStationNames, call)
-				}
-				sort.Strings(mapStationNames)
-				if mapSel >= len(mapStationNames) {
-					mapSel = len(mapStationNames) - 1 // stations age out of the window
-				}
-				if mapSel < 0 {
-					mapDetail = false
-				}
-				var mapSelUI *ui.MapSelection
-				if mapSel >= 0 && mapSel < len(mapStationNames) {
-					call := mapStationNames[mapSel]
-					st := stations[call]
-					if lat, lon, approx, ok := stationPos(call, st.grid); ok {
-						mapSelUI = &ui.MapSelection{
-							Call: call, Lat: lat, Lon: lon, Approx: approx,
-							Grid: st.grid, Country: geo.Country(call),
-							Index: mapSel + 1, Total: len(mapStationNames),
-						}
-						if mapDetail {
-							mapSelUI.Detail = st.msgs
-						}
-					}
-				}
-				if os.Getenv("SDR_MAP_DEMO") != "" {
-					// Dev aid: fixed entries + an open detail panel so the
-					// overlay can be eyeballed from a rendered PNG.
-					latT, lonT, _ := geo.GridToLatLon("OK04")
-					latB, lonB, _ := geo.GridToLatLon("JO65")
-					u.DrawWorldMap([]ui.MapEntry{
-						{Lat: latT, Lon: lonT, IsCQ: true, Age: 2 * time.Second},
-						{Lat: 50.8, Lon: 4.4, IsCQ: true, Approx: true, Age: 30 * time.Second},
-						{Lat: latB, Lon: lonB, Arc: true, FromLat: latT, FromLon: lonT, Role: ui.RoleReceiver, Age: time.Minute},
-					}, &ui.MapSelection{
-						Call: "HS0ZKO", Lat: latT, Lon: lonT, Grid: "OK04", Country: "Thailand",
-						Index: 3, Total: 7,
-						Detail: []string{
-							"12:00:15 > CQ HS0ZKO OK04",
-							"12:00:30 < ON4ABC HS0ZKO R-07",
-							"12:00:45 > ON4ABC HS0ZKO RR73",
-							"12:00:50 < ON4ABC HS0ZKO JO65",
-						},
-					})
-				} else {
-					u.DrawWorldMap(mapEntries, mapSelUI)
-				}
-			} else if uiMode == uiFT8Bands {
-				// FT8 band picker; the green row is the band currently
-				// tuned (within ±2 kHz of the dial frequency).
-				labels := make([]string, len(ft8Bands))
-				active := -1
-				for i, band := range ft8Bands {
-					labels[i] = band.label
-					d := r.Freq() - band.hz
-					if d < 0 {
-						d = -d
-					}
-					if d <= 2000 {
-						active = i
-					}
-				}
-				u.DrawBandList(labels, ft8BandSel, active)
 			}
-			if r.FT8Enabled() && uiMode == uiMain {
+			rows := []string{"# Log"}
+			vis := (u.WaterfallRows - 80) / 16
+			if vis < 1 {
+				vis = 1
+			}
+			start := len(logLines) - vis - logScroll
+			if start < 0 {
+				start = 0
+			}
+			for i := start; i < start+vis && i < len(logLines); i++ {
+				ln := logLines[i]
+				if len(ln) > 80 {
+					ln = ln[:80]
+				}
+				rows = append(rows, ln)
+			}
+			rows = append(rows, fmt.Sprintf("%d–%d / %d", start+1, start+vis, len(logLines)))
+			u.DrawSysMon(rows)
+		} else if uiMode == uiMap {
+			// Build map entries and the station index from the last
+			// 10 minutes of FT8 log. The sender (toks[1]) draws red,
+			// the recipient (toks[0]) green; positions resolve to the
+			// exact grid when known (message tail or cache), else the
+			// country centroid — a coarse placeholder that upgrades
+			// to the real grid as soon as that station is heard with
+			// one.
+			now := time.Now()
+			mapEntries := []ui.MapEntry{}
+			type mapStation struct {
+				grid string
+				msgs []string
+			}
+			stations := map[string]*mapStation{}
+			station := func(call string) *mapStation {
+				s := stations[call]
+				if s == nil {
+					s = &mapStation{}
+					stations[call] = s
+				}
+				return s
+			}
+			stationPos := func(call, grid string) (lat, lon float64, approx, ok bool) {
+				if grid != "" {
+					lat, lon, ok = geo.GridToLatLon(grid)
+					return lat, lon, false, ok
+				}
+				lat, lon, ok = geo.CountryLatLon(call)
+				return lat, lon, true, ok
+			}
+			for _, e := range ft8Log {
+				t, err := time.Parse("15:04:05", e.Time)
+				if err != nil {
+					continue
+				}
+				eTime := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), t.Second(), 0, now.Location())
+				if eTime.After(now.Add(time.Hour)) {
+					eTime = eTime.Add(-24 * time.Hour)
+				}
+				age := now.Sub(eTime)
+				if age < 0 || age > 10*time.Minute {
+					continue
+				}
+				toks := strings.Fields(e.Text)
+				if len(toks) < 2 {
+					continue
+				}
+				isCQ := toks[0] == "CQ" || strings.HasPrefix(toks[0], "CQ_")
+				// The message grid (tail token) belongs to the SENDER
+				// (toks[1]); report/RRR/73 tails carry none and fall
+				// back to the sender's cached grid.
+				lastTok := toks[len(toks)-1]
+				isTail := lastTok == "RR73" || lastTok == "RRR" || lastTok == "73" || lastTok == "CQ"
+				hasGrid := !isTail && len(lastTok) >= 4 && lastTok[0] >= 'A' && lastTok[0] <= 'R' &&
+					lastTok[1] >= 'A' && lastTok[1] <= 'R' &&
+					lastTok[2] >= '0' && lastTok[2] <= '9' && lastTok[3] >= '0' && lastTok[3] <= '9'
+				senderGrid := ""
+				if hasGrid {
+					senderGrid = lastTok
+				} else if g, ok := gridCache[toks[1]]; ok {
+					senderGrid = g
+				}
+				// Station bookkeeping for the selector: ">" rows are
+				// messages this station SENT, "<" ones addressed TO it.
+				txt := e.Text
+				if len(txt) > 36 {
+					txt = txt[:36]
+				}
+				s := station(toks[1])
+				if hasGrid {
+					s.grid = lastTok
+				}
+				s.msgs = append(s.msgs, e.Time+" > "+txt)
+				if !isCQ {
+					rcp := station(toks[0])
+					if rcp.grid == "" {
+						if g, ok := gridCache[toks[0]]; ok {
+							rcp.grid = g
+						}
+					}
+					rcp.msgs = append(rcp.msgs, e.Time+" < "+txt)
+				}
+				slat, slon, sApprox, sok := stationPos(toks[1], senderGrid)
+				if !sok {
+					continue
+				}
+				ent := ui.MapEntry{Lat: slat, Lon: slon, Role: ui.RoleSender, IsCQ: isCQ, Approx: sApprox, Age: age}
+				// QSO arc: SENDER -> RECIPIENT. The recipient (toks[0])
+				// never carries a grid inside QSO texts — exact cached
+				// grid when heard before, else their country centroid.
+				if !isCQ {
+					if rlat, rlon, rApprox, rok := stationPos(toks[0], gridCache[toks[0]]); rok &&
+						(rlat != slat || rlon != slon) {
+						ent.Lat, ent.Lon, ent.Approx = rlat, rlon, rApprox
+						ent.Arc = true
+						ent.Role = ui.RoleReceiver
+						ent.FromLat, ent.FromLon = slat, slon
+					}
+				}
+				mapEntries = append(mapEntries, ent)
+			}
+			// The sorted station list drives Left/Right selection.
+			mapStationNames = mapStationNames[:0]
+			for call := range stations {
+				mapStationNames = append(mapStationNames, call)
+			}
+			sort.Strings(mapStationNames)
+			if mapSel >= len(mapStationNames) {
+				mapSel = len(mapStationNames) - 1 // stations age out of the window
+			}
+			if mapSel < 0 {
+				mapDetail = false
+			}
+			var mapSelUI *ui.MapSelection
+			if mapSel >= 0 && mapSel < len(mapStationNames) {
+				call := mapStationNames[mapSel]
+				st := stations[call]
+				if lat, lon, approx, ok := stationPos(call, st.grid); ok {
+					mapSelUI = &ui.MapSelection{
+						Call: call, Lat: lat, Lon: lon, Approx: approx,
+						Grid: st.grid, Country: geo.Country(call),
+						Index: mapSel + 1, Total: len(mapStationNames),
+					}
+					if mapDetail {
+						mapSelUI.Detail = st.msgs
+					}
+				}
+			}
+			if os.Getenv("SDR_MAP_DEMO") != "" {
+				// Dev aid: fixed entries + an open detail panel so the
+				// overlay can be eyeballed from a rendered PNG.
+				// SDR_MAP_STYLE / SDR_MAP_PAL pick the basemap and
+				// colour set (int indexes).
+				if v, err := strconv.Atoi(os.Getenv("SDR_MAP_STYLE")); err == nil {
+					for i := 0; i < v; i++ {
+						u.CycleMap(1)
+					}
+				}
+				if v, err := strconv.Atoi(os.Getenv("SDR_MAP_PAL")); err == nil {
+					u.SetMapPalette(v)
+				}
+				latT, lonT, _ := geo.GridToLatLon("OK04")
+				latB, lonB, _ := geo.GridToLatLon("JO65")
+				u.DrawWorldMap([]ui.MapEntry{
+					{Lat: latT, Lon: lonT, IsCQ: true, Age: 2 * time.Second},
+					{Lat: 50.8, Lon: 4.4, IsCQ: true, Approx: true, Age: 30 * time.Second},
+					{Lat: latB, Lon: lonB, Arc: true, FromLat: latT, FromLon: lonT, Role: ui.RoleReceiver, Age: time.Minute},
+				}, &ui.MapSelection{
+					Call: "HS0ZKO", Lat: latT, Lon: lonT, Grid: "OK04", Country: "Thailand",
+					Index: 3, Total: 7,
+					Detail: []string{
+						"12:00:15 > CQ HS0ZKO OK04",
+						"12:00:30 < ON4ABC HS0ZKO R-07",
+						"12:00:45 > ON4ABC HS0ZKO RR73",
+						"12:00:50 < ON4ABC HS0ZKO JO65",
+					},
+				})
+			} else {
+				u.DrawWorldMap(mapEntries, mapSelUI)
+			}
+		} else if uiMode == uiFT8Bands {
+			// FT8 band picker; the green row is the band currently
+			// tuned (within ±2 kHz of the dial frequency).
+			labels := make([]string, len(ft8Bands))
+			active := -1
+			for i, band := range ft8Bands {
+				labels[i] = band.label
+				d := r.Freq() - band.hz
+				if d < 0 {
+					d = -d
+				}
+				if d <= 2000 {
+					active = i
+				}
+			}
+			u.DrawBandList(labels, ft8BandSel, active)
+		}
+		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
 			u.DrawFT8Log(ft8Log)
 		}

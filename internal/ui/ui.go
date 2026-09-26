@@ -44,8 +44,8 @@ type FT8Entry struct {
 	SNRDb  float64
 	FreqHz float64 // audio offset from the listening frequency
 	Text   string
-	Anno   string          // country/distance annotation (drawn after the flag)
-	FlagC  [3]color.RGBA   // 3 stripe colors (zero = no flag)
+	Anno   string        // country/distance annotation (drawn after the flag)
+	FlagC  [3]color.RGBA // 3 stripe colors (zero = no flag)
 }
 
 // DrawFT8Log renders a semi-transparent log of the latest FT8 decodes
@@ -374,9 +374,11 @@ type UI struct {
 
 	// World map screen: active basemap style (index into mapStyleNames)
 	// and its decoded RGBA cache (one slot — switching re-decodes).
+	// mapPal selects the overlay colour set (L2/R2 cycle).
 	mapStyle int
 	mapImg   *image.RGBA
 	mapIdx   int
+	mapPal   int
 
 	stats FrameStats
 }
@@ -1293,4 +1295,3 @@ func (u *UI) DrawBookmarkList(entries []string, sel, activeIdx int, curMode stri
 	}
 	Face(13, sel == len(entries)).DrawString(u.img, cyan, px+34, y, i18n.T("bm_add"))
 }
-
