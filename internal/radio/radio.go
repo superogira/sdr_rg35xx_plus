@@ -647,6 +647,7 @@ func (r *Radio) CycleSquelch() string {
 	}
 	r.sqlDb = next
 	r.chain.SetSquelchDb(next)
+	r.chain.ResetSqlFloor()
 	r.mu.Unlock()
 	return r.SquelchLabel()
 }
@@ -964,7 +965,13 @@ func (r *Radio) SetGainDb(db float64) {
 	}
 	if err := client.SetGainTenthsDB(int32(math.Round(db * 10))); err != nil {
 		client.Close() // poisoned stream — reconnect with the new gain
+		return
 	}
+	// Gain moved the whole noise floor; re-learn it so the squelch
+	// threshold stays meaningful against the new level.
+	r.mu.Lock()
+	r.chain.ResetSqlFloor()
+	r.mu.Unlock()
 }
 
 // GainStepDb moves db one entry up (dir>0) or down the RTL-SDR V4 gain
@@ -989,6 +996,8 @@ func (r *Radio) SquelchDb() float64 {
 }
 
 // SetSquelchDb applies a new NFM squelch threshold (clamped 4-40; 40 = off).
+// The noise floor is re-learned from the live signal so a floor that
+// went stale while the squelch was open can never keep it stuck open.
 func (r *Radio) SetSquelchDb(db float64) {
 	if db < 4 {
 		db = 4
@@ -999,6 +1008,7 @@ func (r *Radio) SetSquelchDb(db float64) {
 	r.mu.Lock()
 	r.sqlDb = db
 	r.chain.SetSquelchDb(db)
+	r.chain.ResetSqlFloor()
 	r.mu.Unlock()
 }
 

@@ -422,6 +422,18 @@ func (c *Chain) SquelchOpen() bool { return c.sqlOpen }
 // noise floor (NFM only). 40 or more means "squelch disabled".
 func (c *Chain) SetSquelchDb(db float64) { c.sqlLevel = db }
 
+// ResetSqlFloor forgets the tracked noise floor so the next block
+// re-learns it from the live power. The floor is deliberately frozen
+// while the squelch is open (a held carrier must not walk it up), but
+// that means any PERMANENT level shift that happened while open —
+// monitoring with SQL off across a band or gain change, then setting a
+// threshold — left the floor stale and the squelch stuck open forever
+// ("36 dB and the hiss never stops"). Re-learning on every user change
+// of the SQL level or gain closes that hole; adjusting squelch during
+// a transmission briefly chops that transmission, which is how real
+// radios behave too.
+func (c *Chain) ResetSqlFloor() { c.sqlFloor = -100 }
+
 // SetVolume sets software volume 0..1.5.
 func (c *Chain) SetVolume(v float64) {
 	if v < 0 {
@@ -648,19 +660,26 @@ func (c *Chain) measureIF(block []complex128) {
 		return
 	}
 	// Noise-floor tracking runs ONLY while the squelch is closed (then
-	// only noise should be present): converge down fast, up moderately,
-	// so it settles on the true noise within ~1 s. While open the floor
-	// is frozen — a carrier held for minutes must not walk the floor up
-	// and chop the tail of a long transmission. Tuning into an
-	// already-busy channel therefore starts closed; open it manually
-	// with the squelch cycle (SQL OFF = monitor).
+	// only noise should be present): converge down fast, up very slowly.
+	// The up-rate must stay far below the meter's attack (0.25/block):
+	// at the old 0.05 the floor chased the signal almost as fast as the
+	// meter rose, capping the reachable headroom at ~22 dB — thresholds
+	// above that could never open, and the only way one ever read open
+	// was inheriting a stale frozen floor from a SQL-off session, which
+	// then never closed ("36 dB and the hiss never stops"). While open
+	// the floor is frozen — a carrier held for minutes must not walk the
+	// floor up and chop the tail of a long transmission.
+	// Fresh floor: first block after a chain build or ResetSqlFloor —
+	// including a reset issued while stuck open, so the sentinel must
+	// be consumed here, not inside the closed-only branch.
+	if c.sqlFloor < -99 {
+		c.sqlFloor = db
+	}
 	if !c.sqlOpen {
-		if c.sqlFloor < -99 {
-			c.sqlFloor = db
-		} else if db < c.sqlFloor {
+		if db < c.sqlFloor {
 			c.sqlFloor += 0.3 * (db - c.sqlFloor)
 		} else {
-			c.sqlFloor += 0.05 * (db - c.sqlFloor)
+			c.sqlFloor += 0.002 * (db - c.sqlFloor)
 		}
 		if c.sqlFloor < -120 {
 			c.sqlFloor = -120
