@@ -289,6 +289,33 @@ var ft8Bands = []struct {
 	{"23cm 1296.174 MHz", 1_296_174_000},
 }
 
+// Audio corner-filter options (0 = off); ascending so RIGHT increases.
+var audioHpSteps = []int{0, 100, 150, 200, 300, 400, 500, 700, 1000}
+var audioLpSteps = []int{0, 1500, 1800, 2000, 2200, 2500, 2800, 3000, 3500}
+
+// stepHzOption walks options up/down from cur (matching value or the
+// nearest lower entry), wrapping around.
+func stepHzOption(cur, dir int, options []int) int {
+	idx := 0
+	for i, v := range options {
+		if v <= cur {
+			idx = i
+		}
+	}
+	idx = (idx + dir + len(options)) % len(options)
+	return options[idx]
+}
+
+func hp2(r *radio.Radio) int {
+	hp, _ := r.AudioFilter()
+	return hp
+}
+
+func lp2(r *radio.Radio) int {
+	_, lp := r.AudioFilter()
+	return lp
+}
+
 func main() {
 	host := flag.String("host", defaultHost, "rtl_tcp server address host:port")
 	freq := flag.Int64("freq", 145_500_000, "startup frequency in Hz")
@@ -337,6 +364,22 @@ func main() {
 					break
 				}
 			}
+		}
+	}
+	nrLevel, hpHz, lpHz := 0, 0, 0
+	if v, ok := cfg["nr"]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 9 {
+			nrLevel = n
+		}
+	}
+	if v, ok := cfg["hp"]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 6000 {
+			hpHz = n
+		}
+	}
+	if v, ok := cfg["lp"]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 6000 {
+			lpHz = n
 		}
 	}
 	if v, ok := cfg["lang"]; ok {
@@ -450,6 +493,9 @@ func main() {
 	if sqlPref > 0 {
 		r.SetSquelchDb(sqlPref)
 	}
+	r.SetNoiseReduction(nrLevel)
+	r.SetAudioFilter("hp", hpHz)
+	r.SetAudioFilter("lp", lpHz)
 	if bwv, ok := cfg[fmt.Sprintf("bw.%s", r.Mode().Name)]; ok {
 		if f, err := strconv.ParseFloat(bwv, 64); err == nil {
 			r.SetBandwidth(f)
@@ -658,6 +704,9 @@ func main() {
 		menuBM
 		menuMap
 		menuBands
+		menuNR
+		menuHP
+		menuLP
 	)
 	// The flat 16-row menu outgrew the screen, so it is now three
 	// subpages reached from a 3-row root. pageItems maps (page → row)
@@ -668,6 +717,7 @@ func main() {
 		pageFT8
 		pageSys
 		pageBM
+		pageAudio
 	)
 	menuPage := pageRoot
 	pageItems := [][]int{
@@ -863,6 +913,17 @@ func main() {
 			}
 			r.SetSquelchDb(db)
 			cfg["sql"] = fmt.Sprintf("%g", r.SquelchDb())
+		case menuNR:
+			r.SetNoiseReduction(r.NoiseReduction() + dir)
+			cfg["nr"] = fmt.Sprintf("%d", r.NoiseReduction())
+		case menuHP:
+			hp, _ := r.AudioFilter()
+			r.SetAudioFilter("hp", stepHzOption(hp, dir, audioHpSteps))
+			cfg["hp"] = fmt.Sprintf("%d", hp2(r))
+		case menuLP:
+			_, lp := r.AudioFilter()
+			r.SetAudioFilter("lp", stepHzOption(lp, dir, audioLpSteps))
+			cfg["lp"] = fmt.Sprintf("%d", lp2(r))
 		case menuSample:
 			// RTL-SDR hardware rates our DSP supports (divisible by
 			// 64 kHz for the SSB decimation chain). 256 kHz is the
@@ -1870,7 +1931,8 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_rxpage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"},
-					ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"})
+					ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_audiopage"), Value: ">"})
 			case pageRx:
 				freqDec := 5
 				switch r.Mode().Name {
