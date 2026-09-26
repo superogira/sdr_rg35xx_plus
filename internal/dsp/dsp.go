@@ -222,6 +222,7 @@ type Chain struct {
 	ncoPhase float64
 	amDc     float64 // AM envelope DC tracker
 	fmDc     float64 // FM discriminator DC tracker (LO/ppm offset)
+	fx       *audProc // user audio effects: NR + HP/LP
 
 	// Squelch + metering state.
 	sqlOpen  bool
@@ -273,6 +274,7 @@ func pickChDecim(in, out, prefer int) int {
 func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 	c := &Chain{mode: mode, tap: tap, rawTap: rawTap, volume: 1}
 	c.dc = NewDCBlocker(float64(IQRate))
+	c.fx = newAudProc()
 	// 255 taps with cutoff at 0.40×IF2: the stopband lands almost exactly
 	// at the IF2 Nyquist edge for every supported rate (the tap count is
 	// rate-independent because IQRate/IF2Rate is fixed at 8).
@@ -451,6 +453,15 @@ func (c *Chain) SquelchOpen() bool { return c.sqlOpen }
 // only), on the same meter the status bar shows. ≥ 0 means "off".
 func (c *Chain) SetSquelchDb(db float64) { c.sqlLevel = db }
 
+// SetNoiseReduction applies the audio NR level 0 (off) .. 9.
+func (c *Chain) SetNoiseReduction(level int) { c.fx.SetNoiseReduction(level) }
+
+// SetAudioFilters configures the user HP/LP corners in Hz (0 = off) at
+// the chain's audio rate.
+func (c *Chain) SetAudioFilters(hpHz, lpHz int) {
+	c.fx.SetAudioFilters(hpHz, lpHz, float64(c.outRate))
+}
+
 // SetVolume sets software volume 0..1.5.
 func (c *Chain) SetVolume(v float64) {
 	if v < 0 {
@@ -547,7 +558,8 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 		realFIRDecim(c.auTaps, &c.auHist, c.auD, c.fdem, &audio)
 		c.audioBuf = audio
 		for _, v := range audio {
-			x := v * c.volume
+			x := c.fx.step(v)
+			x *= c.volume
 			appendOutput(out, x)
 		}
 		return
@@ -593,6 +605,7 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 		if c.deemph != nil {
 			x = c.deemph.Step(x)
 		}
+		x = c.fx.step(x)
 		x = c.applySquelchRamp(x)
 		x *= c.volume
 		appendOutput(out, x)
@@ -625,6 +638,7 @@ func (c *Chain) processSSB(out *[]float32) {
 		if c.agc != nil && c.agcOn {
 			x = c.agc.Step(x)
 		}
+		x = c.fx.step(x)
 		x = c.applySquelchRamp(x)
 		x *= c.volume
 		appendOutput(out, x)

@@ -72,7 +72,10 @@ type Radio struct {
 	mode      dsp.Mode
 	gainDb    float64 // tuner gain in dB at connect; negative = AGC
 	vol       float64
-	sqlDb     float64 // NFM squelch threshold above floor (40 = off)
+	sqlDb     float64 // NFM squelch threshold, absolute dBFS (>=0 = off)
+	nrLevel   int    // audio noise reduction 0..9
+	hpHz      int    // user audio high-pass corner, 0 = off
+	lpHz      int    // user audio low-pass corner, 0 = off
 	iqRate    int     // capture sample rate in Hz (server default 2.048M)
 	dsMode    int     // -1 auto (DS below 24 MHz), 0 force off, 2 force on (Q)
 	agcOn     bool    // SSB/CW AGC enabled
@@ -169,6 +172,7 @@ func (r *Radio) SetCaptureRate(hz int) {
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
 	r.chain.SetAGCEnabled(r.agcOn)
+	r.applyAudioFx()
 	if r.ft8On {
 		r.chain.SetFT8Detector(r.ft8)
 	}
@@ -274,6 +278,7 @@ func (r *Radio) session(ctx context.Context) error {
 		chain.SetVolume(r.vol)
 		chain.SetSquelchDb(r.sqlDb)
 		chain.SetAGCEnabled(r.agcOn)
+		r.applyAudioFx()
 		if r.ft8On {
 			chain.SetFT8Detector(r.ft8)
 		}
@@ -592,6 +597,61 @@ func (r *Radio) Freq() int64 {
 	return r.freqHz
 }
 
+// applyAudioFx (re)applies the user audio-effect settings to a chain.
+// Every chain rebuild must run it — SetMode, SetBandwidth, SetCaptureRate
+// and session setup all create fresh chains.
+func (r *Radio) applyAudioFx() {
+	r.chain.SetNoiseReduction(r.nrLevel)
+	r.chain.SetAudioFilters(r.hpHz, r.lpHz)
+}
+
+// SetNoiseReduction applies the audio NR level 0 (off) .. 9.
+func (r *Radio) SetNoiseReduction(level int) {
+	if level < 0 {
+		level = 0
+	}
+	if level > 9 {
+		level = 9
+	}
+	r.mu.Lock()
+	r.nrLevel = level
+	r.applyAudioFx()
+	r.mu.Unlock()
+}
+
+// NoiseReduction returns the NR level (0 = off).
+func (r *Radio) NoiseReduction() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.nrLevel
+}
+
+// SetAudioFilter sets one user corner filter: which is "hp" or "lp",
+// hz 0 = off. The other corner is kept.
+func (r *Radio) SetAudioFilter(which string, hz int) {
+	if hz < 0 {
+		hz = 0
+	}
+	if hz > 6000 {
+		hz = 6000
+	}
+	r.mu.Lock()
+	if which == "hp" {
+		r.hpHz = hz
+	} else {
+		r.lpHz = hz
+	}
+	r.applyAudioFx()
+	r.mu.Unlock()
+}
+
+// AudioFilter returns the current HP and LP corners (0 = off).
+func (r *Radio) AudioFilter() (hpHz, lpHz int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.hpHz, r.lpHz
+}
+
 // SetMode swaps the demod chain. While FT8 is active the mode is locked
 // to USB — the FT8 operating convention — so the demod can never sit on
 // a mode that fights the monitor branch (and the listener gets the
@@ -609,6 +669,7 @@ func (r *Radio) SetMode(mode dsp.Mode) {
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
 	r.chain.SetAGCEnabled(r.agcOn)
+	r.applyAudioFx()
 	if r.ft8On {
 		r.chain.SetFT8Detector(r.ft8)
 	}
@@ -920,6 +981,7 @@ func (r *Radio) SetBandwidth(bw float64) {
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
 	r.chain.SetAGCEnabled(r.agcOn)
+	r.applyAudioFx()
 	if r.ft8On {
 		r.chain.SetFT8Detector(r.ft8)
 	}
