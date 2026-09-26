@@ -241,6 +241,34 @@ type Chain struct {
 
 // NewChain builds a chain for the mode with filters designed for the fixed
 // global rates. volume defaults to 1.
+// pickChDecim chooses the channel decimation for the FM/AM chains: a
+// divisor whose resulting channel rate is an EXACT integer multiple of
+// the audio output rate. The plain decrement loop could land on rates
+// like 28 kHz at IF2 224 kHz, and the audio decimation then truncated
+// silently (28000/8000 = 3), streaming 9.33 kHz audio into a resampler
+// told to expect 8 kHz — every NFM voice pitch-shifted ~17%. Candidates
+// are scored by how close the channel rate stays to the preferred
+// factor's rate, so rates that were already exact (2.048M, 1.024M, …)
+// keep their previous numbers; d = 1 always qualifies (IF2 is a
+// multiple of 8 kHz for every supported IQ rate), so the search
+// terminates.
+func pickChDecim(in, out, prefer int) int {
+	best, bestDist := 1, 1<<30
+	for d := 1; d <= in/out; d++ {
+		if in%d != 0 || (in/d)%out != 0 {
+			continue
+		}
+		dist := in/d - in/prefer
+		if dist < 0 {
+			dist = -dist
+		}
+		if dist < bestDist || (dist == bestDist && d > best) {
+			best, bestDist = d, dist
+		}
+	}
+	return best
+}
+
 func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 	c := &Chain{mode: mode, tap: tap, rawTap: rawTap, volume: 1}
 	c.dc = NewDCBlocker(float64(IQRate))
@@ -313,6 +341,7 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 		for IF2Rate/c.chD < c.outRate && c.chD > 1 {
 			c.chD--
 		}
+		c.chD = pickChDecim(IF2Rate, c.outRate, c.chD)
 		c.chRate = IF2Rate / c.chD
 		c.demod = FMDemod{rate: float64(c.chRate)}
 		c.auTaps = DesignLowpass(255, mode.AudioCut, float64(c.chRate))
@@ -330,6 +359,7 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 		for IF2Rate/c.chD < c.outRate && c.chD > 1 {
 			c.chD--
 		}
+		c.chD = pickChDecim(IF2Rate, c.outRate, c.chD)
 		c.chRate = IF2Rate / c.chD
 		c.auTaps = DesignLowpass(255, mode.AudioCut, float64(c.chRate))
 		c.auD = c.chRate / c.outRate
