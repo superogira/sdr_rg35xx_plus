@@ -722,6 +722,7 @@ func main() {
 	mapStationNames := []string{}
 	// FT8 band picker: selected row (up/down walk the ft8Bands table).
 	ft8BandSel := 0
+	menuPage := pageRoot
 	// Dev aid for PNG screenshot testing of the overlays.
 	switch os.Getenv("SDR_UI") {
 	case "menu":
@@ -732,9 +733,10 @@ func main() {
 		uiMode = uiMap
 	case "ft8bands":
 		uiMode = uiFT8Bands
+	case "audio":
+		uiMode, menuPage = uiMenu, pageAudio
 	}
 	menuSel := 0
-	menuPage := pageRoot
 	// menuRow maps an item id to its row on a page. Hardcoded row
 	// numbers drifted every time a row was inserted — this replaces
 	// the "pageFT8, N" literals.
@@ -1982,6 +1984,23 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_rig"), Value: myRig},
 					ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal},
 					ui.MenuItem{Label: i18n.T("m_map"), Value: i18n.T("press_a")})
+			case pageAudio:
+				nrVal := i18n.T("off")
+				if lv := r.NoiseReduction(); lv > 0 {
+					nrVal = fmt.Sprintf("%d", lv)
+				}
+				hp, lp := r.AudioFilter()
+				hpVal, lpVal := i18n.T("off"), i18n.T("off")
+				if hp > 0 {
+					hpVal = fmt.Sprintf("%d Hz", hp)
+				}
+				if lp > 0 {
+					lpVal = fmt.Sprintf("%d Hz", lp)
+				}
+				items = append(items,
+					ui.MenuItem{Label: i18n.T("m_nr"), Value: nrVal},
+					ui.MenuItem{Label: i18n.T("m_hp"), Value: hpVal},
+					ui.MenuItem{Label: i18n.T("m_lp"), Value: lpVal})
 			case pageSys:
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
@@ -2411,6 +2430,15 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	fmt.Fprintf(f, "call=%s\ngrid=%s\npsk=%s\nantenna=%s\nrig=%s\nwfmin=%g\nwfmax=%g\n", myCall, myGrid, map[bool]string{true: "on", false: "off"}[pskOn], myAnt, myRig, wfMin, wfMax)
 	if v, ok := cfg["bm"]; ok {
 		fmt.Fprintf(f, "bm=%s\n", v)
+	}
+	if v, ok := cfg["nr"]; ok {
+		fmt.Fprintf(f, "nr=%s\n", v)
+	}
+	if v, ok := cfg["hp"]; ok {
+		fmt.Fprintf(f, "hp=%s\n", v)
+	}
+	if v, ok := cfg["lp"]; ok {
+		fmt.Fprintf(f, "lp=%s\n", v)
 	}
 	if v, ok := cfg["updateurl"]; ok && v != "" {
 		fmt.Fprintf(f, "updateurl=%s\n", v)
