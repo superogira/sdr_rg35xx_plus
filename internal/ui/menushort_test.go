@@ -1,7 +1,6 @@
 package ui
 
 import (
-	
 	"image/png"
 	"os"
 	"testing"

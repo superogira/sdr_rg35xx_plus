@@ -295,6 +295,58 @@ func TestArcNoLeadingSolidSegment(t *testing.T) {
 	}
 }
 
+// TestMapPaletteCycle: L2/R2 must cycle the overlay colour set; each
+// palette's sender core must actually replace the previous one on
+// screen.
+func TestMapPaletteCycle(t *testing.T) {
+	u := New(640, 480)
+	if len(mapPalettes) < 3 {
+		t.Fatalf("expected >= 3 palettes, got %d", len(mapPalettes))
+	}
+	cores := map[[3]uint8]bool{}
+	for i := range mapPalettes {
+		u.SetMapPalette(i)
+		if u.MapPaletteName() == "" {
+			t.Fatalf("palette %d has no name", i)
+		}
+		u.fillBlend(0, 0, u.W, u.H, 15, 17, 23, 255)
+		u.DrawWorldMap([]MapEntry{{Lat: 0, Lon: 0, Age: 0}}, nil)
+		x, y := u.latLonToScreen(0, 0)
+		core := mapPalettes[i].tx
+		want := [3]uint8{core.R, core.G, core.B}
+		if cores[want] {
+			t.Fatalf("palette %d reuses colour %v of an earlier set", i, want)
+		}
+		cores[want] = true
+		if !findCore(u, x, y, RoleSender) {
+			// findCore only knows the classic red — check the actual
+			// palette core instead.
+			found := false
+			for dy := -3; dy <= 3 && !found; dy++ {
+				for dx := -3; dx <= 3 && !found; dx++ {
+					r, g, b, _ := u.img.At(x+dx, y+dy).RGBA()
+					if [3]uint8{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8)} == want {
+						found = true
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("palette %d: sender core %v not drawn", i, want)
+			}
+		}
+	}
+	// Cycling wraps in both directions.
+	u.SetMapPalette(0)
+	u.CycleMapPalette(-1)
+	if u.MapPaletteName() != mapPalettes[len(mapPalettes)-1].name {
+		t.Fatalf("CycleMapPalette(-1) wrap → %s", u.MapPaletteName())
+	}
+	u.CycleMapPalette(1)
+	if u.MapPaletteName() != mapPalettes[0].name {
+		t.Fatalf("CycleMapPalette(1) wrap → %s", u.MapPaletteName())
+	}
+}
+
 func dist(r1, g1, b1, r2, g2, b2 int) int {
 	dr, dg, db := r1-r2, g1-g2, b1-b2
 	if dr < 0 {

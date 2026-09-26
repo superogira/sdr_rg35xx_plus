@@ -42,14 +42,14 @@ const (
 
 // MapEntry describes one FT8 activity marker on the world map.
 type MapEntry struct {
-	Lat, Lon    float64       // marker position (exact grid or country centroid)
-	Arc         bool          // draw a dashed arc from the sender's position
-	FromLat     float64       // arc source (sender, red)
-	FromLon     float64       // arc source
-	Role        int           // RoleSender / RoleReceiver (arc endpoint colour)
-	IsCQ        bool          // true = CQ beacon, false = QSO exchange
-	Approx      bool          // position is a country-level guess (hollow marker)
-	Age         time.Duration // time since decoded
+	Lat, Lon float64       // marker position (exact grid or country centroid)
+	Arc      bool          // draw a dashed arc from the sender's position
+	FromLat  float64       // arc source (sender, red)
+	FromLon  float64       // arc source
+	Role     int           // RoleSender / RoleReceiver (arc endpoint colour)
+	IsCQ     bool          // true = CQ beacon, false = QSO exchange
+	Approx   bool          // position is a country-level guess (hollow marker)
+	Age      time.Duration // time since decoded
 }
 
 // MapSelection is the station picked with Left/Right on the map screen.
@@ -57,14 +57,14 @@ type MapEntry struct {
 // history; the panel lands on the half of the screen opposite the
 // station marker so it never covers it.
 type MapSelection struct {
-	Call      string
-	Lat, Lon  float64 // station position (grid or country centroid)
-	Approx    bool
-	Grid      string // known Maidenhead grid ("" when only country known)
-	Country   string
-	Index     int      // 1-based position in the sorted station list
-	Total     int      // station count
-	Detail    []string // message-history rows; nil = panel closed
+	Call     string
+	Lat, Lon float64 // station position (grid or country centroid)
+	Approx   bool
+	Grid     string // known Maidenhead grid ("" when only country known)
+	Country  string
+	Index    int      // 1-based position in the sorted station list
+	Total    int      // station count
+	Detail   []string // message-history rows; nil = panel closed
 }
 
 // CycleMap switches the basemap style (L1 = previous, R1 = next).
@@ -73,7 +73,7 @@ func (u *UI) CycleMap(dir int) {
 	if n == 0 {
 		return
 	}
-	u.mapStyle = ((u.mapStyle + dir) % n + n) % n
+	u.mapStyle = ((u.mapStyle+dir)%n + n) % n
 	u.mapImg = nil // force re-decode of the new style
 }
 
@@ -118,6 +118,66 @@ func (u *UI) basemap() *image.RGBA {
 	u.mapImg, u.mapIdx = rgba, u.mapStyle
 	return rgba
 }
+
+// mapPalette is one colour set for the map overlays. Three sets cover
+// the basemap families found by surveying all 21 embedded maps
+// (ocean/land luminance 3-244): "classic" for photographic/mid maps,
+// "neon" for the dark family (black/navy/dark-red/dark-green, lum<70)
+// and "dark" for the bright/white family (lum>140) where yellow and
+// pure green wash out.
+type mapPalette struct {
+	name         string
+	tx           color.RGBA // sender marker core
+	rx           color.RGBA // receiver marker core
+	dashA, dashB color.RGBA // alternating arc dash colours
+	ripple       color.RGBA // CQ ripple
+}
+
+var mapPalettes = []mapPalette{
+	{"classic",
+		color.RGBA{255, 0, 0, 255},
+		color.RGBA{0, 255, 0, 255},
+		color.RGBA{255, 223, 89, 255},
+		color.RGBA{255, 140, 0, 255},
+		color.RGBA{34, 211, 238, 255}},
+	{"neon",
+		color.RGBA{255, 60, 220, 255},
+		color.RGBA{0, 230, 255, 255},
+		color.RGBA{255, 255, 255, 255},
+		color.RGBA{255, 60, 220, 255},
+		color.RGBA{170, 90, 255, 255}},
+	{"dark",
+		color.RGBA{200, 0, 30, 255},
+		color.RGBA{0, 130, 0, 255},
+		color.RGBA{0, 60, 255, 255},
+		color.RGBA{170, 80, 0, 255},
+		color.RGBA{130, 0, 200, 255}},
+}
+
+// palette returns the active overlay colour set.
+func (u *UI) palette() mapPalette {
+	if u.mapPal < 0 || u.mapPal >= len(mapPalettes) {
+		return mapPalettes[0]
+	}
+	return mapPalettes[u.mapPal]
+}
+
+// CycleMapPalette switches the overlay colour set (L2 = previous,
+// R2 = next) — some basemaps swallow the default colours.
+func (u *UI) CycleMapPalette(dir int) {
+	u.mapPal = ((u.mapPal+dir)%len(mapPalettes) + len(mapPalettes)) % len(mapPalettes)
+}
+
+// SetMapPalette selects a colour set by index (clamped).
+func (u *UI) SetMapPalette(i int) {
+	if i < 0 || i >= len(mapPalettes) {
+		i = 0
+	}
+	u.mapPal = i
+}
+
+// MapPaletteName returns the active colour-set label.
+func (u *UI) MapPaletteName() string { return u.palette().name }
 
 // DrawWorldMap renders the FT8 world map: the active equirectangular
 // basemap with red sender / green receiver markers, CQ ripples and
@@ -190,8 +250,8 @@ func (u *UI) DrawWorldMap(entries []MapEntry, sel *MapSelection) {
 	tf := Face(13, false)
 	tf.DrawString(u.img, color.RGBA{255, 255, 255, 255}, 16, 26, "FT8 World Map - 10min")
 
-	// Active basemap chip (top-right).
-	mn := fmt.Sprintf("map %d/%d %s", u.mapStyle+1, len(mapStyleNames), u.MapStyleName())
+	// Active basemap chip (top-right): style + overlay colour set.
+	mn := fmt.Sprintf("map %d/%d %s · %s", u.mapStyle+1, len(mapStyleNames), u.MapStyleName(), u.MapPaletteName())
 	mw := tf.TextWidth(mn)
 	u.fillBlend(u.W-mw-24, 8, mw+16, 26, 0, 0, 0, 170)
 	tf.DrawString(u.img, color.RGBA{200, 220, 255, 255}, u.W-mw-16, 26, mn)
@@ -219,7 +279,7 @@ func (u *UI) DrawWorldMap(entries []MapEntry, sel *MapSelection) {
 	hw := hf.TextWidth(hint)
 	u.fillBlend(u.W-hw-24, u.H-30, hw+16, 22, 0, 0, 0, 170)
 	hf.DrawString(u.img, color.RGBA{220, 220, 220, 255}, u.W-hw-16, u.H-13, hint)
-	styleHint := "L1/R1 map style"
+	styleHint := "L1/R1 map style  L2/R2 colour"
 	sw := hf.TextWidth(styleHint)
 	sx := u.W - hw - 24 - sw - 16
 	if sx > 4 {
@@ -346,12 +406,15 @@ func (u *UI) latLonToScreen(lat, lon float64) (int, int) {
 	return x, y
 }
 
-// roleColour returns (core, rim) for a station role.
-func roleColour(role int) (color.RGBA, color.RGBA) {
+// roleColour returns (core, rim) for a station role in the active
+// palette.
+func (u *UI) roleColour(role int) (color.RGBA, color.RGBA) {
 	if role == RoleReceiver {
-		return color.RGBA{0, 255, 0, 255}, color.RGBA{0, 60, 0, 255}
+		c := u.palette().rx
+		return c, color.RGBA{c.R / 3, c.G / 3, c.B / 3, 255}
 	}
-	return color.RGBA{255, 0, 0, 255}, color.RGBA{70, 0, 0, 255}
+	c := u.palette().tx
+	return c, color.RGBA{c.R / 3, c.G / 3, c.B / 3, 255}
 }
 
 // marker draws a station position: a filled dot when the grid is known,
@@ -370,7 +433,7 @@ func (u *UI) marker(x, y int, fade float64, approx bool, role int) {
 // the 10-minute window).
 func (u *UI) drawRing(cx, cy int, fade float64, role int) {
 	alpha := uint8(fade * 255)
-	core, _ := roleColour(role)
+	core, _ := u.roleColour(role)
 	rim := color.RGBA{core.R / 3, core.G / 3, core.B / 3, alpha}
 	core.A = alpha
 	// Double ring for weight.
@@ -383,14 +446,13 @@ func (u *UI) drawRipple(cx, cy int, radius, fade float64) {
 	if radius < 1 {
 		radius = 1
 	}
-	alpha := uint8(fade * 255)
 
 	// Three concentric rings trailing the wavefront.
 	for _, r := range []float64{radius, radius + 4, radius + 8} {
 		if r > 55 {
 			continue
 		}
-		u.drawCircle(cx, cy, r, color.RGBA{34, 211, 238, alpha})
+		u.drawCircle(cx, cy, r, fadeColor(u.palette().ripple, fade))
 	}
 
 	u.drawDot(cx, cy, fade, RoleSender)
@@ -453,8 +515,8 @@ func arcPoints(x1, y1, x2, y2 int) []image.Point {
 // math.Mod never returns the negative values that used to paint a
 // solid yellow bar over the first stretch of the arc.
 func (u *UI) drawArc(x1, y1, x2, y2 int, fade, phase float64) {
-	yellow := color.RGBA{255, 223, 89, uint8(fade * 255)}
-	orange := color.RGBA{255, 140, 0, uint8(fade * 255)}
+	yellow := fadeColor(u.palette().dashA, fade)
+	orange := fadeColor(u.palette().dashB, fade)
 
 	pts := arcPoints(x1, y1, x2, y2)
 	dist := 0.0 // arc length travelled so far
@@ -477,7 +539,7 @@ func (u *UI) drawArc(x1, y1, x2, y2 int, fade, phase float64) {
 // follows the age fade (1.0 → 0 over the 10-minute window).
 func (u *UI) drawDot(cx, cy int, fade float64, role int) {
 	alpha := uint8(fade * 255)
-	core, rim := roleColour(role)
+	core, rim := u.roleColour(role)
 	core.A = alpha
 	rim.A = alpha
 	for dy := -3; dy <= 3; dy++ {
@@ -546,4 +608,11 @@ func (u *UI) setPixel(x, y int, c color.RGBA) {
 		u.img.Pix[o+2] = uint8(float64(c.B)*a + float64(u.img.Pix[o+2])*ia)
 	}
 	u.img.Pix[o+3] = 255
+}
+
+// fadeColor applies the age fade (1.0 → 0 over the 10-minute window)
+// to a palette colour.
+func fadeColor(c color.RGBA, fade float64) color.RGBA {
+	c.A = uint8(fade * 255)
+	return c
 }
