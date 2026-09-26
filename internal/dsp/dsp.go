@@ -221,6 +221,7 @@ type Chain struct {
 	offsetHz float64
 	ncoPhase float64
 	amDc     float64 // AM envelope DC tracker
+	fmDc     float64 // FM discriminator DC tracker (LO/ppm offset)
 
 	// Squelch + metering state.
 	sqlOpen  bool
@@ -557,11 +558,21 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 	complexFIRDecim(c.chTaps, &c.chHist, c.chD, c.fif2, &chanf)
 	c.chScratch = chanf
 
-	// FM demodulation -> instantaneous frequency in Hz.
+	// FM demodulation -> instantaneous frequency in Hz. A slow DC
+	// tracker removes the constant-frequency bias that any LO error
+	// puts on the discriminator output: RTL dongles drift tens of ppm,
+	// which at 2 m is several kHz against NFM's ±2.5 kHz deviation —
+	// the old code let that through as DC (the audio lowpass passes
+	// 0 Hz), and the 0.85/deviation scaling turned e.g. 3 kHz of error
+	// into full-scale clamping = hopelessly muffled audio regardless
+	// of the channel bandwidth. The ~0.25 Hz corner is far below the
+	// 300 Hz voice band, and it re-centres within ~1 s after a retune.
 	dn := len(chanf)
 	c.fdem = growFloat(c.fdem, dn)
 	for i, z := range chanf {
-		c.fdem[i] = c.demod.Step(z)
+		hz := c.demod.Step(z)
+		c.fmDc += 0.0005 * (hz - c.fmDc)
+		c.fdem[i] = hz - c.fmDc
 	}
 
 	// Audio decimation to the chain output rate.
