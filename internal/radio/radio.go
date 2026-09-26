@@ -149,7 +149,7 @@ func (r *Radio) SetCaptureRate(hz int) {
 	// Rates from the RTL-SDR hardware (see the server's own list);
 	// our DSP needs IQRate divisible by 64 kHz (SSB: /8→/8 to 8 kHz).
 	// Lower rates halve the network load — useful on mobile hotspots.
-	if hz != 256_000 && hz != 640_000 && hz != 1_024_000 && hz != 1_536_000 &&
+	if hz != 256_000 && hz != 1_024_000 && hz != 1_536_000 &&
 		hz != 1_792_000 && hz != 2_048_000 && hz != 2_560_000 &&
 		hz != 2_880_000 && hz != 3_200_000 {
 		return
