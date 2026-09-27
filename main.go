@@ -293,6 +293,39 @@ var ft8Bands = []struct {
 var audioHpSteps = []int{0, 100, 150, 200, 300, 400, 500, 700, 1000}
 var audioLpSteps = []int{0, 1500, 1800, 2000, 2200, 2500, 2800, 3000, 3500}
 
+// audioFilterPresets: one-touch HP+LP combos ("audio filter" row).
+// Index 0..2; hp/lp outside every preset reads as custom.
+var audioFilterPresets = []struct {
+	i18nKey    string
+	hpHz, lpHz int
+}{
+	{"af_narrow", 400, 1700},
+	{"af_normal", 300, 2400},
+	{"af_wide", 100, 3000},
+}
+
+// audioFilterPresetIndex returns the preset matching the corners, or
+// -1 when the user shaped them by hand (custom).
+func audioFilterPresetIndex(hpHz, lpHz int) int {
+	for i, p := range audioFilterPresets {
+		if p.hpHz == hpHz && p.lpHz == lpHz {
+			return i
+		}
+	}
+	return -1
+}
+
+// nextAudioFilterPreset picks the preset to apply when the row is
+// pressed: from a matching preset move by dir (wrapping); from custom
+// land on normal whichever way is pressed.
+func nextAudioFilterPreset(hpHz, lpHz, dir int) int {
+	cur := audioFilterPresetIndex(hpHz, lpHz)
+	if cur < 0 {
+		return 1 // normal
+	}
+	return (cur + dir + len(audioFilterPresets)) % len(audioFilterPresets)
+}
+
 // stepHzOption walks options up/down from cur (matching value or the
 // nearest lower entry), wrapping around.
 func stepHzOption(cur, dir int, options []int) int {
@@ -349,6 +382,7 @@ const (
 	menuNR
 	menuHP
 	menuLP
+	menuAF
 )
 
 // pageItems is package-level so a test can pin it: one row list per
@@ -361,7 +395,7 @@ var pageItems = [][]int{
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap},
 	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 	{menuBM},
-	{menuNR, menuHP, menuLP},
+	{menuAF, menuNR, menuHP, menuLP},
 }
 
 // The flat 16-row menu outgrew the screen, so it is now three
@@ -923,6 +957,15 @@ func main() {
 			}
 			r.SetSquelchDb(db)
 			cfg["sql"] = fmt.Sprintf("%g", r.SquelchDb())
+		case menuAF:
+			{
+				hp, lp := r.AudioFilter()
+				p := audioFilterPresets[nextAudioFilterPreset(hp, lp, dir)]
+				r.SetAudioFilter("hp", p.hpHz)
+				r.SetAudioFilter("lp", p.lpHz)
+				cfg["hp"] = fmt.Sprintf("%d", p.hpHz)
+				cfg["lp"] = fmt.Sprintf("%d", p.lpHz)
+			}
 		case menuNR:
 			r.SetNoiseReduction(r.NoiseReduction() + dir)
 			cfg["nr"] = fmt.Sprintf("%d", r.NoiseReduction())
@@ -1997,7 +2040,12 @@ func main() {
 				if lp > 0 {
 					lpVal = fmt.Sprintf("%d Hz", lp)
 				}
+				afVal := i18n.T("af_custom")
+				if i := audioFilterPresetIndex(hp, lp); i >= 0 {
+					afVal = i18n.T(audioFilterPresets[i].i18nKey)
+				}
 				items = append(items,
+					ui.MenuItem{Label: i18n.T("m_af"), Value: afVal},
 					ui.MenuItem{Label: i18n.T("m_nr"), Value: nrVal},
 					ui.MenuItem{Label: i18n.T("m_hp"), Value: hpVal},
 					ui.MenuItem{Label: i18n.T("m_lp"), Value: lpVal})
