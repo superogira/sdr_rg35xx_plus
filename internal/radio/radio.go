@@ -74,6 +74,8 @@ type Radio struct {
 	vol       float64
 	sqlDb     float64 // NFM squelch threshold, absolute dBFS (>=0 = off)
 	nrLevel   int    // audio noise reduction 0..9
+	rttyOn   bool
+	rtty     *dsp.RTTYDecoder
 	hpHz      int    // user audio high-pass corner, 0 = off
 	lpHz      int    // user audio low-pass corner, 0 = off
 	iqRate    int     // capture sample rate in Hz (server default 2.048M)
@@ -113,7 +115,9 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 	if gainDb > 49.6 {
 		gainDb = 49.6
 	}
+	rttyDec := dsp.NewRTTYDecoder()
 	return &Radio{
+		rtty:   rttyDec,
 		Host:   host,
 		tap:    dsp.NewSpectrumTap(),
 		rawTap: dsp.NewSpectrumTap(),
@@ -603,6 +607,9 @@ func (r *Radio) Freq() int64 {
 func (r *Radio) applyAudioFx() {
 	r.chain.SetNoiseReduction(r.nrLevel)
 	r.chain.SetAudioFilters(r.hpHz, r.lpHz)
+	if r.rttyOn {
+		r.chain.SetRTTYDetector(r.rtty)
+	}
 }
 
 // SetNoiseReduction applies the audio NR level 0 (off) .. 9.
@@ -761,6 +768,52 @@ func (r *Radio) SetHost(host string) {
 		client.CloseGraceful() // reconnect to the new address
 	}
 	fmt.Fprintf(os.Stderr, "radio: host now %s (reconnecting)\n", host)
+}
+
+// SetRTTYEnabled turns the RTTY decoder on/off. No mode lock — the
+// monitor branch decodes in every mode (RTTY convention is USB, mark
+// tone tuned to +2125 Hz on the waterfall).
+func (r *Radio) SetRTTYEnabled(on bool) {
+	r.mu.Lock()
+	r.rttyOn = on
+	r.applyAudioFx()
+	r.mu.Unlock()
+}
+
+// RTTYEnabled reports whether RTTY decoding is active.
+func (r *Radio) RTTYEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.rttyOn
+}
+
+// SetRTTYReversed swaps mark/space polarity (LSB or reversed-keyed TX).
+func (r *Radio) SetRTTYReversed(on bool) {
+	r.mu.Lock()
+	r.rtty.SetReversed(on)
+	r.mu.Unlock()
+}
+
+// RTTYReversed reports the mark/space polarity flag.
+func (r *Radio) RTTYReversed() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.rtty.Reversed()
+}
+
+// RTTYTakeLines drains decoded text lines.
+func (r *Radio) RTTYTakeLines() []string {
+	return r.rtty.TakeLines()
+}
+
+// RTTYCurrent returns the partially-received line.
+func (r *Radio) RTTYCurrent() string {
+	return r.rtty.Current()
+}
+
+// RTTYLevels returns mark/space tuning levels (0..~1).
+func (r *Radio) RTTYLevels() (float64, float64) {
+	return r.rtty.Levels()
 }
 
 // FT8Enabled reports whether FT8 detection is active.
