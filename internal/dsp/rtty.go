@@ -45,6 +45,9 @@ var rttyFigures = [32]string{
 	"9", "?", "&", "\x1b", ".", "/", ";", "\x1f",
 }
 
+// rttyNoVote disables the 3-look majority (experiment aid).
+var rttyNoVote bool
+
 // rttyDebug enables framer tracing in tests.
 var rttyDebug func(format string, args ...any)
 
@@ -54,6 +57,11 @@ type RTTYDecoder struct {
 	enabled bool
 	rev     bool // mark/space swapped (LSB-side or reversed signals)
 	usos    bool
+
+	// Demodulation tones (defaults: mark 2125 / space 2295 = the ham
+	// convention). Adjustable for off-frequency signals.
+	centreHz    float64
+	halfShiftHz float64
 
 	mixPhase float64 // LO phase for the centre-frequency mixer
 	mixTaps  []float64
@@ -65,24 +73,47 @@ type RTTYDecoder struct {
 	qCount int
 
 	// bit stream + asynchronous character framing (quarter-bit grid)
-	qTotal    int // absolute quarter counter (debug/timing)
-	lastBit   int // previous quarter decision, mark = 1
-	collect   int // quarters until the next sampling point (0 = sample now)
-	sampling  bool
-	bits      uint8
-	nBits     int
-	shiftFigs bool
-	cur       strings.Builder
-	lines     []string
+	qTotal                int // absolute quarter counter (debug/timing)
+	lastBit               int // previous quarter decision, mark = 1
+	collect               int // quarters until the next sampling point (0 = sample now)
+	sampling              bool
+	candMid               int // bit at the sampling centre
+	candPrev              int // bit one quarter before the centre
+	bits                  uint8
+	nBits                 int
+	lastMarkQ, lastSpaceQ int // quarters since each tone was last seen
+	lastStopQ int // quarter of the previous accepted stop vote
+	runGood   int // consecutive frames at 7.5-bit spacing
+	pending   []uint8 // frames held until a run confirms them
+	shiftFigs             bool
+	cur                   strings.Builder
+	lines                 []string
 
 	markLvl, spaceLvl float64 // smoothed tone levels for the tuning bar
 }
 
-// NewRTTYDecoder builds the decoder with USOS on.
+// NewRTTYDecoder builds the decoder with USOS on and the standard
+// 2125/2295 tones.
 func NewRTTYDecoder() *RTTYDecoder {
-	d := &RTTYDecoder{usos: true}
+	d := &RTTYDecoder{usos: true, centreHz: rttyCentreHz, halfShiftHz: 85, candMid: -1}
 	d.mixTaps = DesignLowpass(127, 300, rttyFeedRate)
 	return d
+}
+
+// SetTones retargets the demodulator at an absolute mark/space pair
+// (Hz in the 8 kHz audio). Non-standard pairs need a fresh filter
+// state, so the demod restarts cleanly.
+func (d *RTTYDecoder) SetTones(markHz, spaceHz float64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.centreHz = (markHz + spaceHz) / 2
+	d.halfShiftHz = math.Abs(spaceHz-markHz) / 2
+	d.mixHist = nil
+	d.prev = 0
+	d.qSum, d.qCount = 0, 0
+	d.sampling = false
+	d.lastBit = 0
+	d.candMid = -1
 }
 
 func (d *RTTYDecoder) Enabled() bool       { return d.enabled }
@@ -102,7 +133,7 @@ func (d *RTTYDecoder) Feed(x []float64) {
 	// 2 kHz (one complex output per 4 input samples).
 	mixed := make([]complex128, len(x))
 	for i, v := range x {
-		d.mixPhase += 2 * math.Pi * rttyCentreHz / rttyFeedRate
+		d.mixPhase += 2 * math.Pi * d.centreHz / rttyFeedRate
 		mixed[i] = complex(v*math.Cos(d.mixPhase), -v*math.Sin(d.mixPhase))
 	}
 	var dec []complex128
@@ -127,13 +158,18 @@ func (d *RTTYDecoder) Feed(x []float64) {
 		if d.rev {
 			bit ^= 1
 		}
-		mag := math.Abs(d.qSum) / (85.0 * rttyQuarter)
+		mag := math.Abs(d.qSum) / (d.halfShiftHz * rttyQuarter)
 		if bit == 1 {
 			d.markLvl += 0.25 * (mag - d.markLvl)
 			d.spaceLvl += 0.25 * (0 - d.spaceLvl)
 		} else {
 			d.spaceLvl += 0.25 * (mag - d.spaceLvl)
 			d.markLvl += 0.25 * (0 - d.markLvl)
+		}
+		if bit == 1 {
+			d.lastMarkQ = d.qTotal
+		} else {
+			d.lastSpaceQ = d.qTotal
 		}
 		d.qSum, d.qCount = 0, 0
 		d.qTotal++
@@ -142,21 +178,22 @@ func (d *RTTYDecoder) Feed(x []float64) {
 }
 
 // stepBit advances the asynchronous character framer by one
-// quarter-bit decision. Data bit k (k = 0..4) is sampled at its centre:
-// start edge + (1.5 + k) bits = edge + 6 + 4k quarters; the stop bit
-// centre is edge + 30 quarters. Any per-character clock error is
-// bounded — every character restarts the hunt.
+// quarter-bit decision. Each sampling point (bit centre) is evaluated
+// as the majority of three looks — the quarters before, at and after
+// the centre: on noise the three looks disagree and the character is
+// rejected, on a real tone pair they agree. Data bit k is centred at
+// start-edge + 6 + 4k quarters (the edge detection lags the true
+// boundary by a systematic ~2 quarters which cancels out), the stop
+// bit centre at edge + 28 quarters — inside the 1.5 stop bits with
+// margin from both edges.
 func (d *RTTYDecoder) stepBit(bit int) {
 	defer func() { d.lastBit = bit }()
 
 	if !d.sampling {
-		// Hunt: a mark→space edge while idle is a start bit.
+		// Hunt: a mark-to-space edge while idle is a start bit.
 		if d.lastBit == 1 && bit == 0 {
 			d.sampling = true
 			d.bits, d.nBits = 0, 0
-			// Data bit k is sampled at edge + 6 + 4k quarters (its
-			// centre; the detected edge already carries the ~2-quarter
-			// filter/window lag, which is systematic and cancels out).
 			d.collect = 6
 		}
 		return
@@ -165,26 +202,73 @@ func (d *RTTYDecoder) stepBit(bit int) {
 	if d.collect > 0 {
 		return
 	}
-	// This quarter IS a sampling point (bit centre).
+	if d.collect == 0 && d.candMid < 0 {
+		// Centre quarter: remember the look before it and this one;
+		// the vote completes one quarter later.
+		d.candPrev = d.lastBit
+		d.candMid = bit
+		d.collect = 1
+		return
+	}
+	// Vote quarter: majority of prev / centre / now.
+	v := 0
+	if d.candPrev+d.candMid+bit >= 2 {
+		v = 1
+	}
+	if rttyNoVote {
+		v = d.candMid
+	}
+	d.candMid = -1 // re-arm the centre capture
+
 	if d.nBits < 5 {
-		if bit == 1 {
+		if v == 1 {
 			d.bits |= 1 << d.nBits
 		}
 		d.nBits++
 		if d.nBits == 5 {
-			// Stop sample sits 6 quarters past the 5th data bit — the
-			// centre of the 1.5 stop bits with margin from both edges;
-			// at +8 the sample hit the NEXT start bit exactly and every
-			// character was discarded.
-			d.collect = 6
+			// Stop vote at edge+26/+27: past the bit-5→stop transition
+			// smear, but clear of the NEXT character's start edge at
+			// +32 — at +28 the vote quarter slid into that edge (with
+			// the ±2-quarter edge-detection jitter) and consumed it,
+			// dropping the whole next character.
+			d.collect = 3
 		} else {
-			d.collect = 4
+			d.collect = 3 // next centre: 4 quarters on, minus the vote quarter
 		}
 		return
 	}
-	// Stop bit sample: must be mark.
-	if bit == 1 {
-		d.decode(d.bits)
+	// Stop bit vote: must be mark, and BOTH tones must have been seen
+	// recently (2.5 s) — a constant carrier or a CW keyer never opens
+	// the gate; noise rejection comes from the three-look vote.
+	if v == 1 && d.qTotal-d.lastMarkQ < 300 && d.qTotal-d.lastSpaceQ < 300 {
+		// Run gate: real Baudot arrives as characters spaced exactly
+		// 7.5 bits (30 quarters) apart, back to back — noise frames
+		// land at random spacing. Text prints only inside a run of
+		// three-plus in-step frames; the first two characters of a
+		// burst stay hidden (RTTY sends continuously, idle LTRS
+		// doiddles ARE in-step and keep the run warm).
+		inStep := d.lastStopQ > 0 && d.qTotal-d.lastStopQ >= 27 && d.qTotal-d.lastStopQ <= 33
+		if inStep {
+			d.runGood++
+		} else {
+			d.runGood = 1
+			d.pending = d.pending[:0]
+		}
+		d.lastStopQ = d.qTotal
+		if len(d.pending) < 4 {
+			d.pending = append(d.pending, d.bits)
+		}
+		if d.runGood >= 4 {
+			// Run confirmed: release the held frames (the first two of
+			// the burst) and stream from here on.
+			for _, b := range d.pending {
+				d.decode(b)
+			}
+			d.pending = d.pending[:0]
+		}
+	} else {
+		d.runGood = 0
+		d.pending = d.pending[:0]
 	}
 	d.sampling = false
 }

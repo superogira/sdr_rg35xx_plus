@@ -136,3 +136,26 @@ func TestRTTYNoisySignal(t *testing.T) {
 		t.Fatalf("noisy decode wrong: %q", lines)
 	}
 }
+
+func TestRTTYSilentOnNoise(t *testing.T) {
+	// Pure noise must not decode printable text: the 3-look vote and
+	// the both-tones gate keep the screen clean (the first live test
+	// printed endless structured garbage from noise before them).
+	d := NewRTTYDecoder()
+	d.SetEnabled(true)
+	rnd := uint64(99)
+	audio := make([]float64, 8000*8)
+	for i := range audio {
+		rnd = rnd*6364136223846793005 + 1442695040888963407
+		audio[i] = 0.5 * (float64(int64(rnd>>33)%2000)/1000.0 - 1)
+	}
+	feedRTTY(d, audio)
+	lines := d.TakeLines()
+	total := 0
+	for _, ln := range lines {
+		total += len(ln)
+	}
+	if total > 4 {
+		t.Fatalf("noise decoded %d chars (%q) — gating too weak", total, lines)
+	}
+}
