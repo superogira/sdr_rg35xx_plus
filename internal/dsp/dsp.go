@@ -223,6 +223,7 @@ type Chain struct {
 	amDc     float64 // AM envelope DC tracker
 	fmDc     float64 // FM discriminator DC tracker (LO/ppm offset)
 	fx       *audProc // user audio effects: NR + HP/LP
+	rtty     *RTTYDecoder // RTTY monitor (fed alongside the FT8 branch)
 
 	// Squelch + metering state.
 	sqlOpen  bool
@@ -529,11 +530,11 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 		c.fif2 = c.fif2Rot
 	}
 
-	// FT8 monitor: the dedicated branch below feeds the detector in every
-	// mode; the SSB-8k path keeps its in-processSSB feed (identical band,
-	// avoids running the branch twice).
-	if c.ft8 != nil && !(c.mode.SSB && c.outRate == SSBRate) {
-		c.feedFT8()
+	// FT8/RTTY monitor: the dedicated branch below feeds the detectors
+	// in every mode; the SSB-8k path keeps its in-processSSB feed
+	// (identical band, avoids running the branch twice).
+	if (c.ft8 != nil || c.rtty != nil) && !(c.mode.SSB && c.outRate == SSBRate) {
+		c.feedMonitors()
 	}
 
 	if c.mode.SSB {
@@ -624,14 +625,19 @@ func (c *Chain) processSSB(out *[]float32) {
 	complexCIFIR(c.ssbTaps, &c.ssbHist, slow, &side)
 	c.sbOut = side
 
-	// FT8 expects 8 kHz audio — the wide 16 kHz SSB branches cannot
-	// feed it (the detector's whole timing assumes 8 k).
-	if c.ft8 != nil && c.outRate == SSBRate {
-		ft8buf := make([]float64, 0, len(side))
+	// FT8/RTTY expect 8 kHz audio — the wide 16 kHz SSB branches cannot
+	// feed them (the detectors' timing assumes 8 k).
+	if (c.ft8 != nil || c.rtty != nil) && c.outRate == SSBRate {
+		fbuf := make([]float64, 0, len(side))
 		for _, z := range side {
-			ft8buf = append(ft8buf, real(z)*3.0)
+			fbuf = append(fbuf, real(z)*3.0)
 		}
-		c.ft8.Feed(ft8buf)
+		if c.ft8 != nil {
+			c.ft8.Feed(fbuf)
+		}
+		if c.rtty != nil {
+			c.rtty.Feed(fbuf)
+		}
 	}
 	for _, z := range side {
 		x := real(z) * 3.0
@@ -655,11 +661,11 @@ func appendOutput(out *[]float32, x float64) {
 	*out = append(*out, float32(x))
 }
 
-// feedFT8 runs the independent FT8 monitor branch: decimate the rotated
+// feedMonitors runs the independent FT8/RTTY monitor branch: decimate the rotated
 // IF2 stream to 8 kHz, bandpass 200..3200 Hz, and hand the real part to
 // the detector. Used whenever the audio path itself cannot feed FT8
 // (AM/NFM/WFM/wide-SSB listening modes).
-func (c *Chain) feedFT8() {
+func (c *Chain) feedMonitors() {
 	if len(c.ft8Taps) == 0 || c.ft8DecD < 1 {
 		return
 	}
@@ -675,8 +681,16 @@ func (c *Chain) feedFT8() {
 	for _, z := range side {
 		buf = append(buf, real(z)*3.0)
 	}
-	c.ft8.Feed(buf)
+	if c.ft8 != nil {
+		c.ft8.Feed(buf)
+	}
+	if c.rtty != nil {
+		c.rtty.Feed(buf)
+	}
 }
+
+// SetRTTYDetector attaches (or with nil detaches) the RTTY decoder.
+func (c *Chain) SetRTTYDetector(d *RTTYDecoder) { c.rtty = d }
 
 // measure updates the power meter and squelch state from one IF block.
 func (c *Chain) measureIF(block []complex128) {

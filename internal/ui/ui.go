@@ -962,6 +962,71 @@ func (u *UI) DrawHostList(hosts []string, sel, activeIdx int) {
 	Face(14, sel == len(hosts)).DrawString(u.img, cyan, px+38, y, i18n.T("host_add"))
 }
 
+// DrawRTTY renders the RTTY text screen: scrolling decoded lines, the
+// in-progress line, and a mark/space tuning bar so the operator can
+// centre the signal (mark tone at +2125 Hz in USB).
+func (u *UI) DrawRTTY(lines []string, cur string, mark, space float64, rev, on bool) {
+	u.fillBlend(0, 0, u.W, u.H, 10, 12, 18, 255)
+
+	white := color.RGBA{240, 240, 240, 255}
+	grey := color.RGBA{150, 160, 170, 255}
+	cyan := color.RGBA{80, 220, 255, 255}
+	yellow := color.RGBA{255, 230, 120, 255}
+
+	Face(16, true).DrawString(u.img, cyan, 10, 26, i18n.T("rtty_title"))
+	tag := ""
+	if rev {
+		tag = "  REV"
+	}
+	if !on {
+		tag += "  [" + i18n.T("off") + "]"
+	}
+	Face(11, false).DrawString(u.img, yellow, 10+Face(16, true).TextWidth(i18n.T("rtty_title"))+8, 26, tag)
+
+	hf := Face(11, false)
+	hf.DrawString(u.img, grey, 10, u.H-13, i18n.T("rtty_hint"))
+
+	// Tuning bars: mark (red-ish) and space (green-ish) levels.
+	barY := u.H - 40
+	u.fillBlend(10, barY-10, 300, 12, 20, 24, 34, 255)
+	for i := 0; i < int(mark*140); i++ {
+		u.fillBlend(12+i*2, barY-8, 2, 8, 255, 80, 80, 255)
+	}
+	for i := 0; i < int(space*140); i++ {
+		u.fillBlend(162+i*2, barY-8, 2, 8, 80, 255, 80, 255)
+	}
+	lf := Face(10, false)
+	lf.DrawString(u.img, grey, 10, barY-14, "M")
+	lf.DrawString(u.img, grey, 160, barY-14, "S")
+	lf.DrawString(u.img, grey, 300, barY-2, "2125 / 2295 Hz")
+
+	if !on {
+		return
+	}
+	// Text: newest at the bottom; rows above the bars.
+	tf := Face(13, false)
+	rowH := 18
+	maxRows := (u.H - 40 - 44) / rowH
+	all := lines
+	if len(all) > maxRows {
+		all = all[len(all)-maxRows:]
+	}
+	y := 44
+	for _, ln := range all {
+		if len(ln) > 78 {
+			ln = ln[:78]
+		}
+		tf.DrawString(u.img, white, 10, y, ln)
+		y += rowH
+	}
+	if cur != "" {
+		if len(cur) > 78 {
+			cur = cur[:78]
+		}
+		tf.DrawString(u.img, yellow, 10, y, cur+"_")
+	}
+}
+
 // DrawBandList renders the FT8 band picker: one row per band, the
 // currently-tuned band marked with a drawn square (the font has no
 // symbol glyphs) and green text.

@@ -383,6 +383,8 @@ const (
 	menuHP
 	menuLP
 	menuAF
+	menuRTTY
+	menuRTTYLog
 )
 
 // pageItems is package-level so a test can pin it: one row list per
@@ -392,7 +394,7 @@ const (
 var pageItems = [][]int{
 	{0, 0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
 	{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
-	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap},
+	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
 	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 	{menuBM},
 	{menuAF, menuNR, menuHP, menuLP},
@@ -484,6 +486,7 @@ func main() {
 	myAnt := strings.TrimSpace(cfg["antenna"])
 	myRig := strings.TrimSpace(cfg["rig"])
 	pskOn := cfg["psk"] == "on"
+	rttyOn := cfg["rtty"] == "on"
 	sqlPref := 0.0
 	if v, ok := cfg["sql"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= -100 && f <= 40 {
@@ -590,6 +593,7 @@ func main() {
 	r.SetNoiseReduction(nrLevel)
 	r.SetAudioFilter("hp", hpHz)
 	r.SetAudioFilter("lp", lpHz)
+	r.SetRTTYEnabled(rttyOn)
 	if bwv, ok := cfg[fmt.Sprintf("bw.%s", r.Mode().Name)]; ok {
 		if f, err := strconv.ParseFloat(bwv, 64); err == nil {
 			r.SetBandwidth(f)
@@ -747,6 +751,7 @@ func main() {
 		uiBmList
 		uiMap
 		uiFT8Bands
+		uiRTTY
 	)
 	uiMode := uiMain
 	// Map screen: selected station (index into mapStationNames, -1 =
@@ -756,6 +761,10 @@ func main() {
 	mapStationNames := []string{}
 	// FT8 band picker: selected row (up/down walk the ft8Bands table).
 	ft8BandSel := 0
+	// RTTY screen: display list + scroll. Lines drain from the decoder
+	// every frame while the screen is open.
+	rttyLines := []string{}
+	rttyScroll := 0
 	menuPage := pageRoot
 	// Dev aid for PNG screenshot testing of the overlays.
 	switch os.Getenv("SDR_UI") {
@@ -769,6 +778,8 @@ func main() {
 		uiMode = uiFT8Bands
 	case "audio":
 		uiMode, menuPage = uiMenu, pageAudio
+	case "rtty":
+		uiMode = uiRTTY
 	}
 	menuSel := 0
 	// menuRow maps an item id to its row on a page. Hardcoded row
@@ -1121,6 +1132,13 @@ func main() {
 			pskOn = !pskOn
 			cfg["psk"] = map[bool]string{true: "on", false: "off"}[pskOn]
 			psk.SetEnabled(pskOn)
+		case menuRTTY:
+			r.SetRTTYEnabled(!r.RTTYEnabled())
+			cfg["rtty"] = map[bool]string{true: "on", false: "off"}[r.RTTYEnabled()]
+			fmt.Fprintf(os.Stderr, "rtty: decode %s\n", cfg["rtty"])
+		case menuRTTYLog:
+			rttyScroll = 0
+			uiMode = uiRTTY
 		case menuSysMon:
 			uiMode = uiSysMon
 		case menuLogs:
@@ -1377,6 +1395,28 @@ func main() {
 			case input.Start, input.Select:
 				mapSel, mapDetail = -1, false
 				uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuMap)
+			}
+		case uiRTTY:
+			// RTTY text screen: up/down scroll, Y reverses mark/space
+			// polarity, X clears, B/Start back to the FT8 page.
+			switch b {
+			case input.Up:
+				rttyScroll++
+			case input.Down:
+				rttyScroll--
+			case input.Y:
+				r.SetRTTYReversed(!r.RTTYReversed())
+			case input.X:
+				rttyLines = nil
+				rttyScroll = 0
+			case input.B, input.Start, input.Select:
+				uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuRTTYLog)
+			}
+			if rttyScroll > 500 {
+				rttyScroll = 500
+			}
+			if rttyScroll < 0 {
+				rttyScroll = 0
 			}
 		case uiFT8Bands:
 			// Band picker: up/down walk the list, A tunes there (and
@@ -2026,7 +2066,9 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_ant"), Value: myAnt},
 					ui.MenuItem{Label: i18n.T("m_rig"), Value: myRig},
 					ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal},
-					ui.MenuItem{Label: i18n.T("m_map"), Value: i18n.T("press_a")})
+					ui.MenuItem{Label: i18n.T("m_map"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_rtty"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.RTTYEnabled()]},
+					ui.MenuItem{Label: i18n.T("m_rttylog"), Value: i18n.T("press_a")})
 			case pageAudio:
 				nrVal := i18n.T("off")
 				if lv := r.NoiseReduction(); lv > 0 {
@@ -2334,6 +2376,15 @@ func main() {
 				}
 			}
 			u.DrawBandList(labels, ft8BandSel, active)
+		} else if uiMode == uiRTTY {
+			for _, ln := range r.RTTYTakeLines() {
+				rttyLines = append(rttyLines, ln)
+				if len(rttyLines) > 60 {
+					rttyLines = rttyLines[len(rttyLines)-60:]
+				}
+			}
+			m, sp := r.RTTYLevels()
+			u.DrawRTTY(rttyLines, r.RTTYCurrent(), m, sp, r.RTTYReversed(), r.RTTYEnabled())
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
@@ -2487,6 +2538,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["lp"]; ok {
 		fmt.Fprintf(f, "lp=%s\n", v)
+	}
+	if v, ok := cfg["rtty"]; ok {
+		fmt.Fprintf(f, "rtty=%s\n", v)
 	}
 	if v, ok := cfg["updateurl"]; ok && v != "" {
 		fmt.Fprintf(f, "updateurl=%s\n", v)
