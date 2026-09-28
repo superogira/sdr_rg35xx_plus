@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
+	_ "image/jpeg" // ESRI World Imagery serves JPEG tiles
 	_ "image/png"
 	"io"
 	"math"
@@ -37,20 +38,18 @@ type Layer struct {
 	Attr string
 }
 
-// Layers available on the radar (L1/R1 cycles them).
+// Layers available on the radar (L1/R1 cycles them). CARTO styles
+// were dropped — their tile CDN now requires an API key.
 var Layers = []Layer{
 	{"OSM", func(z, x, y int) string {
 		return fmt.Sprintf("https://tile.openstreetmap.org/%d/%d/%d.png", z, x, y)
 	}, "(c) OpenStreetMap contributors"},
-	{"Dark", func(z, x, y int) string {
-		return fmt.Sprintf("https://basemaps.cartocdn.com/dark_all/%d/%d/%d.png", z, x, y)
-	}, "(c) OpenStreetMap contributors (c) CARTO"},
-	{"Light", func(z, x, y int) string {
-		return fmt.Sprintf("https://basemaps.cartocdn.com/light_all/%d/%d/%d.png", z, x, y)
-	}, "(c) OpenStreetMap contributors (c) CARTO"},
+	{"Topo", func(z, x, y int) string {
+		return fmt.Sprintf("https://tile.opentopomap.org/%d/%d/%d.png", z, x, y)
+	}, "(c) OpenStreetMap contributors (SRTM | (c) OpenTopoMap (CC-BY-SA)"},
 	{"Sat", func(z, x, y int) string {
-		// ESRI serves tiles in z/y/x order.
-		return fmt.Sprintf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/%d/%d/%d.png", z, y, x)
+		// ESRI serves tiles in z/y/x order — and as JPEG.
+		return fmt.Sprintf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/%d/%d/%d", z, y, x)
 	}, "Esri World Imagery"},
 }
 
@@ -81,7 +80,7 @@ func (c *Cache) tile(layer, zoom, x, y int) *image.RGBA {
 	}
 
 	dir := filepath.Join(c.dir, Layers[layer].Name)
-	path := filepath.Join(dir, fmt.Sprintf("%d_%d_%d.png", zoom, x, y))
+	path := filepath.Join(dir, fmt.Sprintf("%d_%d_%d.tile", zoom, x, y)) // format-agnostic: PNG or JPEG bytes
 	if b, err := os.ReadFile(path); err == nil {
 		if img = decodePNG(b); img != nil {
 			c.remember(key, img)
