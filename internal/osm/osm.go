@@ -33,24 +33,36 @@ func MercatorPx(lat, lon float64, zoom int) (float64, float64) {
 
 // Layer is one tile-server style. URL receives (zoom, x, y).
 type Layer struct {
-	Name string
-	URL  func(z, x, y int) string
-	Attr string
+	Name    string
+	URL     func(z, x, y int) string
+	Attr    string
+	NoFetch bool // the classic black radar — no tiles at all
 }
 
-// Layers available on the radar (L1/R1 cycles them). CARTO styles
-// were dropped — their tile CDN now requires an API key.
+// Layers available on the radar (L1/R1 cycles them). Indexes 0-2 are
+// historical (ini adsblayer) — keep them stable and append new ones.
+// Probed live and keyless: OSM, OpenTopoMap, and the ESRI arcgisonline
+// family (JPEG). CARTO needs an API key (dropped); OpenFreeMap is
+// vector-only (unusable for us); CyclOSM/OPNV/Wikimedia serve blanks
+// or 403 to non-browser agents.
 var Layers = []Layer{
 	{"OSM", func(z, x, y int) string {
 		return fmt.Sprintf("https://tile.openstreetmap.org/%d/%d/%d.png", z, x, y)
-	}, "(c) OpenStreetMap contributors"},
+	}, "(c) OpenStreetMap contributors", false},
 	{"Topo", func(z, x, y int) string {
 		return fmt.Sprintf("https://tile.opentopomap.org/%d/%d/%d.png", z, x, y)
-	}, "(c) OpenStreetMap contributors (SRTM | (c) OpenTopoMap (CC-BY-SA)"},
+	}, "(c) OpenStreetMap contributors (SRTM | (c) OpenTopoMap (CC-BY-SA)", false},
 	{"Sat", func(z, x, y int) string {
 		// ESRI serves tiles in z/y/x order — and as JPEG.
 		return fmt.Sprintf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/%d/%d/%d", z, y, x)
-	}, "Esri World Imagery"},
+	}, "Esri World Imagery", false},
+	{"Street", func(z, x, y int) string {
+		return fmt.Sprintf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/%d/%d/%d", z, y, x)
+	}, "Esri World Street Map", false},
+	{"EsriTopo", func(z, x, y int) string {
+		return fmt.Sprintf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/%d/%d/%d", z, y, x)
+	}, "Esri World Topo Map", false},
+	{"Phosphor", nil, "", true},
 }
 
 // Cache keeps tile images in memory and on disk.
