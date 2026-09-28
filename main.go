@@ -44,6 +44,7 @@ import (
 	"sdr35/internal/geo"
 	"sdr35/internal/i18n"
 	"sdr35/internal/input"
+	"sdr35/internal/osm"
 	"sdr35/internal/pskreporter"
 	"sdr35/internal/radio"
 	"sdr35/internal/sysinfo"
@@ -558,6 +559,12 @@ func main() {
 		}
 	}
 	adsbConnected := false
+	// OSM basemap: one mosaic per range zoom, fetched in the
+	// background and cached in memory + on the SD card.
+	adsbZooms := []int{11, 10, 9, 8} // for ranges 50/100/200/400 km
+	osmCache := osm.NewCache(filepath.Join(filepath.Dir(mustExe()), "osmcache"))
+	adsbMosaic := [4]*image.RGBA{}
+	adsbFetching := [4]bool{}
 
 	go r.Run(ctx)
 	// ADS-B: Beast TCP feed → decode → store, independent of the radio.
@@ -2513,7 +2520,17 @@ func main() {
 					blips = append(blips, b)
 				}
 			}
-			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon, cpu)
+			z := adsbRangeIdx
+			if adsbMosaic[z] == nil && !adsbFetching[z] {
+				adsbFetching[z] = true
+				latC, lonC, zoom := adsbLat, adsbLon, adsbZooms[z]
+				go func() {
+					m := osmCache.Mosaic(latC, lonC, zoom, 640, 480)
+					adsbMosaic[z] = m
+					adsbFetching[z] = false
+				}()
+			}
+			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[adsbRangeIdx])
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
