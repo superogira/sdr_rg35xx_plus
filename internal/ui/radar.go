@@ -91,7 +91,9 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		if clamped {
 			col = dim
 		}
-		// Flown track: one-minute breadcrumbs, fading with age.
+		// Flown track: breadcrumbs every 30 s of flight within the
+		// one-minute window. Every dot is a full 2x2 body — 1-px dots
+		// proved invisible on the handheld screen.
 		for _, d := range b.Trail {
 			tr := d.DistKm / rangeKm * maxR
 			if tr > maxR {
@@ -100,19 +102,16 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			ta := d.BrngDeg * math.Pi / 180
 			dx := cx + int(tr*math.Sin(ta))
 			dy := cy - int(tr*math.Cos(ta))
-			tc := color.RGBA{0, 160, 80, 255} // recent
+			tc := color.RGBA{0, 255, 130, 255} // recent
 			if d.AgeSec > 40 {
-				tc = color.RGBA{0, 80, 40, 255} // old
+				tc = color.RGBA{0, 150, 75, 255} // old
 			} else if d.AgeSec > 20 {
-				tc = color.RGBA{0, 120, 60, 255}
+				tc = color.RGBA{0, 200, 100, 255}
 			}
 			u.setPixel(dx, dy, tc)
-			if d.AgeSec <= 20 {
-				// Dots fresh enough to matter get a 2x2 body.
-				u.setPixel(dx+1, dy, tc)
-				u.setPixel(dx, dy+1, tc)
-				u.setPixel(dx+1, dy+1, tc)
-			}
+			u.setPixel(dx+1, dy, tc)
+			u.setPixel(dx, dy+1, tc)
+			u.setPixel(dx+1, dy+1, tc)
 		}
 
 		// Velocity leader: where the aircraft will be in one minute
