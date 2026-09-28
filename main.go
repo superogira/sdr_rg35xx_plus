@@ -548,8 +548,15 @@ func main() {
 	// ADS-B: Beast client settings + radar range (L1/R1 cycles).
 	adsbHost := "192.168.2.152:30005"
 	adsbLat, adsbLon := 13.5955, 100.56178
-	adsbRangeIdx := 1
 	adsbRanges := []float64{50, 100, 200, 400}
+	adsbRangeIdx := 1
+	if v := os.Getenv("SDR_ADSB_RANGE"); v != "" {
+		for i, rg := range adsbRanges {
+			if fmt.Sprintf("%.0f", rg) == v {
+				adsbRangeIdx = i
+			}
+		}
+	}
 	adsbConnected := false
 
 	go r.Run(ctx)
