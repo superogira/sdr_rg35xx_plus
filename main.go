@@ -2465,9 +2465,13 @@ func main() {
 			planes := adsbStore.Planes()
 			blips := make([]ui.RadarBlip, 0, len(planes))
 			for _, pl := range planes {
-				b := ui.RadarBlip{Call: pl.Callsign, ICAO: pl.ICAO, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, TrackDeg: pl.TrackDeg, HasPos: pl.HasPos}
+				b := ui.RadarBlip{Call: pl.Callsign, ICAO: pl.ICAO, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, TrackDeg: pl.TrackDeg, VrateFpm: pl.VrateFpm, HasPos: pl.HasPos}
 				if pl.HasPos {
 					b.DistKm, b.BrngDeg = geo.DistanceBearingKm(adsbLat, adsbLon, pl.Lat, pl.Lon)
+				}
+				for _, tp := range pl.Trail {
+					d, br := geo.DistanceBearingKm(adsbLat, adsbLon, tp.Lat, tp.Lon)
+					b.Trail = append(b.Trail, ui.RadarDot{DistKm: d, BrngDeg: br, AgeSec: int(time.Since(tp.At).Seconds())})
 				}
 				blips = append(blips, b)
 			}
