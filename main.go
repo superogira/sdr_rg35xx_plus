@@ -1163,6 +1163,20 @@ func main() {
 		case menuRTTYLog:
 			rttyScroll = 0
 			uiMode = uiRTTY
+		case menuADSBHost:
+			hostText, kbTarget = adsbHost, "adsbhost"
+			hostKbR, hostKbC = 0, 0
+			uiMode = uiHostEdit
+		case menuADSBLat:
+			hostText, kbTarget = fmt.Sprintf("%.5f", adsbLat), "adsblat"
+			hostKbR, hostKbC = 0, 0
+			uiMode = uiHostEdit
+		case menuADSBLon:
+			hostText, kbTarget = fmt.Sprintf("%.5f", adsbLon), "adsblon"
+			hostKbR, hostKbC = 0, 0
+			uiMode = uiHostEdit
+		case menuADSBRadar:
+			uiMode = uiADSB
 		case menuSysMon:
 			uiMode = uiSysMon
 		case menuLogs:
