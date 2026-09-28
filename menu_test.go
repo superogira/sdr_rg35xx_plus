@@ -6,7 +6,7 @@ import "testing"
 // the root page exposes one row per subpage — the Audio page row once
 // went missing in a silent edit and the d-pad could never reach it.
 func TestPageItemsCoverEveryPage(t *testing.T) {
-	wantPages := []int{pageRoot, pageRx, pageFT8, pageSys, pageBM, pageAudio}
+	wantPages := []int{pageRoot, pageRx, pageFT8, pageSys, pageBM, pageAudio, pageADSB}
 	if len(pageItems) != len(wantPages) {
 		t.Fatalf("pageItems has %d pages, want %d — a page id exists with no row list (rows become unreachable)", len(pageItems), len(wantPages))
 	}

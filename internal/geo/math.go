@@ -57,3 +57,21 @@ func DistanceKm(grid1, grid2 string) int {
 		math.Cos(rLat1)*math.Cos(rLat2)*math.Sin(dLon/2)*math.Sin(dLon/2)
 	return int(math.Round(6371 * 2 * math.Asin(math.Sqrt(a))))
 }
+
+// DistanceBearingKm returns the great-circle distance (km) and the
+// initial bearing (degrees true) from point 1 to point 2.
+func DistanceBearingKm(lat1, lon1, lat2, lon2 float64) (float64, float64) {
+	const rad = math.Pi / 180
+	rLat1, rLat2 := lat1*rad, lat2*rad
+	dLat := (lat2 - lat1) * rad
+	dLon := (lon2 - lon1) * rad
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(rLat1)*math.Cos(rLat2)*math.Sin(dLon/2)*math.Sin(dLon/2)
+	km := 6371 * 2 * math.Asin(math.Sqrt(a))
+	brng := math.Atan2(math.Sin(dLon)*math.Cos(rLat2),
+		math.Cos(rLat1)*math.Sin(rLat2)-math.Sin(rLat1)*math.Cos(rLat2)*math.Cos(dLon)) / rad
+	if brng < 0 {
+		brng += 360
+	}
+	return km, brng
+}

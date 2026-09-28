@@ -37,6 +37,7 @@ import (
 	"syscall"
 	"time"
 
+	"sdr35/internal/adsb"
 	"sdr35/internal/audio"
 	"sdr35/internal/backlight"
 	"sdr35/internal/dsp"
@@ -385,6 +386,10 @@ const (
 	menuAF
 	menuRTTY
 	menuRTTYLog
+	menuADSBHost
+	menuADSBLat
+	menuADSBLon
+	menuADSBRadar
 )
 
 // pageItems is package-level so a test can pin it: one row list per
@@ -392,12 +397,13 @@ const (
 // root page at four rows while a fifth page existed — the Audio row
 // was unreachable from the d-pad.
 var pageItems = [][]int{
-	{0, 0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
+	{0, 0, 0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
 	{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
 	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 	{menuBM},
 	{menuAF, menuNR, menuHP, menuLP},
+	{menuADSBHost, menuADSBLat, menuADSBLon, menuADSBRadar},
 }
 
 // The flat 16-row menu outgrew the screen, so it is now three
@@ -410,6 +416,7 @@ const (
 	pageSys
 	pageBM
 	pageAudio
+	pageADSB
 )
 
 func main() {
@@ -538,7 +545,21 @@ func main() {
 		}
 	}
 	r.SetVolume(*vol)
+	// ADS-B: Beast client settings + radar range (L1/R1 cycles).
+	adsbHost := "192.168.2.152:30005"
+	adsbLat, adsbLon := 13.5955, 100.56178
+	adsbRangeIdx := 1
+	adsbRanges := []float64{50, 100, 200, 400}
+	adsbConnected := false
+
 	go r.Run(ctx)
+	// ADS-B: Beast TCP feed → decode → store, independent of the radio.
+	adsbStore := adsb.NewStore()
+	adsbClient := adsb.NewClient(adsbHost)
+	adsbClient.Connected = func(c bool) { adsbConnected = c }
+	go adsbClient.Run(ctx, func(msg []byte, mlat uint64, sig int) {
+		adsbStore.Decode(msg)
+	})
 	defer func() {
 		if out != nil {
 			out.Close()
@@ -752,6 +773,7 @@ func main() {
 		uiMap
 		uiFT8Bands
 		uiRTTY
+		uiADSB
 	)
 	uiMode := uiMain
 	// Map screen: selected station (index into mapStationNames, -1 =
@@ -780,6 +802,8 @@ func main() {
 		uiMode, menuPage = uiMenu, pageAudio
 	case "rtty":
 		uiMode = uiRTTY
+	case "adsb":
+		uiMode = uiADSB
 	}
 	menuSel := 0
 	// menuRow maps an item id to its row on a page. Hardcoded row
@@ -1396,6 +1420,16 @@ func main() {
 				mapSel, mapDetail = -1, false
 				uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuMap)
 			}
+		case uiADSB:
+			// Radar: L1/R1 cycle the range rings, B/Start back.
+			switch b {
+			case input.L1:
+				adsbRangeIdx = (adsbRangeIdx + len(adsbRanges) - 1) % len(adsbRanges)
+			case input.R1:
+				adsbRangeIdx = (adsbRangeIdx + 1) % len(adsbRanges)
+			case input.B, input.Start, input.Select:
+				uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuADSBRadar)
+			}
 		case uiRTTY:
 			// RTTY text screen: up/down scroll, Y reverses mark/space
 			// polarity, X clears, B/Start back to the FT8 page.
@@ -1548,6 +1582,27 @@ func main() {
 					}
 					hostText = ""
 					uiMode = uiBmList
+				case "adsbhost":
+					adsbHost = hostText
+					cfg["adsbhost"] = adsbHost
+					adsbClient.SetHost(adsbHost)
+					hostText = ""
+					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuADSBHost)
+				case "adsblat":
+					if v, err := strconv.ParseFloat(hostText, 64); err == nil {
+						adsbLat = v
+						cfg["adsblat"] = fmt.Sprintf("%.5f", adsbLat)
+					}
+					hostText = ""
+					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuADSBLat)
+				case "adsblon":
+					if v, err := strconv.ParseFloat(hostText, 64); err == nil {
+						adsbLon = v
+						cfg["adsblon"] = fmt.Sprintf("%.5f", adsbLon)
+					}
+					hostText = ""
+					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuADSBLon)
+
 				default:
 					if hostText != "" {
 						if hostEditIdx >= 0 && hostEditIdx < len(hostList) {
@@ -2025,7 +2080,8 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"},
-					ui.MenuItem{Label: i18n.T("m_audiopage"), Value: ">"})
+					ui.MenuItem{Label: i18n.T("m_audiopage"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_adsbpage"), Value: ">"})
 			case pageRx:
 				freqDec := 5
 				switch r.Mode().Name {
@@ -2091,6 +2147,12 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_nr"), Value: nrVal},
 					ui.MenuItem{Label: i18n.T("m_hp"), Value: hpVal},
 					ui.MenuItem{Label: i18n.T("m_lp"), Value: lpVal})
+			case pageADSB:
+				items = append(items,
+					ui.MenuItem{Label: i18n.T("m_adsbhost"), Value: adsbHost},
+					ui.MenuItem{Label: i18n.T("m_adsblat"), Value: fmt.Sprintf("%.5f", adsbLat)},
+					ui.MenuItem{Label: i18n.T("m_adsblon"), Value: fmt.Sprintf("%.5f", adsbLon)},
+					ui.MenuItem{Label: i18n.T("m_adsbradar"), Value: i18n.T("press_a")})
 			case pageSys:
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
@@ -2385,6 +2447,32 @@ func main() {
 			}
 			m, sp := r.RTTYLevels()
 			u.DrawRTTY(rttyLines, r.RTTYCurrent(), m, sp, r.RTTYReversed(), r.RTTYEnabled())
+		} else if uiMode == uiADSB {
+			planes := adsbStore.Planes()
+			blips := make([]ui.RadarBlip, 0, len(planes))
+			for _, pl := range planes {
+				b := ui.RadarBlip{Call: pl.Callsign, ICAO: pl.ICAO, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, HasPos: pl.HasPos}
+				if pl.HasPos {
+					b.DistKm, b.BrngDeg = geo.DistanceBearingKm(adsbLat, adsbLon, pl.Lat, pl.Lon)
+				}
+				blips = append(blips, b)
+			}
+			if os.Getenv("SDR_ADSB_DEMO") != "" {
+				// Dev aid: fake traffic so the radar can be eyeballed
+				// from a rendered PNG.
+				for _, d := range []struct {
+					call                 string
+					brng, dist, alt, spd int
+				}{
+					{"THA341", 35, 32, 35000, 470},
+					{"AIH772", 128, 71, 27000, 440},
+					{"TGK209", 255, 18, 8000, 250},
+					{"WMS12", 300, 180, 41000, 490},
+				} {
+					blips = append(blips, ui.RadarBlip{Call: d.call, BrngDeg: float64(d.brng), DistKm: float64(d.dist), AltFt: d.alt, SpdKt: d.spd, HasPos: true})
+				}
+			}
+			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
@@ -2541,6 +2629,15 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["rtty"]; ok {
 		fmt.Fprintf(f, "rtty=%s\n", v)
+	}
+	if v, ok := cfg["adsbhost"]; ok {
+		fmt.Fprintf(f, "adsbhost=%s\n", v)
+	}
+	if v, ok := cfg["adsblat"]; ok {
+		fmt.Fprintf(f, "adsblat=%s\n", v)
+	}
+	if v, ok := cfg["adsblon"]; ok {
+		fmt.Fprintf(f, "adsblon=%s\n", v)
 	}
 	if v, ok := cfg["updateurl"]; ok && v != "" {
 		fmt.Fprintf(f, "updateurl=%s\n", v)
