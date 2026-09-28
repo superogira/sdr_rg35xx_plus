@@ -30,6 +30,30 @@ func MercatorPx(lat, lon float64, zoom int) (float64, float64) {
 	return x, y
 }
 
+// Layer is one tile-server style. URL receives (zoom, x, y).
+type Layer struct {
+	Name string
+	URL  func(z, x, y int) string
+	Attr string
+}
+
+// Layers available on the radar (L1/R1 cycles them).
+var Layers = []Layer{
+	{"OSM", func(z, x, y int) string {
+		return fmt.Sprintf("https://tile.openstreetmap.org/%d/%d/%d.png", z, x, y)
+	}, "(c) OpenStreetMap contributors"},
+	{"Dark", func(z, x, y int) string {
+		return fmt.Sprintf("https://basemaps.cartocdn.com/dark_all/%d/%d/%d.png", z, x, y)
+	}, "(c) OpenStreetMap contributors (c) CARTO"},
+	{"Light", func(z, x, y int) string {
+		return fmt.Sprintf("https://basemaps.cartocdn.com/light_all/%d/%d/%d.png", z, x, y)
+	}, "(c) OpenStreetMap contributors (c) CARTO"},
+	{"Sat", func(z, x, y int) string {
+		// ESRI serves tiles in z/y/x order.
+		return fmt.Sprintf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/%d/%d/%d.png", z, y, x)
+	}, "Esri World Imagery"},
+}
+
 // Cache keeps tile images in memory and on disk.
 type Cache struct {
 	mu     sync.Mutex
@@ -46,9 +70,9 @@ func NewCache(dir string) *Cache {
 	}
 }
 
-// tile fetches (memory → disk → network) one tile.
-func (c *Cache) tile(zoom, x, y int) *image.RGBA {
-	key := fmt.Sprintf("%d/%d/%d", zoom, x, y)
+// tile fetches (memory → disk → network) one tile of a layer.
+func (c *Cache) tile(layer, zoom, x, y int) *image.RGBA {
+	key := fmt.Sprintf("%d/%d/%d/%d", layer, zoom, x, y)
 	c.mu.Lock()
 	img := c.mem[key]
 	c.mu.Unlock()
@@ -56,16 +80,17 @@ func (c *Cache) tile(zoom, x, y int) *image.RGBA {
 		return img
 	}
 
-	path := filepath.Join(c.dir, fmt.Sprintf("%d_%d_%d.png", zoom, x, y))
+	dir := filepath.Join(c.dir, Layers[layer].Name)
+	path := filepath.Join(dir, fmt.Sprintf("%d_%d_%d.png", zoom, x, y))
 	if b, err := os.ReadFile(path); err == nil {
 		if img = decodePNG(b); img != nil {
 			c.remember(key, img)
 			return img
 		}
 	}
-	_ = os.MkdirAll(c.dir, 0o755)
+	_ = os.MkdirAll(dir, 0o755)
 
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://tile.openstreetmap.org/%d/%d/%d.png", zoom, x, y), nil)
+	req, err := http.NewRequest("GET", Layers[layer].URL(zoom, x, y), nil)
 	if err != nil {
 		return nil
 	}
@@ -115,7 +140,7 @@ func decodePNG(b []byte) *image.RGBA {
 
 // Mosaic builds a w×h image centred on lat/lon at a zoom level,
 // pulling the covering tiles. Missing tiles leave black gaps.
-func (c *Cache) Mosaic(lat, lon float64, zoom, w, h int) *image.RGBA {
+func (c *Cache) Mosaic(layer int, lat, lon float64, zoom, w, h int) *image.RGBA {
 	rx, ry := MercatorPx(lat, lon, zoom)
 	out := image.NewRGBA(image.Rect(0, 0, w, h))
 	x0 := int(rx-float64(w)/2) / 256
@@ -124,7 +149,7 @@ func (c *Cache) Mosaic(lat, lon float64, zoom, w, h int) *image.RGBA {
 	y1 := int(ry+float64(h)/2) / 256
 	for ty := y0; ty <= y1; ty++ {
 		for tx := x0; tx <= x1; tx++ {
-			t := c.tile(zoom, tx, ty)
+			t := c.tile(layer, zoom, tx, ty)
 			if t == nil {
 				continue
 			}
@@ -134,31 +159,4 @@ func (c *Cache) Mosaic(lat, lon float64, zoom, w, h int) *image.RGBA {
 		}
 	}
 	return out
-}
-
-// HasTiles reports whether every tile of the mosaic came back (used to
-// decide map vs fallback rendering — a half-empty fetch is fine to
-// show, gaps are just dark).
-func (c *Cache) MosaicComplete(lat, lon float64, zoom, w, h int, m *image.RGBA) bool {
-	rx, ry := MercatorPx(lat, lon, zoom)
-	x0 := int(rx-float64(w)/2) / 256
-	x1 := int(rx+float64(w)/2) / 256
-	y0 := int(ry-float64(h)/2) / 256
-	y1 := int(ry+float64(h)/2) / 256
-	need := (x1 - x0 + 1) * (y1 - y0 + 1)
-	if need == 0 {
-		return false
-	}
-	// Count non-black pixels as a cheap completeness proxy: a fully
-	// fetched mosaic is never entirely black.
-	dark := 0
-	for y := 0; y < h; y += 16 {
-		for x := 0; x < w; x += 16 {
-			r, g, b, _ := m.At(x, y).RGBA()
-			if r>>8 < 6 && g>>8 < 6 && b>>8 < 6 {
-				dark++
-			}
-		}
-	}
-	return dark < (w/16)*(h/16)*3/4
 }
