@@ -2493,15 +2493,15 @@ func main() {
 					// flat east/north offsets, then back to bearing/dist.
 					en := float64(d.dist) * math.Sin(float64(d.brng)*math.Pi/180)
 					nn := float64(d.dist) * math.Cos(float64(d.brng)*math.Pi/180)
-					for k := 1; k <= 12; k++ {
-						e := en - math.Sin(float64(d.trk)*math.Pi/180)*1.5*float64(k)
-						n := nn - math.Cos(float64(d.trk)*math.Pi/180)*1.5*float64(k)
+					for k := 1; k <= 30; k++ {
+						e := en - math.Sin(float64(d.trk)*math.Pi/180)*2.5*float64(k)
+						n := nn - math.Cos(float64(d.trk)*math.Pi/180)*2.5*float64(k)
 						td := math.Hypot(e, n)
 						tb := math.Atan2(e, n) * 180 / math.Pi
 						if tb < 0 {
 							tb += 360
 						}
-						b.Trail = append(b.Trail, ui.RadarDot{BrngDeg: tb, DistKm: td, AgeSec: k * 5})
+						b.Trail = append(b.Trail, ui.RadarDot{BrngDeg: tb, DistKm: td, AgeSec: k * 10})
 					}
 					blips = append(blips, b)
 				}

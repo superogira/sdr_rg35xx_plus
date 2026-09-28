@@ -222,15 +222,15 @@ func (s *Store) globalDecode(p *Plane, latestOdd bool) {
 		lon += 360
 	}
 	p.Lat, p.Lon, p.HasPos = lat, lon, true
-	// Breadcrumbs: one dot every 5 s of flight within the one-minute
-	// window (~12 dots). Position fixes arrive ~1/s — laying a dot on
+	// Breadcrumbs: one dot every 5 s of flight within a five-minute
+	// window (~60 dots). Position fixes arrive ~1/s — laying a dot on
 	// every fix made a dense 1-px smear that was invisible on the
 	// handheld screen; spaced dots are the classic readable form.
 	now := time.Now()
 	if len(p.Trail) == 0 || now.Sub(p.Trail[len(p.Trail)-1].At) >= 5*time.Second {
 		p.Trail = append(p.Trail, TrailPt{Lat: lat, Lon: lon, AltFt: p.AltFt, At: now})
 	}
-	cut := now.Add(-60 * time.Second)
+	cut := now.Add(-5 * time.Minute)
 	drop := 0
 	for drop < len(p.Trail) && !p.Trail[drop].At.After(cut) {
 		drop++
@@ -238,8 +238,8 @@ func (s *Store) globalDecode(p *Plane, latestOdd bool) {
 	if drop > 0 {
 		p.Trail = p.Trail[drop:]
 	}
-	if len(p.Trail) > 16 {
-		p.Trail = p.Trail[len(p.Trail)-16:]
+	if len(p.Trail) > 70 {
+		p.Trail = p.Trail[len(p.Trail)-70:]
 	}
 }
 
