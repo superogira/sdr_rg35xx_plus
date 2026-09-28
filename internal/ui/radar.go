@@ -35,7 +35,7 @@ type RadarBlip struct {
 
 // DrawRadar renders the ADS-B radar. Blips beyond rangeKm clamp to the
 // outer ring at half brightness.
-func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64) {
+func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64) {
 	// Phosphor palette.
 	bg := color.RGBA{2, 10, 4, 255}
 	dim := color.RGBA{0, 110, 55, 255}
@@ -185,11 +185,17 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 	}
 	sf.DrawString(u.img, green, 10, 58, fmt.Sprintf("%d aircraft", n))
 
-	// Hint bar.
+	// Button hints: top-right (clear of the aircraft labels).
 	hint := "L1/R1 range  B close"
 	hw := sf.TextWidth(hint)
-	u.fillBlend(u.W-hw-20, u.H-24, hw+14, 20, 0, 20, 8, 180)
-	sf.DrawString(u.img, dim, u.W-hw-13, u.H-9, hint)
+	u.fillBlend(u.W-hw-14, 12, hw+10, 20, 2, 14, 7, 200)
+	sf.DrawString(u.img, bright, u.W-hw-9, 27, hint)
+
+	// CPU load: bottom-right.
+	cpu := fmt.Sprintf("CPU %.0f%%", cpuPct)
+	cw := sf.TextWidth(cpu)
+	u.fillBlend(u.W-cw-14, u.H-24, cw+10, 20, 2, 14, 7, 200)
+	sf.DrawString(u.img, bright, u.W-cw-9, u.H-9, cpu)
 }
 
 // radarLine draws a Bresenham line (radar-local helper; map.go's
