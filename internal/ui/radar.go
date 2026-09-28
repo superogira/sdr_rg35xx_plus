@@ -110,9 +110,13 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 				tc = color.RGBA{0, 200, 100, 255}
 			}
 			u.setPixel(dx, dy, tc)
-			u.setPixel(dx+1, dy, tc)
-			u.setPixel(dx, dy+1, tc)
-			u.setPixel(dx+1, dy+1, tc)
+			if rangeKm < 100 {
+				// Zoomed in: 2x2 bodies. At 100 km and beyond the 5-minute
+				// trail gets dense — single pixels keep the picture clean.
+				u.setPixel(dx+1, dy, tc)
+				u.setPixel(dx, dy+1, tc)
+				u.setPixel(dx+1, dy+1, tc)
+			}
 		}
 
 		// Velocity leader: where the aircraft will be in one minute
