@@ -2543,7 +2543,7 @@ func main() {
 				}
 			}
 			z, L := adsbRangeIdx, adsbLayerIdx
-			if adsbMosaic[L][z] == nil && !adsbFetching[L][z] {
+			if !osm.Layers[L].NoFetch && adsbMosaic[L][z] == nil && !adsbFetching[L][z] {
 				adsbFetching[L][z] = true
 				latC, lonC, zoom, layer := adsbLat, adsbLon, adsbZooms[z], L
 				go func() {
@@ -2553,7 +2553,7 @@ func main() {
 				}()
 			}
 			mapName, mapAttr := "", ""
-			if adsbMosaic[L][z] != nil {
+			if !osm.Layers[L].NoFetch && adsbMosaic[L][z] != nil {
 				mapName, mapAttr = osm.Layers[L].Name, osm.Layers[L].Attr
 			}
 			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr)
