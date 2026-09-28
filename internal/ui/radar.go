@@ -5,6 +5,7 @@ package ui
 
 import (
 	"fmt"
+	"image"
 	"image/color"
 	"math"
 	"time"
@@ -36,13 +37,21 @@ type RadarBlip struct {
 
 // DrawRadar renders the ADS-B radar. Blips beyond rangeKm clamp to the
 // outer ring at half brightness.
-func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64) {
+func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA) {
 	// Phosphor palette.
 	bg := color.RGBA{2, 10, 4, 255}
 	dim := color.RGBA{0, 110, 55, 255}
 	green := color.RGBA{0, 230, 120, 255}
 	bright := color.RGBA{140, 255, 180, 255}
-	u.fillBlend(0, 0, u.W, u.H, bg.R, bg.G, bg.B, 255)
+	if basemap != nil {
+		for y := 0; y < u.H; y++ {
+			src := y * basemap.Stride
+			dst := y * u.img.Stride
+			copy(u.img.Pix[dst:dst+u.W*4], basemap.Pix[src:src+u.W*4])
+		}
+	} else {
+		u.fillBlend(0, 0, u.W, u.H, bg.R, bg.G, bg.B, 255)
+	}
 
 	cx, cy := u.W/2, u.H/2+6
 	maxR := float64(u.H)/2 - 46
@@ -50,16 +59,31 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		maxR = float64(u.W)/2 - 16
 	}
 
-	// Range rings + crosshair.
+	// Range rings + crosshair. On a map background the rings blend at
+	// ~50% so the geography stays readable; on the dark fallback they
+	// draw solid as before.
 	for k := 1; k <= 4; k++ {
-		u.drawCircle(cx, cy, maxR*float64(k)/4, dim)
+		r := maxR * float64(k) / 4
+		for a2 := 0.0; a2 < 360; a2 += 0.5 {
+			px := cx + int(r*math.Sin(a2*math.Pi/180))
+			py := cy - int(r*math.Cos(a2*math.Pi/180))
+			if basemap != nil {
+				u.blendPx(px, py, 0, 230, 120, 120)
+			} else {
+				u.setPixel(px, py, dim)
+			}
+		}
 	}
 	u.drawCircle(cx, cy, 2, green)
+	cross := color.RGBA{0, 60, 30, 255}
+	if basemap != nil {
+		cross = color.RGBA{0, 200, 100, 90}
+	}
 	for y := 0; y < u.H; y++ {
-		u.setPixel(cx, y, color.RGBA{0, 60, 30, 255})
+		u.setPixel(cx, y, cross)
 	}
 	for x := 0; x < u.W; x++ {
-		u.setPixel(x, cy, color.RGBA{0, 60, 30, 255})
+		u.setPixel(x, cy, cross)
 	}
 
 	// Ring distance labels.
@@ -170,6 +194,10 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		if y < 60 {
 			ty = y + 14
 		}
+		if basemap != nil {
+			// Dark chip keeps the label readable over map colours.
+			u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+6, 13, 0, 0, 0, 170)
+		}
 		tf.DrawString(u.img, bright, tx, ty, label)
 	}
 
@@ -195,6 +223,11 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 	hw := sf.TextWidth(hint)
 	u.fillBlend(u.W-hw-14, 12, hw+10, 20, 2, 14, 7, 200)
 	sf.DrawString(u.img, bright, u.W-hw-9, 27, hint)
+
+	if basemap != nil {
+		// OSM attribution (tile usage policy) — bottom-left.
+		sf.DrawString(u.img, dim, 8, u.H-9, "(c) OpenStreetMap contributors")
+	}
 
 	// Clock stacked above the CPU badge: bottom-right.
 	clock := time.Now().Format("15:04:05")
@@ -244,4 +277,17 @@ func (u *UI) radarLine(x1, y1, x2, y2 int, c color.RGBA) {
 			y += sy
 		}
 	}
+}
+
+// blendPx alpha-blends a colour onto one pixel (map-overlay rings).
+func (u *UI) blendPx(x, y int, r, g, b uint8, a uint8) {
+	if x < 0 || x >= u.W || y < 0 || y >= u.H {
+		return
+	}
+	o := y*u.img.Stride + x*4
+	ia := 255 - a
+	u.img.Pix[o+0] = uint8((int(r)*int(a) + int(u.img.Pix[o+0])*int(ia)) / 255)
+	u.img.Pix[o+1] = uint8((int(g)*int(a) + int(u.img.Pix[o+1])*int(ia)) / 255)
+	u.img.Pix[o+2] = uint8((int(b)*int(a) + int(u.img.Pix[o+2])*int(ia)) / 255)
+	u.img.Pix[o+3] = 255
 }
