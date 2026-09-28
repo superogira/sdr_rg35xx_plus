@@ -2477,13 +2477,29 @@ func main() {
 				for _, d := range []struct {
 					call                      string
 					brng, dist, alt, spd, trk int
+					vr                        int
 				}{
-					{"THA341", 35, 32, 35000, 470, 75},
-					{"AIH772", 128, 71, 27000, 440, 300},
-					{"TGK209", 255, 18, 8000, 250, 20},
-					{"WMS12", 300, 180, 41000, 490, 90},
+					{"THA341", 35, 32, 35000, 470, 75, 1200},
+					{"AIH772", 128, 71, 27000, 440, 300, -800},
+					{"TGK209", 255, 18, 8000, 250, 20, 0},
+					{"WMS12", 300, 180, 41000, 490, 90, 0},
 				} {
-					blips = append(blips, ui.RadarBlip{Call: d.call, BrngDeg: float64(d.brng), DistKm: float64(d.dist), AltFt: d.alt, SpdKt: d.spd, TrackDeg: d.trk, HasPos: true})
+					b := ui.RadarBlip{Call: d.call, BrngDeg: float64(d.brng), DistKm: float64(d.dist), AltFt: d.alt, SpdKt: d.spd, TrackDeg: d.trk, VrateFpm: d.vr, HasPos: true}
+					// Fake breadcrumbs: walk backwards along the track in
+					// flat east/north offsets, then back to bearing/dist.
+					en := float64(d.dist) * math.Sin(float64(d.brng)*math.Pi/180)
+					nn := float64(d.dist) * math.Cos(float64(d.brng)*math.Pi/180)
+					for k := 1; k <= 8; k++ {
+						e := en - math.Sin(float64(d.trk)*math.Pi/180)*2.2*float64(k)
+						n := nn - math.Cos(float64(d.trk)*math.Pi/180)*2.2*float64(k)
+						td := math.Hypot(e, n)
+						tb := math.Atan2(e, n) * 180 / math.Pi
+						if tb < 0 {
+							tb += 360
+						}
+						b.Trail = append(b.Trail, ui.RadarDot{BrngDeg: tb, DistKm: td, AgeSec: k * 6})
+					}
+					blips = append(blips, b)
 				}
 			}
 			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon)

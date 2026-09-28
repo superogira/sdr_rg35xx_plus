@@ -45,6 +45,13 @@ type cprPos struct {
 	at             time.Time
 }
 
+// TrailPt is one breadcrumb of the aircraft's flown path.
+type TrailPt struct {
+	Lat, Lon float64
+	AltFt    int
+	At       time.Time
+}
+
 // Plane is one tracked aircraft.
 type Plane struct {
 	ICAO     string
@@ -56,6 +63,7 @@ type Plane struct {
 	TrackDeg int
 	VrateFpm int
 	LastSeen time.Time
+	Trail    []TrailPt // last minute of flown positions
 
 	even, odd *cprPos
 }
@@ -82,6 +90,9 @@ func (s *Store) Planes() []*Plane {
 			continue
 		}
 		cp := *p
+		if len(p.Trail) > 0 {
+			cp.Trail = append([]TrailPt(nil), p.Trail...)
+		}
 		out = append(out, &cp)
 	}
 	return out
@@ -211,6 +222,20 @@ func (s *Store) globalDecode(p *Plane, latestOdd bool) {
 		lon += 360
 	}
 	p.Lat, p.Lon, p.HasPos = lat, lon, true
+	p.Trail = append(p.Trail, TrailPt{Lat: lat, Lon: lon, AltFt: p.AltFt, At: time.Now()})
+	// Keep one minute of breadcrumbs (position updates arrive
+	// ~1/s; cap the count as a backstop).
+	cut := time.Now().Add(-60 * time.Second)
+	drop := 0
+	for drop < len(p.Trail) && !p.Trail[drop].At.After(cut) {
+		drop++
+	}
+	if drop > 0 {
+		p.Trail = p.Trail[drop:]
+	}
+	if len(p.Trail) > 90 {
+		p.Trail = p.Trail[len(p.Trail)-90:]
+	}
 }
 
 // decodeCallsign reads BDS 0,8 (TC 1-4): 8 characters, 6 bits each.

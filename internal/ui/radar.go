@@ -11,6 +11,14 @@ import (
 	"sdr35/internal/i18n"
 )
 
+// RadarDot is one breadcrumb of an aircraft's past track, positioned
+// relative to the receiver like the blip itself.
+type RadarDot struct {
+	BrngDeg float64
+	DistKm  float64
+	AgeSec  int
+}
+
 // RadarBlip is one aircraft positioned relative to the receiver.
 type RadarBlip struct {
 	Call     string
@@ -20,7 +28,9 @@ type RadarBlip struct {
 	TrackDeg int
 	AltFt    int
 	SpdKt    int
+	VrateFpm int
 	HasPos   bool
+	Trail    []RadarDot
 }
 
 // DrawRadar renders the ADS-B radar. Blips beyond rangeKm clamp to the
@@ -81,6 +91,30 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		if clamped {
 			col = dim
 		}
+		// Flown track: one-minute breadcrumbs, fading with age.
+		for _, d := range b.Trail {
+			tr := d.DistKm / rangeKm * maxR
+			if tr > maxR {
+				continue // off-scope history stays off
+			}
+			ta := d.BrngDeg * math.Pi / 180
+			dx := cx + int(tr*math.Sin(ta))
+			dy := cy - int(tr*math.Cos(ta))
+			tc := color.RGBA{0, 160, 80, 255} // recent
+			if d.AgeSec > 40 {
+				tc = color.RGBA{0, 80, 40, 255} // old
+			} else if d.AgeSec > 20 {
+				tc = color.RGBA{0, 120, 60, 255}
+			}
+			u.setPixel(dx, dy, tc)
+			if d.AgeSec <= 20 {
+				// Dots fresh enough to matter get a 2x2 body.
+				u.setPixel(dx+1, dy, tc)
+				u.setPixel(dx, dy+1, tc)
+				u.setPixel(dx+1, dy+1, tc)
+			}
+		}
+
 		// Velocity leader: where the aircraft will be in one minute
 		// (knots → km/min: kt·1.852/60), drawn before the triangle so
 		// the icon stays on top.
@@ -114,9 +148,15 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		if call == "" {
 			call = b.ICAO
 		}
-		label := fmt.Sprintf("%s %d", call, b.AltFt/100)
+		vr := ""
+		if b.VrateFpm > 300 {
+			vr = "+" // climbing
+		} else if b.VrateFpm < -300 {
+			vr = "-" // descending
+		}
+		label := fmt.Sprintf("%s %dft%s", call, b.AltFt, vr)
 		if b.SpdKt > 0 {
-			label = fmt.Sprintf("%s %d %dkt", call, b.AltFt/100, b.SpdKt)
+			label = fmt.Sprintf("%s %dft%s %dkt", call, b.AltFt, vr, b.SpdKt)
 		}
 		tx := x + 8
 		if x > u.W-120 {
