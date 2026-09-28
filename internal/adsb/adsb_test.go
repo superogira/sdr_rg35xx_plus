@@ -231,3 +231,25 @@ func TestBeastResyncMidFrame(t *testing.T) {
 		t.Fatalf("frames %d, want 1 (resync)", got)
 	}
 }
+
+func TestTrailThirtySecondSpacing(t *testing.T) {
+	s := NewStore()
+	icao := [3]byte{0x40, 0x6B, 0x90}
+	// A burst of position fixes within a few seconds: only ONE
+	// breadcrumb is laid down (the 30 s spacing rule).
+	s.Decode(encodePosFrame(icao, 13.70, 100.60, 35000, true))
+	s.Decode(encodePosFrame(icao, 13.701, 100.601, 35000, false))
+	s.Decode(encodePosFrame(icao, 13.702, 100.602, 35000, true))
+	ps := s.Planes()
+	if len(ps) != 1 {
+		t.Fatalf("planes %d", len(ps))
+	}
+	if n := len(ps[0].Trail); n != 1 {
+		t.Fatalf("trail has %d dots after a same-second burst, want 1 (30 s spacing)", n)
+	}
+	// Latest position still tracks the newest fix (CPR round-trip
+	// carries a few-metre epsilon).
+	if math.Abs(ps[0].Lat-13.702) > 0.001 {
+		t.Fatalf("position did not update: %.4f", ps[0].Lat)
+	}
+}
