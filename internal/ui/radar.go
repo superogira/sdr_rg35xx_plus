@@ -13,13 +13,14 @@ import (
 
 // RadarBlip is one aircraft positioned relative to the receiver.
 type RadarBlip struct {
-	Call    string
-	ICAO    string
-	BrngDeg float64
-	DistKm  float64
-	AltFt   int
-	SpdKt   int
-	HasPos  bool
+	Call     string
+	ICAO     string
+	BrngDeg  float64
+	DistKm   float64
+	TrackDeg int
+	AltFt    int
+	SpdKt    int
+	HasPos   bool
 }
 
 // DrawRadar renders the ADS-B radar. Blips beyond rangeKm clamp to the
@@ -80,12 +81,34 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		if clamped {
 			col = dim
 		}
-		// Blip: filled 3x3 square.
-		for dy := -1; dy <= 1; dy++ {
-			for dx := -1; dx <= 1; dx++ {
-				u.setPixel(x+dx, y+dy, col)
+		// Velocity leader: where the aircraft will be in one minute
+		// (knots → km/min: kt·1.852/60), drawn before the triangle so
+		// the icon stays on top.
+		if b.SpdKt > 0 {
+			kmPerMin := float64(b.SpdKt) * 1.852 / 60.0
+			lead := kmPerMin / rangeKm * maxR
+			if lead > maxR {
+				lead = maxR
 			}
+			rad := float64(b.TrackDeg) * math.Pi / 180
+			ex := x + int(lead*math.Sin(rad))
+			ey := y - int(lead*math.Cos(rad))
+			u.radarLine(x, y, ex, ey, dim)
 		}
+
+		// Aircraft icon: a triangle pointing along the track.
+		rad := float64(b.TrackDeg) * math.Pi / 180
+		dir := func(degOff, r float64) (int, int) {
+			a := rad + degOff*math.Pi/180
+			return x + int(r*math.Sin(a)), y - int(r*math.Cos(a))
+		}
+		nx, ny := dir(0, 6)
+		lx, ly := dir(150, 5)
+		rx, ry := dir(210, 5)
+		u.radarLine(nx, ny, lx, ly, col)
+		u.radarLine(lx, ly, rx, ry, col)
+		u.radarLine(rx, ry, nx, ny, col)
+		u.setPixel(x, y, col)
 		// Label: callsign + flight level (hundreds of feet).
 		call := b.Call
 		if call == "" {
@@ -95,15 +118,15 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		if b.SpdKt > 0 {
 			label = fmt.Sprintf("%s %d %dkt", call, b.AltFt/100, b.SpdKt)
 		}
-		lx := x + 6
+		tx := x + 8
 		if x > u.W-120 {
-			lx = x - 6 - tf.TextWidth(label)
+			tx = x - 8 - tf.TextWidth(label)
 		}
-		ly := y + 4
+		ty := y + 4
 		if y < 60 {
-			ly = y + 14
+			ty = y + 14
 		}
-		tf.DrawString(u.img, bright, lx, ly, label)
+		tf.DrawString(u.img, bright, tx, ty, label)
 	}
 
 	// Header: host + connection + aircraft count.
@@ -128,4 +151,41 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 	hw := sf.TextWidth(hint)
 	u.fillBlend(u.W-hw-20, u.H-24, hw+14, 20, 0, 20, 8, 180)
 	sf.DrawString(u.img, dim, u.W-hw-13, u.H-9, hint)
+}
+
+// radarLine draws a Bresenham line (radar-local helper; map.go's
+// drawLine was removed when the arcs went per-pixel).
+func (u *UI) radarLine(x1, y1, x2, y2 int, c color.RGBA) {
+	dx := x2 - x1
+	if dx < 0 {
+		dx = -dx
+	}
+	dy := y2 - y1
+	if dy < 0 {
+		dy = -dy
+	}
+	sx, sy := 1, 1
+	if x1 > x2 {
+		sx = -1
+	}
+	if y1 > y2 {
+		sy = -1
+	}
+	err := dx - dy
+	x, y := x1, y1
+	for {
+		u.setPixel(x, y, c)
+		if x == x2 && y == y2 {
+			return
+		}
+		e2 := 2 * err
+		if e2 > -dy {
+			err -= dy
+			x += sx
+		}
+		if e2 < dx {
+			err += dx
+			y += sy
+		}
+	}
 }

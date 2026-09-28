@@ -2465,7 +2465,7 @@ func main() {
 			planes := adsbStore.Planes()
 			blips := make([]ui.RadarBlip, 0, len(planes))
 			for _, pl := range planes {
-				b := ui.RadarBlip{Call: pl.Callsign, ICAO: pl.ICAO, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, HasPos: pl.HasPos}
+				b := ui.RadarBlip{Call: pl.Callsign, ICAO: pl.ICAO, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, TrackDeg: pl.TrackDeg, HasPos: pl.HasPos}
 				if pl.HasPos {
 					b.DistKm, b.BrngDeg = geo.DistanceBearingKm(adsbLat, adsbLon, pl.Lat, pl.Lon)
 				}
@@ -2475,15 +2475,15 @@ func main() {
 				// Dev aid: fake traffic so the radar can be eyeballed
 				// from a rendered PNG.
 				for _, d := range []struct {
-					call                 string
-					brng, dist, alt, spd int
+					call                      string
+					brng, dist, alt, spd, trk int
 				}{
-					{"THA341", 35, 32, 35000, 470},
-					{"AIH772", 128, 71, 27000, 440},
-					{"TGK209", 255, 18, 8000, 250},
-					{"WMS12", 300, 180, 41000, 490},
+					{"THA341", 35, 32, 35000, 470, 75},
+					{"AIH772", 128, 71, 27000, 440, 300},
+					{"TGK209", 255, 18, 8000, 250, 20},
+					{"WMS12", 300, 180, 41000, 490, 90},
 				} {
-					blips = append(blips, ui.RadarBlip{Call: d.call, BrngDeg: float64(d.brng), DistKm: float64(d.dist), AltFt: d.alt, SpdKt: d.spd, HasPos: true})
+					blips = append(blips, ui.RadarBlip{Call: d.call, BrngDeg: float64(d.brng), DistKm: float64(d.dist), AltFt: d.alt, SpdKt: d.spd, TrackDeg: d.trk, HasPos: true})
 				}
 			}
 			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon)
