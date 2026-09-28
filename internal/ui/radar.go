@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"time"
 
 	"sdr35/internal/i18n"
 )
@@ -190,6 +191,12 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 	hw := sf.TextWidth(hint)
 	u.fillBlend(u.W-hw-14, 12, hw+10, 20, 2, 14, 7, 200)
 	sf.DrawString(u.img, bright, u.W-hw-9, 27, hint)
+
+	// Clock stacked above the CPU badge: bottom-right.
+	clock := time.Now().Format("15:04:05")
+	kw := sf.TextWidth(clock)
+	u.fillBlend(u.W-kw-14, u.H-46, kw+10, 20, 2, 14, 7, 200)
+	sf.DrawString(u.img, bright, u.W-kw-9, u.H-31, clock)
 
 	// CPU load: bottom-right.
 	cpu := fmt.Sprintf("CPU %.0f%%", cpuPct)

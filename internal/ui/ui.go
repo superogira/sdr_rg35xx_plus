@@ -12,6 +12,7 @@ import (
 
 	"sdr35/internal/dsp"
 	"sdr35/internal/i18n"
+	"time"
 )
 
 // SavePNG writes a rendered frame to disk (the menu screenshot action).
@@ -1188,6 +1189,14 @@ func (u *UI) DrawSysMon(lines []string) {
 // waterfall: CPU %, MEM % and battery level.
 func (u *UI) DrawSysBadge(cpu, mem float64, batt int) {
 	tf := Face(11, false)
+	// Clock chip stacked directly above the resource badge.
+	clock := time.Now().Format("15:04:05")
+	cw := tf.TextWidth(clock) + 12
+	cx := u.W - cw - 6
+	cy := u.WaterfallRows - 16 - 4 - 18
+	u.fillBlend(cx, cy, cw, 16, 0, 0, 0, 150)
+	tf.DrawString(u.img, color.RGBA{200, 230, 255, 255}, cx+6, cy+12, clock)
+
 	txt := fmt.Sprintf("CPU%.0f  MEM%.0f  BAT%d%%", cpu, mem, batt)
 	w := tf.TextWidth(txt) + 12
 	h := 16
