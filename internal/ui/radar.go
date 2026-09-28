@@ -37,7 +37,7 @@ type RadarBlip struct {
 
 // DrawRadar renders the ADS-B radar. Blips beyond rangeKm clamp to the
 // outer ring at half brightness.
-func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA) {
+func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string) {
 	// Phosphor palette.
 	bg := color.RGBA{2, 10, 4, 255}
 	dim := color.RGBA{0, 110, 55, 255}
@@ -217,16 +217,19 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		}
 	}
 	sf.DrawString(u.img, green, 10, 58, fmt.Sprintf("%d aircraft", n))
+	if mapName != "" {
+		sf.DrawString(u.img, green, 10, 74, "MAP "+mapName)
+	}
 
 	// Button hints: top-right (clear of the aircraft labels).
-	hint := "L1/R1 range  B close"
+	hint := "L1/R1 map  L2/R2 range  B close"
 	hw := sf.TextWidth(hint)
 	u.fillBlend(u.W-hw-14, 12, hw+10, 20, 2, 14, 7, 200)
 	sf.DrawString(u.img, bright, u.W-hw-9, 27, hint)
 
-	if basemap != nil {
-		// OSM attribution (tile usage policy) — bottom-left.
-		sf.DrawString(u.img, dim, 8, u.H-9, "(c) OpenStreetMap contributors")
+	if basemap != nil && mapAttr != "" {
+		// Attribution per layer (tile usage policy) — bottom-left.
+		sf.DrawString(u.img, dim, 8, u.H-9, mapAttr)
 	}
 
 	// Clock stacked above the CPU badge: bottom-right.

@@ -559,12 +559,27 @@ func main() {
 		}
 	}
 	adsbConnected := false
-	// OSM basemap: one mosaic per range zoom, fetched in the
+	// OSM basemap: one mosaic per (layer, range zoom), fetched in the
 	// background and cached in memory + on the SD card.
+	adsbLayerIdx := 0
+	if v, ok := cfg["adsblayer"]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 && n < len(osm.Layers) {
+			adsbLayerIdx = n
+		}
+	}
+	if v := os.Getenv("SDR_ADSB_LAYER"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 && n < len(osm.Layers) {
+			adsbLayerIdx = n
+		}
+	}
 	adsbZooms := []int{11, 10, 9, 8} // for ranges 50/100/200/400 km
 	osmCache := osm.NewCache(filepath.Join(filepath.Dir(mustExe()), "osmcache"))
-	adsbMosaic := [4]*image.RGBA{}
-	adsbFetching := [4]bool{}
+	adsbMosaic := make([][]*image.RGBA, len(osm.Layers))
+	adsbFetching := make([][]bool, len(osm.Layers))
+	for i := range adsbMosaic {
+		adsbMosaic[i] = make([]*image.RGBA, len(adsbRanges))
+		adsbFetching[i] = make([]bool, len(adsbRanges))
+	}
 
 	go r.Run(ctx)
 	// ADS-B: Beast TCP feed → decode → store, independent of the radio.
@@ -1449,11 +1464,18 @@ func main() {
 				uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuMap)
 			}
 		case uiADSB:
-			// Radar: L1/R1 cycle the range rings, B/Start back.
+			// Radar: L1/R1 cycle the map layer, L2/R2 the range,
+			// B/Start back.
 			switch b {
 			case input.L1:
-				adsbRangeIdx = (adsbRangeIdx + len(adsbRanges) - 1) % len(adsbRanges)
+				adsbLayerIdx = (adsbLayerIdx + len(osm.Layers) - 1) % len(osm.Layers)
+				cfg["adsblayer"] = fmt.Sprintf("%d", adsbLayerIdx)
 			case input.R1:
+				adsbLayerIdx = (adsbLayerIdx + 1) % len(osm.Layers)
+				cfg["adsblayer"] = fmt.Sprintf("%d", adsbLayerIdx)
+			case input.L2:
+				adsbRangeIdx = (adsbRangeIdx + len(adsbRanges) - 1) % len(adsbRanges)
+			case input.R2:
 				adsbRangeIdx = (adsbRangeIdx + 1) % len(adsbRanges)
 			case input.B, input.Start, input.Select:
 				uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuADSBRadar)
@@ -2520,17 +2542,21 @@ func main() {
 					blips = append(blips, b)
 				}
 			}
-			z := adsbRangeIdx
-			if adsbMosaic[z] == nil && !adsbFetching[z] {
-				adsbFetching[z] = true
-				latC, lonC, zoom := adsbLat, adsbLon, adsbZooms[z]
+			z, L := adsbRangeIdx, adsbLayerIdx
+			if adsbMosaic[L][z] == nil && !adsbFetching[L][z] {
+				adsbFetching[L][z] = true
+				latC, lonC, zoom, layer := adsbLat, adsbLon, adsbZooms[z], L
 				go func() {
-					m := osmCache.Mosaic(latC, lonC, zoom, 640, 480)
-					adsbMosaic[z] = m
-					adsbFetching[z] = false
+					m := osmCache.Mosaic(layer, latC, lonC, zoom, 640, 480)
+					adsbMosaic[layer][z] = m
+					adsbFetching[layer][z] = false
 				}()
 			}
-			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[adsbRangeIdx])
+			mapName, mapAttr := "", ""
+			if adsbMosaic[L][z] != nil {
+				mapName, mapAttr = osm.Layers[L].Name, osm.Layers[L].Attr
+			}
+			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
@@ -2696,6 +2722,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["adsblon"]; ok {
 		fmt.Fprintf(f, "adsblon=%s\n", v)
+	}
+	if v, ok := cfg["adsblayer"]; ok {
+		fmt.Fprintf(f, "adsblayer=%s\n", v)
 	}
 	if v, ok := cfg["updateurl"]; ok && v != "" {
 		fmt.Fprintf(f, "updateurl=%s\n", v)
