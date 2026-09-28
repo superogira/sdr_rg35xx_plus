@@ -2489,20 +2489,20 @@ func main() {
 					// flat east/north offsets, then back to bearing/dist.
 					en := float64(d.dist) * math.Sin(float64(d.brng)*math.Pi/180)
 					nn := float64(d.dist) * math.Cos(float64(d.brng)*math.Pi/180)
-					for k := 1; k <= 2; k++ {
-						e := en - math.Sin(float64(d.trk)*math.Pi/180)*9.0*float64(k)
-						n := nn - math.Cos(float64(d.trk)*math.Pi/180)*9.0*float64(k)
+					for k := 1; k <= 12; k++ {
+						e := en - math.Sin(float64(d.trk)*math.Pi/180)*1.5*float64(k)
+						n := nn - math.Cos(float64(d.trk)*math.Pi/180)*1.5*float64(k)
 						td := math.Hypot(e, n)
 						tb := math.Atan2(e, n) * 180 / math.Pi
 						if tb < 0 {
 							tb += 360
 						}
-						b.Trail = append(b.Trail, ui.RadarDot{BrngDeg: tb, DistKm: td, AgeSec: k * 30})
+						b.Trail = append(b.Trail, ui.RadarDot{BrngDeg: tb, DistKm: td, AgeSec: k * 5})
 					}
 					blips = append(blips, b)
 				}
 			}
-			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon)
+			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon, cpu)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
