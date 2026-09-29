@@ -870,6 +870,8 @@ func main() {
 		uiFreqEdit
 		uiHostEdit
 		uiHostList
+		uiBeastList
+		uiAISList
 		uiFT8Log
 		uiSysMon
 		uiLogs
@@ -1022,6 +1024,10 @@ func main() {
 			return i18n.T("m_rig")
 		case "bm":
 			return i18n.T("m_bm")
+		case "beast":
+			return i18n.T("beast_title")
+		case "ais":
+			return i18n.T("ais_title")
 		}
 		return i18n.T("m_host") + ":port"
 	}
@@ -1058,6 +1064,45 @@ func main() {
 	hostEditIdx := -1
 	saveHosts := func() {
 		cfg["hosts"] = strings.Join(hostList, ",")
+	}
+	// Beast/AIS server pickers share the host-list mechanics; each list is
+	// seeded with the live value so it can be edited or re-selected.
+	loadHostList := func(key, cur string) []string {
+		var list []string
+		if v, ok := cfg[key]; ok && v != "" {
+			for _, h := range strings.Split(v, ",") {
+				if h = strings.TrimSpace(h); h != "" {
+					list = append(list, h)
+				}
+			}
+		}
+		found := false
+		for _, h := range list {
+			if h == cur {
+				found = true
+			}
+		}
+		if !found {
+			list = append([]string{cur}, list...)
+		}
+		return list
+	}
+	beastList := loadHostList("beasthosts", adsbHost)
+	aisList := loadHostList("aishosts", aisHost)
+	beastSel, aisSel := 0, 0
+	saveBeastHosts := func() { cfg["beasthosts"] = strings.Join(beastList, ",") }
+	saveAISHosts := func() { cfg["aishosts"] = strings.Join(aisList, ",") }
+	listTargetOf := func(mode int) string {
+		if mode == uiAISList {
+			return "ais"
+		}
+		return "beast"
+	}
+	menuBeastRow := func(mode int) int {
+		if mode == uiAISList {
+			return menuAISServer
+		}
+		return menuADSBHost
 	}
 
 	// Long-press exit: MENU or START held for 3s quits; a short MENU tap
@@ -1278,9 +1323,8 @@ func main() {
 			rttyScroll = 0
 			uiMode = uiRTTY
 		case menuADSBHost:
-			hostText, kbTarget = adsbHost, "adsbhost"
-			hostKbR, hostKbC = 0, 0
-			uiMode = uiHostEdit
+			beastSel = 0
+			uiMode = uiBeastList
 		case menuADSBLat:
 			hostText, kbTarget = fmt.Sprintf("%.5f", adsbLat), "adsblat"
 			hostKbR, hostKbC = 0, 0
@@ -1292,9 +1336,8 @@ func main() {
 		case menuADSBRadar:
 			uiMode = uiADSB
 		case menuAISServer:
-			hostText, kbTarget = aisHost, "aishost"
-			hostKbR, hostKbC = 0, 0
-			uiMode = uiHostEdit
+			aisSel = 0
+			uiMode = uiAISList
 		case menuSysMon:
 			uiMode = uiSysMon
 		case menuLogs:
@@ -1657,6 +1700,64 @@ func main() {
 			case input.B, input.Start:
 				uiMode = uiMenu
 			}
+		case uiBeastList, uiAISList:
+			// Same rows/select/edit/delete mechanics as the radio host
+			// list, aimed at the Beast or AIS target.
+			list := &beastList
+			sel := &beastSel
+			if uiMode == uiAISList {
+				list, sel = &aisList, &aisSel
+			}
+			rows := len(*list) + 1
+			switch b {
+			case input.Up:
+				*sel = (*sel + rows - 1) % rows
+			case input.Down:
+				*sel = (*sel + 1) % rows
+			case input.A:
+				if *sel == len(*list) {
+					hostText, hostEditIdx, kbTarget = "", -1, listTargetOf(uiMode)
+					hostKbR, hostKbC = 0, 0
+					uiMode = uiHostEdit
+				} else {
+					h := (*list)[*sel]
+					if uiMode == uiAISList {
+						aisHost = h
+						cfg["aishost"] = h
+						aisClient.SetHost(h)
+						saveAISHosts()
+					} else {
+						adsbHost = h
+						cfg["adsbhost"] = h
+						adsbClient.SetHost(h)
+						saveBeastHosts()
+					}
+					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuBeastRow(uiMode))
+				}
+			case input.X:
+				if *sel < len(*list) {
+					hostText, hostEditIdx, kbTarget = (*list)[*sel], *sel, listTargetOf(uiMode)
+					hostKbR, hostKbC = 0, 0
+					uiMode = uiHostEdit
+				}
+			case input.Y:
+				if *sel < len(*list) {
+					*list = append((*list)[:*sel], (*list)[*sel+1:]...)
+					if len(*list) == 0 {
+						*list = []string{adsbHost}
+					}
+					if *sel >= len(*list) {
+						*sel = len(*list)
+					}
+					if uiMode == uiBeastList {
+						saveBeastHosts()
+					} else {
+						saveAISHosts()
+					}
+				}
+			case input.B, input.Start:
+				uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuBeastRow(uiMode))
+			}
 		case uiHostEdit:
 			switch b {
 			case input.Up:
@@ -1724,12 +1825,23 @@ func main() {
 					}
 					hostText = ""
 					uiMode = uiBmList
-				case "adsbhost":
-					adsbHost = hostText
-					cfg["adsbhost"] = adsbHost
-					adsbClient.SetHost(adsbHost)
+				case "beast":
+					if hostText != "" {
+						if hostEditIdx >= 0 && hostEditIdx < len(beastList) {
+							beastList[hostEditIdx] = hostText
+						} else {
+							beastList = append(beastList, hostText)
+							hostEditIdx = len(beastList) - 1
+						}
+						saveBeastHosts()
+						adsbHost = hostText
+						cfg["adsbhost"] = adsbHost
+						adsbClient.SetHost(adsbHost)
+						beastSel = hostEditIdx
+					}
+					hostEditIdx = -1
 					hostText = ""
-					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuADSBHost)
+					uiMode = uiBeastList
 				case "adsblat":
 					if v, err := strconv.ParseFloat(hostText, 64); err == nil {
 						adsbLat = v
@@ -1744,12 +1856,23 @@ func main() {
 					}
 					hostText = ""
 					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuADSBLon)
-				case "aishost":
-					aisHost = hostText
-					cfg["aishost"] = aisHost
-					aisClient.SetHost(aisHost)
+				case "ais":
+					if hostText != "" {
+						if hostEditIdx >= 0 && hostEditIdx < len(aisList) {
+							aisList[hostEditIdx] = hostText
+						} else {
+							aisList = append(aisList, hostText)
+							hostEditIdx = len(aisList) - 1
+						}
+						saveAISHosts()
+						aisHost = hostText
+						cfg["aishost"] = aisHost
+						aisClient.SetHost(aisHost)
+						aisSel = hostEditIdx
+					}
+					hostEditIdx = -1
 					hostText = ""
-					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuAISServer)
+					uiMode = uiAISList
 
 				default:
 					if hostText != "" {
@@ -1773,6 +1896,12 @@ func main() {
 				hostText = ""
 				if kbTarget == "host" {
 					uiMode = uiHostList
+				} else if kbTarget == "beast" {
+					hostEditIdx = -1
+					uiMode = uiBeastList
+				} else if kbTarget == "ais" {
+					hostEditIdx = -1
+					uiMode = uiAISList
 				} else {
 					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuFT8)
 				}
@@ -2343,7 +2472,23 @@ func main() {
 					active = i
 				}
 			}
-			u.DrawHostList(hostList, hostSel, active)
+			u.DrawHostList(hostList, hostSel, active, i18n.T("host_title"))
+		} else if uiMode == uiBeastList {
+			active := -1
+			for i, h := range beastList {
+				if h == adsbHost {
+					active = i
+				}
+			}
+			u.DrawHostList(beastList, beastSel, active, i18n.T("beast_title"))
+		} else if uiMode == uiAISList {
+			active := -1
+			for i, h := range aisList {
+				if h == aisHost {
+					active = i
+				}
+			}
+			u.DrawHostList(aisList, aisSel, active, i18n.T("ais_title"))
 		} else if uiMode == uiBmList {
 			labels := make([]string, len(bookmarks))
 			active := -1
@@ -2865,6 +3010,12 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["hosts"]; ok && v != "" {
 		fmt.Fprintf(f, "hosts=%s\n", v)
+	}
+	if v, ok := cfg["beasthosts"]; ok && v != "" {
+		fmt.Fprintf(f, "beasthosts=%s\n", v)
+	}
+	if v, ok := cfg["aishosts"]; ok && v != "" {
+		fmt.Fprintf(f, "aishosts=%s\n", v)
 	}
 	fmt.Fprintf(f, "call=%s\ngrid=%s\npsk=%s\nantenna=%s\nrig=%s\nwfmin=%g\nwfmax=%g\n", myCall, myGrid, map[bool]string{true: "on", false: "off"}[pskOn], myAnt, myRig, wfMin, wfMax)
 	if v, ok := cfg["bm"]; ok {
