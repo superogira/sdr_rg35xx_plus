@@ -40,7 +40,7 @@ func TestSNRVisible(t *testing.T) {
 			full = append(full, FT8Entry{Time: time.Now().Format("15:04:05"), SNRDb: float64(12 - i/2), Text: "E20ZKT BA7SAY OL53"})
 		}
 		fr2 := u2.Frame(FrameStats{FreqHz: 21074000, Mode: "USB"})
-		u2.DrawFT8LogFull(full, 0)
+		u2.DrawFT8LogFull(full, 0, "")
 		f2, _ := os.Create("snrfull.png")
 		defer f2.Close()
 		png.Encode(f2, fr2)

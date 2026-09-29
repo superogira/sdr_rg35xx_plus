@@ -45,8 +45,8 @@ type FT8Entry struct {
 	SNRDb  float64
 	FreqHz float64 // audio offset from the listening frequency
 	Text   string
-	Anno   string        // country/distance annotation (drawn after the flag)
-	FlagC  [3]color.RGBA // 3 stripe colors (zero = no flag)
+	Anno   string // country/distance annotation
+	FlagCC string // ISO 3166-1 alpha-2 code → flag icon before Anno
 }
 
 // DrawFT8Log renders a semi-transparent log of the latest FT8 decodes
@@ -86,7 +86,7 @@ func (u *UI) DrawFT8Log(entries []FT8Entry) {
 // DrawFT8LogFull renders the large, scrollable FT8 history window over
 // the waterfall. scroll is how far back from the newest entry the
 // bottom of the view sits (0 = latest at the bottom).
-func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int) {
+func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int, flagDir string) {
 	lh := 16
 	x, y := 12, 8
 	w := u.W - 24
@@ -144,7 +144,14 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int) {
 		lineF.DrawString(u.img, ft8TextColor(e.Text), x+210, yy, e.Text)
 		if e.Anno != "" {
 			aw := lineF.TextWidth(e.Anno)
-			lineF.DrawString(u.img, color.RGBA{140, 170, 140, 255}, x+w-aw-10, yy, e.Anno)
+			// Flag icon before the annotation, sized to the line.
+			fx := x + w - aw - 10
+			if flag := GetFlag(e.FlagCC, flagDir); flag != nil {
+				fb := flag.Bounds()
+				drawImage(u.img, flag, fx-fb.Dx()-3, yy-9)
+				fx -= fb.Dx() + 3
+			}
+			lineF.DrawString(u.img, color.RGBA{140, 170, 140, 255}, fx, yy, e.Anno)
 		}
 	}
 	hintF.DrawString(u.img, gray, x+10, y+h-12, i18n.T("ft8_scroll"))
