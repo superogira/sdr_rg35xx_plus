@@ -26,3 +26,28 @@ func TestPageItemsCoverEveryPage(t *testing.T) {
 		}
 	}
 }
+
+// TestRootRowsOpenMatchingPages: root row i must open page i+1, so the
+// ROW LISTS must be in the same order as the page consts. A drift here
+// swaps whole subpages (Audio↔FT8 was a real bug).
+func TestRootRowsOpenMatchingPages(t *testing.T) {
+	want := [][]int{
+		{menuHost, menuSample, menuFreq, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
+		{menuAF, menuNR, menuHP, menuLP},
+		{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
+		{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuADSBRadar},
+		{menuBM},
+		{menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
+	}
+	for i, w := range want {
+		got := pageItems[pageRoot+1+i]
+		if len(got) != len(w) {
+			t.Fatalf("page %d has %d rows, want %d", pageRoot+1+i, len(got), len(w))
+		}
+		for j := range w {
+			if got[j] != w[j] {
+				t.Fatalf("page %d row %d = %d, want %d (subpages swapped?)", pageRoot+1+i, j, got[j], w[j])
+			}
+		}
+	}
+}
