@@ -393,6 +393,7 @@ const (
 	menuADSBLon
 	menuADSBRadar
 	menuAISServer
+	menuExit
 )
 
 // pageItems is package-level so a test can pin it: one row list per
@@ -406,7 +407,7 @@ var pageItems = [][]int{
 	{menuAF, menuNR, menuHP, menuLP},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuADSBRadar},
 	{menuBM},
-	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
+	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate, menuExit},
 }
 
 // The flat 16-row menu outgrew the screen, so it is now subpages
@@ -738,6 +739,9 @@ func main() {
 			stepHz = 12_500
 		}
 	}
+	// Menu Exit: closing this unblocks the render loop's poll below,
+	// which runs the same quit path as the hold-to-exit combo.
+	exitMenu := make(chan struct{})
 	quit := func() {
 		langPref := i18n.Lang()
 		agcPref := "on"
@@ -845,6 +849,8 @@ func main() {
 		uiMode, menuPage = uiMenu, pageAudio
 	case "adsbpage":
 		uiMode, menuPage = uiMenu, pageADSB
+	case "syspage":
+		uiMode, menuPage = uiMenu, pageSys
 	case "rtty":
 		uiMode = uiRTTY
 	case "adsb":
@@ -1226,6 +1232,8 @@ func main() {
 			hostText, kbTarget = aisHost, "aishost"
 			hostKbR, hostKbC = 0, 0
 			uiMode = uiHostEdit
+		case menuExit:
+			close(exitMenu)
 		case menuSysMon:
 			uiMode = uiSysMon
 		case menuLogs:
@@ -1767,6 +1775,12 @@ func main() {
 	lastBeat := time.Now()
 
 	for {
+		select {
+		case <-exitMenu:
+			quit()
+			return
+		default:
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -2238,7 +2252,8 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_logs"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 					ui.MenuItem{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_update"), Value: i18n.T("press_a")})
+					ui.MenuItem{Label: i18n.T("m_update"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_exit"), Value: i18n.T("press_a")})
 			}
 			u.DrawMenu(items, menuSel, fmt.Sprintf(i18n.T("menu_ver"), buildStamp, strings.ReplaceAll(buildTime, "_", " ")))
 		} else if uiMode == uiFreqEdit {
