@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"sdr35/internal/adsb"
+	"sdr35/internal/ais"
 	"sdr35/internal/audio"
 	"sdr35/internal/backlight"
 	"sdr35/internal/dsp"
@@ -391,6 +392,7 @@ const (
 	menuADSBLat
 	menuADSBLon
 	menuADSBRadar
+	menuAISServer
 )
 
 // pageItems is package-level so a test can pin it: one row list per
@@ -404,7 +406,7 @@ var pageItems = [][]int{
 	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 	{menuBM},
 	{menuAF, menuNR, menuHP, menuLP},
-	{menuADSBHost, menuADSBLat, menuADSBLon, menuADSBRadar},
+	{menuADSBHost, menuADSBLat, menuADSBLon, menuADSBRadar, menuAISServer},
 }
 
 // The flat 16-row menu outgrew the screen, so it is now three
@@ -580,6 +582,12 @@ func main() {
 		adsbMosaic[i] = make([]*image.RGBA, len(adsbRanges))
 		adsbFetching[i] = make([]bool, len(adsbRanges))
 	}
+	// AIS: NMEA ship feed from aiscatcher.
+	aisHost := "192.168.2.151:29420"
+	if v, ok := cfg["aishost"]; ok && v != "" {
+		aisHost = v
+	}
+	aisConnected := false
 
 	go r.Run(ctx)
 	// ADS-B: Beast TCP feed → decode → store, independent of the radio.
@@ -589,6 +597,10 @@ func main() {
 	go adsbClient.Run(ctx, func(msg []byte, mlat uint64, sig int) {
 		adsbStore.Decode(msg)
 	})
+	aisStore := ais.NewStore()
+	aisClient := ais.NewClient(aisHost)
+	aisClient.Connected = func(c bool) { aisConnected = c }
+	go aisClient.Run(ctx, aisStore)
 	defer func() {
 		if out != nil {
 			out.Close()
@@ -1206,6 +1218,10 @@ func main() {
 			uiMode = uiHostEdit
 		case menuADSBRadar:
 			uiMode = uiADSB
+		case menuAISServer:
+			hostText, kbTarget = aisHost, "aishost"
+			hostKbR, hostKbC = 0, 0
+			uiMode = uiHostEdit
 		case menuSysMon:
 			uiMode = uiSysMon
 		case menuLogs:
@@ -1652,6 +1668,12 @@ func main() {
 					}
 					hostText = ""
 					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuADSBLon)
+				case "aishost":
+					aisHost = hostText
+					cfg["aishost"] = aisHost
+					aisClient.SetHost(aisHost)
+					hostText = ""
+					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuAISServer)
 
 				default:
 					if hostText != "" {
@@ -2202,7 +2224,8 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_adsbhost"), Value: adsbHost},
 					ui.MenuItem{Label: i18n.T("m_adsblat"), Value: fmt.Sprintf("%.5f", adsbLat)},
 					ui.MenuItem{Label: i18n.T("m_adsblon"), Value: fmt.Sprintf("%.5f", adsbLon)},
-					ui.MenuItem{Label: i18n.T("m_adsbradar"), Value: i18n.T("press_a")})
+					ui.MenuItem{Label: i18n.T("m_adsbradar"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_aishost"), Value: aisHost})
 			case pageSys:
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
@@ -2511,6 +2534,17 @@ func main() {
 				}
 				blips = append(blips, b)
 			}
+			for _, sh := range aisStore.Ships() {
+				if !sh.HasPos {
+					continue
+				}
+				d, br := geo.DistanceBearingKm(adsbLat, adsbLon, sh.Lat, sh.Lon)
+				name := sh.Name
+				if name == "" {
+					name = sh.MMSI
+				}
+				blips = append(blips, ui.RadarBlip{Vessel: true, Call: name, ICAO: sh.MMSI, BrngDeg: br, DistKm: d, SogKt: sh.SogKt, HasPos: true})
+			}
 			if os.Getenv("SDR_ADSB_DEMO") != "" {
 				// Dev aid: fake traffic so the radar can be eyeballed
 				// from a rendered PNG.
@@ -2542,6 +2576,7 @@ func main() {
 					blips = append(blips, b)
 				}
 			}
+			_ = aisConnected // TODO: status line
 			z, L := adsbRangeIdx, adsbLayerIdx
 			if !osm.Layers[L].NoFetch && adsbMosaic[L][z] == nil && !adsbFetching[L][z] {
 				adsbFetching[L][z] = true

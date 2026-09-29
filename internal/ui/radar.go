@@ -21,8 +21,10 @@ type RadarDot struct {
 	AgeSec  int
 }
 
-// RadarBlip is one aircraft positioned relative to the receiver.
+// RadarBlip is one tracked object (aircraft or vessel) positioned
+// relative to the receiver.
 type RadarBlip struct {
+	Vessel   bool // true = ship (AIS), false = aircraft (ADS-B)
 	Call     string
 	ICAO     string
 	BrngDeg  float64
@@ -30,6 +32,7 @@ type RadarBlip struct {
 	TrackDeg int
 	AltFt    int
 	SpdKt    int
+	SogKt    float64
 	VrateFpm int
 	HasPos   bool
 	Trail    []RadarDot
@@ -143,6 +146,36 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			}
 		}
 
+		if b.Vessel {
+			// Ship: cyan filled square + name/MMSI + SOG. No leader —
+			// ships are slow and trails come later if asked for.
+			for dy := -2; dy <= 2; dy++ {
+				for dx := -2; dx <= 2; dx++ {
+					u.setPixel(x+dx, y+dy, color.RGBA{0, 220, 220, 255})
+				}
+			}
+			call := b.Call
+			if call == "" {
+				call = b.ICAO
+			}
+			label := call
+			if b.SogKt > 0.5 {
+				label = fmt.Sprintf("%s %.1fkt", call, b.SogKt)
+			}
+			tx := x + 6
+			if x > u.W-120 {
+				tx = x - 6 - tf.TextWidth(label)
+			}
+			ty := y + 4
+			if y < 60 {
+				ty = y + 14
+			}
+			if basemap != nil {
+				u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+6, 13, 0, 0, 0, 170)
+			}
+			tf.DrawString(u.img, color.RGBA{180, 255, 255, 255}, tx, ty, label)
+			continue
+		}
 		// Velocity leader: where the aircraft will be in one minute
 		// (knots → km/min: kt·1.852/60), drawn before the triangle so
 		// the icon stays on top.
