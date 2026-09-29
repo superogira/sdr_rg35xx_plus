@@ -16,7 +16,7 @@ func buildType5(mmsi uint32, name string) []string {
 func TestType5RoundTrip(t *testing.T) {
 	s := NewStore()
 	for _, ln := range buildType5(567001234, "MV CHAO PHRAYA") {
-		s.Decode(ln)
+		s.decodeT(ln)
 	}
 	for _, sh := range s.Ships() {
 		if sh.MMSI != "567001234" || sh.Name != "MV CHAO PHRAYA" {

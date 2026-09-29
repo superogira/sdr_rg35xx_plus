@@ -121,6 +121,15 @@ func (s *Store) Decode(line string) {
 	}
 	body := strings.TrimLeft(line, "!$")
 	if x := strings.IndexByte(body, '*'); x >= 0 {
+		// Corrupted sentences would otherwise spawn bogus MMSIs.
+		var sum byte
+		for k := 0; k < x; k++ {
+			sum ^= body[k]
+		}
+		var want byte
+		if _, err := fmt.Sscanf(body[x+1:], "%02X", &want); err != nil || want != sum {
+			return
+		}
 		body = body[:x]
 	}
 	f := strings.Split(body, ",")
@@ -171,6 +180,14 @@ func (s *Store) Decode(line string) {
 	typ := u(p, 0, 6)
 	mmsi := fmt.Sprintf("%09d", u(p, 8, 30))
 
+	switch typ {
+	case 1, 2, 3, 5, 6, 18, 21, 24:
+	default:
+		return
+	}
+	if u(p, 8, 30) == 0 {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sh := s.ship(mmsi)
