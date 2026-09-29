@@ -401,13 +401,13 @@ const (
 // root page at four rows while a fifth page existed — the Audio row
 // was unreachable from the d-pad.
 var pageItems = [][]int{
-	{0, 0, 0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
+	{0, 0, 0, 0, 0, 0, menuExit}, // rows 0-5 open subpages by position; the last row is Exit
 	{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
 	{menuAF, menuNR, menuHP, menuLP},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuADSBRadar},
 	{menuBM},
-	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate, menuExit},
+	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 }
 
 // The flat 16-row menu outgrew the screen, so it is now subpages
@@ -600,6 +600,23 @@ func main() {
 	go adsbClient.Run(ctx, func(msg []byte, mlat uint64, sig int) {
 		adsbStore.Decode(msg)
 	})
+	// Persist the current ADS-B/AIS values even when untouched this
+	// session — the ini then always carries the live configuration.
+	if cfg["adsbhost"] == "" {
+		cfg["adsbhost"] = adsbHost
+	}
+	if cfg["adsblat"] == "" {
+		cfg["adsblat"] = fmt.Sprintf("%.5f", adsbLat)
+	}
+	if cfg["adsblon"] == "" {
+		cfg["adsblon"] = fmt.Sprintf("%.5f", adsbLon)
+	}
+	if cfg["adsblayer"] == "" {
+		cfg["adsblayer"] = fmt.Sprintf("%d", adsbLayerIdx)
+	}
+	if cfg["aishost"] == "" {
+		cfg["aishost"] = aisHost
+	}
 	aisStore := ais.NewStore()
 	aisClient := ais.NewClient(aisHost)
 	aisClient.Connected = func(c bool) { aisConnected = c }
@@ -1168,6 +1185,12 @@ func main() {
 		}
 	}
 	activateItem := func(idx int) {
+		if menuPage == pageRoot && idx == menuExit {
+			// The root Exit row quits — not a subpage, so it must
+			// be handled BEFORE the positional page dispatch.
+			close(exitMenu)
+			return
+		}
 		if menuPage == pageRoot {
 			// Root rows open subpages by position.
 			menuPage = menuSel + 1
@@ -1232,8 +1255,6 @@ func main() {
 			hostText, kbTarget = aisHost, "aishost"
 			hostKbR, hostKbC = 0, 0
 			uiMode = uiHostEdit
-		case menuExit:
-			close(exitMenu)
 		case menuSysMon:
 			uiMode = uiSysMon
 		case menuLogs:
@@ -2171,7 +2192,8 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_adsbpage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"},
-					ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"})
+					ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_exit"), Value: i18n.T("press_a")})
 			case pageRx:
 				freqDec := 5
 				switch r.Mode().Name {
@@ -2252,8 +2274,7 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_logs"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 					ui.MenuItem{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_update"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_exit"), Value: i18n.T("press_a")})
+					ui.MenuItem{Label: i18n.T("m_update"), Value: i18n.T("press_a")})
 			}
 			u.DrawMenu(items, menuSel, fmt.Sprintf(i18n.T("menu_ver"), buildStamp, strings.ReplaceAll(buildTime, "_", " ")))
 		} else if uiMode == uiFreqEdit {
@@ -2779,6 +2800,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["adsblayer"]; ok {
 		fmt.Fprintf(f, "adsblayer=%s\n", v)
+	}
+	if v, ok := cfg["aishost"]; ok {
+		fmt.Fprintf(f, "aishost=%s\n", v)
 	}
 	if v, ok := cfg["updateurl"]; ok && v != "" {
 		fmt.Fprintf(f, "updateurl=%s\n", v)
