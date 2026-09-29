@@ -5,6 +5,7 @@ package ais
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"net"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ type Ship struct {
 	SogKt    float64
 	CogDeg   float64
 	LastSeen time.Time
+	AtoN     bool // static aid-to-navigation / base station, not a vessel
 }
 
 // Store holds ships by MMSI, pruned by TTL (ships are slow — 10 min).
@@ -55,6 +57,21 @@ func (s *Store) ship(mmsi string) *Ship {
 		s.ships[mmsi] = sh
 	}
 	return sh
+}
+
+// latLonAt reads the standard 28-bit signed latitude at latOff and
+// longitude at lonOff (1/10000-minute units) with the "not available"
+// guards. Types 6 and 21 carry the same pair at different offsets.
+func latLonAt(p []byte, latOff, lonOff int) (float64, float64, bool) {
+	if latOff+27 >= len(p)*6 || lonOff+27 >= len(p)*6 {
+		return 0, 0, false
+	}
+	lat := float64(i(p, latOff, 28)) / 600000
+	lon := float64(i(p, lonOff, 28)) / 600000
+	if lat == 91 || lon == 181 || math.Abs(lat) > 90 || math.Abs(lon) > 180 {
+		return 0, 0, false
+	}
+	return lat, lon, true
 }
 
 // u reads an unsigned field from the 6-bit payload values.
@@ -181,6 +198,13 @@ func (s *Store) Decode(line string) {
 		}
 	case 5: // Class A static + voyage (name + callsign)
 		sh.Name = text(p, 112, 120)
+	case 6: // Assigned-mode BASE STATION — a station, not a vessel
+		sh.AtoN = true
+		sh.Lat, sh.Lon, sh.HasPos = latLonAt(p, 72, 100)
+	case 21: // Class A aids-to-navigation (buoy, lighthouse, …)
+		sh.AtoN = true
+		sh.Name = text(p, 43, 120)
+		sh.Lat, sh.Lon, sh.HasPos = latLonAt(p, 193, 165)
 	}
 }
 

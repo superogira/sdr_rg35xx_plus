@@ -53,6 +53,7 @@ func (m *MercView) pxPerKm() float64 { return 1000 / m.MPerPx }
 // relative to the receiver.
 type RadarBlip struct {
 	Vessel       bool    // true = ship (AIS), false = aircraft (ADS-B)
+	AtoN         bool    // AIS type 6/21 static aid: yellow rhombus
 	MercX, MercY float64 // Web-Mercator world pixels (see MercView)
 	Call         string
 	ICAO         string
@@ -220,11 +221,19 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		}
 
 		if b.Vessel {
-			// Ship: cyan filled square + name/MMSI + SOG. No leader —
-			// ships are slow and trails come later if asked for.
-			for dy := -2; dy <= 2; dy++ {
-				for dx := -2; dx <= 2; dx++ {
-					u.setPixel(x+dx, y+dy, color.RGBA{0, 220, 220, 255})
+			// Vessel: cyan square + name/MMSI + SOG. Static aids (AIS
+			// base stations, buoys, lighthouses — types 6/21) draw as a
+			// yellow RHOMBUS so they never read as traffic.
+			if b.AtoN {
+				col := color.RGBA{255, 215, 0, 255}
+				for _, d := range [][2]int{{-4, 0}, {-3, -1}, {-3, 1}, {-2, -2}, {-2, 2}, {-1, -2}, {-1, 2}, {0, -2}, {0, 0}, {0, 2}, {1, -2}, {1, 2}, {2, -1}, {2, 1}, {3, 0}} {
+					u.setPixel(x+d[0], y+d[1], col)
+				}
+			} else {
+				for dy := -2; dy <= 2; dy++ {
+					for dx := -2; dx <= 2; dx++ {
+						u.setPixel(x+dx, y+dy, color.RGBA{0, 220, 220, 255})
+					}
 				}
 			}
 			call := b.Call
@@ -232,7 +241,7 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 				call = b.ICAO
 			}
 			label := call
-			if b.SogKt > 0.5 {
+			if b.SogKt > 0.5 && !b.AtoN {
 				label = fmt.Sprintf("%s %.1fkt", call, b.SogKt)
 			}
 			tx := x + 6
@@ -246,7 +255,11 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			if basemap != nil {
 				u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+6, 13, 0, 0, 0, 170)
 			}
-			tf.DrawString(u.img, color.RGBA{180, 255, 255, 255}, tx, ty, label)
+			lcol := color.RGBA{180, 255, 255, 255}
+			if b.AtoN {
+				lcol = color.RGBA{255, 235, 130, 255}
+			}
+			tf.DrawString(u.img, lcol, tx, ty, label)
 			continue
 		}
 		// Velocity leader: where the aircraft will be in one minute
