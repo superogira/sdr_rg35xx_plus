@@ -21,6 +21,13 @@ import (
 	"time"
 )
 
+// MercMetresPx returns the ground metres per Mercator pixel at a
+// latitude (the Mercator scale factor: the equator is compressed by
+// cos(lat) into the same pixels).
+func MercMetresPx(lat float64, zoom int) float64 {
+	return 156543.03392 * math.Cos(lat*math.Pi/180) / math.Pow(2, float64(zoom))
+}
+
 // MercatorPx converts lat/lon to Web-Mercator world pixels at a zoom
 // level (256 px per tile).
 func MercatorPx(lat, lon float64, zoom int) (float64, float64) {

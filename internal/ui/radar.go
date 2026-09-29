@@ -16,31 +16,58 @@ import (
 // RadarDot is one breadcrumb of an aircraft's past track, positioned
 // relative to the receiver like the blip itself.
 type RadarDot struct {
-	BrngDeg float64
-	DistKm  float64
-	AgeSec  int
+	BrngDeg      float64
+	DistKm       float64
+	AgeSec       int
+	MercX, MercY float64 // Web-Mercator world pixels of the breadcrumb
 }
+
+// MercView carries what the radar needs to project targets onto the
+// Web-Mercator basemap: the receiver's world-pixel position and the
+// metres-per-pixel scale there. Positions then land EXACTLY on the
+// tiles (screen = mercPx − rx + centre), so ships sit on the river
+// and aircraft on their true ground track. The old polar
+// (bearing+distance) projection silently disagreed with Mercator —
+// ~3% stretch at Thai latitudes pushed river traffic onto land.
+type MercView struct {
+	Zoom   int
+	Rx, Ry float64 // receiver world pixels at Zoom
+	MPerPx float64 // ground metres per world pixel at the receiver latitude
+}
+
+// project returns the screen offset from the radar centre for a target
+// at Mercator world pixels (mx, my) — computed at the SAME zoom as the
+// receiver reference, so a world-pixel difference IS the offset on the
+// mosaic tiles: screen = mercPx − rx + centre. Exact, no scale maths.
+func (m *MercView) project(mx, my float64) (int, int) {
+	return int(mx - m.Rx), -int(my - m.Ry)
+}
+
+// pxPerKm is the map-true pixels per ground kilometre — drives the
+// range rings and the Phosphor fallback scale.
+func (m *MercView) pxPerKm() float64 { return 1000 / m.MPerPx }
 
 // RadarBlip is one tracked object (aircraft or vessel) positioned
 // relative to the receiver.
 type RadarBlip struct {
-	Vessel   bool // true = ship (AIS), false = aircraft (ADS-B)
-	Call     string
-	ICAO     string
-	BrngDeg  float64
-	DistKm   float64
-	TrackDeg int
-	AltFt    int
-	SpdKt    int
-	SogKt    float64
-	VrateFpm int
-	HasPos   bool
-	Trail    []RadarDot
+	Vessel       bool    // true = ship (AIS), false = aircraft (ADS-B)
+	MercX, MercY float64 // Web-Mercator world pixels (see MercView)
+	Call         string
+	ICAO         string
+	BrngDeg      float64
+	DistKm       float64
+	TrackDeg     int
+	AltFt        int
+	SpdKt        int
+	SogKt        float64
+	VrateFpm     int
+	HasPos       bool
+	Trail        []RadarDot
 }
 
 // DrawRadar renders the ADS-B radar. Blips beyond rangeKm clamp to the
 // outer ring at half brightness.
-func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string) {
+func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView) {
 	// Phosphor palette.
 	bg := color.RGBA{2, 10, 4, 255}
 	dim := color.RGBA{0, 110, 55, 255}
@@ -62,11 +89,28 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		maxR = float64(u.W)/2 - 16
 	}
 
+	// Ring scale: map-true pixels per km when a basemap is shown
+	// (rings then sit on the geography at their real distance); polar
+	// screen fraction on the phosphor fallback.
+	pxPerKm := maxR / rangeKm
+	if merc != nil {
+		pxPerKm = merc.pxPerKm()
+	}
+	// Map mode rings are TRUE kilometres at a round step; phosphor
+	// keeps the quartered screen rings.
+	ringStep := rangeKm / 4
+	if merc != nil {
+		ringStep = niceStep(rangeKm / 4)
+	}
+
 	// Range rings + crosshair. On a map background the rings blend at
 	// ~50% so the geography stays readable; on the dark fallback they
 	// draw solid as before.
-	for k := 1; k <= 4; k++ {
-		r := maxR * float64(k) / 4
+	for k := 1; ; k++ {
+		r := ringStep * float64(k) * pxPerKm
+		if r > maxR {
+			break
+		}
 		for a2 := 0.0; a2 < 360; a2 += 0.5 {
 			px := cx + int(r*math.Sin(a2*math.Pi/180))
 			py := cy - int(r*math.Cos(a2*math.Pi/180))
@@ -91,13 +135,17 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 
 	// Ring distance labels.
 	lf := Face(10, false)
-	for k := 1; k <= 4; k++ {
-		d := rangeKm * float64(k) / 4
+	for k := 1; ; k++ {
+		d := ringStep * float64(k)
+		r := d * pxPerKm
+		if r > maxR {
+			break
+		}
 		label := fmt.Sprintf("%.0f", d)
-		if k == 4 {
+		if d >= rangeKm-0.5 {
 			label = fmt.Sprintf("%.0f km", d)
 		}
-		lf.DrawString(u.img, dim, cx+4, cy-int(maxR*float64(k)/4)+10, label)
+		lf.DrawString(u.img, dim, cx+4, cy-int(r)+10, label)
 	}
 
 	// Blips.
@@ -106,15 +154,28 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		if !b.HasPos {
 			continue
 		}
-		r := b.DistKm / rangeKm * maxR
+		// Projection: on a Mercator basemap the target's world pixels
+		// land EXACTLY on the tiles; on the phosphor fallback the polar
+		// (bearing+distance) rings apply.
+		var x, y int
 		clamped := false
-		if r > maxR {
-			r = maxR
-			clamped = true
+		if merc != nil {
+			dx, dy := merc.project(b.MercX, b.MercY)
+			if math.Hypot(float64(dx), float64(dy)) > maxR {
+				dx, dy = clampVec(dx, dy, int(maxR))
+				clamped = true
+			}
+			x, y = cx+dx, cy+dy
+		} else {
+			r := b.DistKm / rangeKm * maxR
+			if r > maxR {
+				r = maxR
+				clamped = true
+			}
+			ang := b.BrngDeg * 3.14159265 / 180
+			x = cx + int(r*math.Sin(ang))
+			y = cy - int(r*math.Cos(ang))
 		}
-		ang := b.BrngDeg * 3.14159265 / 180
-		x := cx + int(r*math.Sin(ang))
-		y := cy - int(r*math.Cos(ang))
 		col := green
 		if clamped {
 			col = dim
@@ -123,26 +184,36 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		// five-minute window. Every dot is a full 2x2 body — 1-px dots
 		// proved invisible on the handheld screen.
 		for _, d := range b.Trail {
-			tr := d.DistKm / rangeKm * maxR
-			if tr > maxR {
-				continue // off-scope history stays off
+			var dx, dy int
+			if merc != nil {
+				dx, dy = merc.project(d.MercX, d.MercY)
+				if math.Hypot(float64(dx), float64(dy)) > maxR {
+					continue // off-scope history stays off
+				}
+			} else {
+				tr := d.DistKm / rangeKm * maxR
+				if tr > maxR {
+					continue // off-scope history stays off
+				}
+				ta := d.BrngDeg * math.Pi / 180
+				dx = cx + int(tr*math.Sin(ta)) - cx
+				dy = cy - int(tr*math.Cos(ta)) - cy
 			}
-			ta := d.BrngDeg * math.Pi / 180
-			dx := cx + int(tr*math.Sin(ta))
-			dy := cy - int(tr*math.Cos(ta))
+			sx2 := cx + dx
+			sy2 := cy + dy
 			tc := color.RGBA{0, 255, 130, 255} // recent (< 1 min)
 			if d.AgeSec > 150 {
 				tc = color.RGBA{0, 150, 75, 255} // old
 			} else if d.AgeSec > 60 {
 				tc = color.RGBA{0, 200, 100, 255}
 			}
-			u.setPixel(dx, dy, tc)
+			u.setPixel(sx2, sy2, tc)
 			if rangeKm < 100 {
 				// Zoomed in: 2x2 bodies. At 100 km and beyond the 5-minute
 				// trail gets dense — single pixels keep the picture clean.
-				u.setPixel(dx+1, dy, tc)
-				u.setPixel(dx, dy+1, tc)
-				u.setPixel(dx+1, dy+1, tc)
+				u.setPixel(sx2+1, sy2, tc)
+				u.setPixel(sx2, sy2+1, tc)
+				u.setPixel(sx2+1, sy2+1, tc)
 			}
 		}
 
@@ -326,4 +397,25 @@ func (u *UI) blendPx(x, y int, r, g, b uint8, a uint8) {
 	u.img.Pix[o+1] = uint8((int(g)*int(a) + int(u.img.Pix[o+1])*int(ia)) / 255)
 	u.img.Pix[o+2] = uint8((int(b)*int(a) + int(u.img.Pix[o+2])*int(ia)) / 255)
 	u.img.Pix[o+3] = 255
+}
+
+// clampVec shortens a vector to the given length (edge-clamped blips).
+func clampVec(x, y, max int) (int, int) {
+	f := float64(max) / math.Hypot(float64(x), float64(y))
+	return int(float64(x) * f), int(float64(y) * f)
+}
+
+// niceStep rounds km to the nearest 1-2-5 decade value so ring labels
+// read well (e.g. 6.25 → 5, 12.5 → 10, 25 → 20).
+func niceStep(km float64) float64 {
+	if km <= 0 {
+		return 1
+	}
+	pow := math.Pow(10, math.Floor(math.Log10(km)))
+	for _, m := range []float64{1, 2, 5, 10} {
+		if m*pow >= km*0.9 {
+			return m * pow
+		}
+	}
+	return 10 * pow
 }
