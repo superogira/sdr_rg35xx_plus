@@ -583,7 +583,11 @@ func main() {
 			adsbLayerIdx = n
 		}
 	}
-	adsbZooms := []int{12, 11, 10, 9, 8} // for ranges 25/50/100/200/400 km
+	// Zooms sized so the labeled range fits the screen at the map's native
+	// scale (maxR px = rangeKm × pxPerKm of that zoom) — the old
+	// 12/11/10/9/8 map was ~1.7× more zoomed-in than the rings, so
+	// every blip sat ~1.7× too far from the receiver.
+	adsbZooms := []int{10, 9, 8, 7, 6} // for ranges 25/50/100/200/400 km
 	osmCache := osm.NewCache(filepath.Join(filepath.Dir(mustExe()), "osmcache"))
 	adsbMosaic := make([][]*image.RGBA, len(osm.Layers))
 	adsbFetching := make([][]bool, len(osm.Layers))
@@ -2583,16 +2587,29 @@ func main() {
 			m, sp := r.RTTYLevels()
 			u.DrawRTTY(rttyLines, r.RTTYCurrent(), m, sp, r.RTTYReversed(), r.RTTYEnabled())
 		} else if uiMode == uiADSB {
+			// Mercator projection view for map layers: world pixels of the
+			// receiver at zoom 12 and the ground scale there. project()
+			// normalises through MPerPx, so a single fixed zoom serves every
+			// layer zoom — blips always land exactly on the tiles.
+			zCur := adsbZooms[adsbRangeIdx]
+			mrx, mry := osm.MercatorPx(adsbLat, adsbLon, zCur)
+			merc := &ui.MercView{Zoom: zCur, Rx: mrx, Ry: mry, MPerPx: osm.MercMetresPx(adsbLat, zCur)}
+			mercPos := func(lat, lon float64) (float64, float64) {
+				mx, my := osm.MercatorPx(lat, lon, 12)
+				return mx, my
+			}
 			planes := adsbStore.Planes()
 			blips := make([]ui.RadarBlip, 0, len(planes))
 			for _, pl := range planes {
 				b := ui.RadarBlip{Call: pl.Callsign, ICAO: pl.ICAO, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, TrackDeg: pl.TrackDeg, VrateFpm: pl.VrateFpm, HasPos: pl.HasPos}
 				if pl.HasPos {
 					b.DistKm, b.BrngDeg = geo.DistanceBearingKm(adsbLat, adsbLon, pl.Lat, pl.Lon)
+					b.MercX, b.MercY = mercPos(pl.Lat, pl.Lon)
 				}
 				for _, tp := range pl.Trail {
 					d, br := geo.DistanceBearingKm(adsbLat, adsbLon, tp.Lat, tp.Lon)
-					b.Trail = append(b.Trail, ui.RadarDot{DistKm: d, BrngDeg: br, AgeSec: int(time.Since(tp.At).Seconds())})
+					mx, my := mercPos(tp.Lat, tp.Lon)
+					b.Trail = append(b.Trail, ui.RadarDot{DistKm: d, BrngDeg: br, AgeSec: int(time.Since(tp.At).Seconds()), MercX: mx, MercY: my})
 				}
 				blips = append(blips, b)
 			}
@@ -2605,7 +2622,8 @@ func main() {
 				if name == "" {
 					name = sh.MMSI
 				}
-				blips = append(blips, ui.RadarBlip{Vessel: true, Call: name, ICAO: sh.MMSI, BrngDeg: br, DistKm: d, SogKt: sh.SogKt, HasPos: true})
+				mx, my := mercPos(sh.Lat, sh.Lon)
+				blips = append(blips, ui.RadarBlip{Vessel: true, Call: name, ICAO: sh.MMSI, BrngDeg: br, DistKm: d, SogKt: sh.SogKt, HasPos: true, MercX: mx, MercY: my})
 			}
 			if os.Getenv("SDR_ADSB_DEMO") != "" {
 				// Dev aid: fake traffic so the radar can be eyeballed
@@ -2653,7 +2671,11 @@ func main() {
 			if !osm.Layers[L].NoFetch && adsbMosaic[L][z] != nil {
 				mapName, mapAttr = osm.Layers[L].Name, osm.Layers[L].Attr
 			}
-			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr)
+			var mercArg *ui.MercView
+			if adsbMosaic[L][z] != nil {
+				mercArg = merc
+			}
+			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
