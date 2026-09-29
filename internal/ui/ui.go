@@ -923,7 +923,7 @@ func (u *UI) DrawKeyboard(title, text string, textCursor, kbR, kbC int, shifted 
 // DrawHostList renders the saved-host picker: hosts are rows with the
 // active one marked, plus an "add new" row at the bottom. sel indexes
 // the rows including the add row (sel == len(hosts)).
-func (u *UI) DrawHostList(hosts []string, sel, activeIdx int) {
+func (u *UI) DrawHostList(hosts []string, sel, activeIdx int, title string) {
 	rowH := 26
 	pw := 440
 	ph := 70 + rowH*(len(hosts)+1) + 30
@@ -942,7 +942,7 @@ func (u *UI) DrawHostList(hosts []string, sel, activeIdx int) {
 	yellow := color.RGBA{255, 230, 120, 255}
 	green := color.RGBA{120, 230, 140, 255}
 
-	Face(16, true).DrawString(u.img, cyan, px+16, py+28, i18n.T("host_title"))
+	Face(16, true).DrawString(u.img, cyan, px+16, py+28, title)
 	Face(11, false).DrawString(u.img, grey, px+16, py+ph-12, i18n.T("host_hint"))
 
 	for i, h := range hosts {
