@@ -90,8 +90,8 @@ func buildName(mmsi uint32, name string) string {
 
 func TestDecodePositionAndName(t *testing.T) {
 	s := NewStore()
-	s.Decode(buildPos(567890123, 13.5520, 100.5120, 12.5, 87.3))
-	s.Decode(buildName(567890123, "MV BANGKOK"))
+	s.decodeT(buildPos(567890123, 13.5520, 100.5120, 12.5, 87.3))
+	s.decodeT(buildName(567890123, "MV BANGKOK"))
 	ships := s.Ships()
 	if len(ships) != 1 {
 		t.Fatalf("ships %d", len(ships))
@@ -119,9 +119,9 @@ func TestDecodeClassB(t *testing.T) {
 		sfield(int32(math.Round(100.6123*600000)), 28) +
 		sfield(int32(math.Round(9.1234*600000)), 27) +
 		field(uint32(450), 12) + field(511, 9)
-	s.Decode(fmt.Sprintf("!AIVDM,1,1,,B,%s,0*00", encodeBits(b)))
+	s.decodeT(fmt.Sprintf("!AIVDM,1,1,,B,%s,0*00", encodeBits(b)))
 	// Type 24A name.
-	s.Decode(buildName(123456789, "FERRY9"))
+	s.decodeT(buildName(123456789, "FERRY9"))
 	ships := s.Ships()
 	if len(ships) != 1 || !ships[0].HasPos {
 		t.Fatalf("class B: %+v", ships)
@@ -143,7 +143,7 @@ func TestDecodeIgnoresJunk(t *testing.T) {
 		"garbage without commas",
 		"!AIVDM,1,1,,A,###,0*00", // bad payload chars
 	} {
-		s.Decode(ln)
+		s.decodeT(ln)
 	}
 	if len(s.Ships()) != 0 {
 		t.Fatalf("junk decoded: %+v", s.Ships())
@@ -179,9 +179,9 @@ func buildAtoN(typ uint32, mmsi uint32, name string, lat, lon float64, latOff, l
 func TestDecodeAtoNTypes(t *testing.T) {
 	// Type 21: name at 43, lon at 165, lat at 193.
 	s := NewStore()
-	s.Decode(buildAtoN(21, 992190761, "BANGKOK LIGHT", 13.7210, 100.5120, 193, 165))
+	s.decodeT(buildAtoN(21, 992190761, "BANGKOK LIGHT", 13.7210, 100.5120, 193, 165))
 	// Type 6: lat at 72, lon at 100.
-	s.Decode(buildAtoN(6, 993190762, "", 7.5000, 100.4000, 72, 100))
+	s.decodeT(buildAtoN(6, 993190762, "", 7.5000, 100.4000, 72, 100))
 	var aids, ships int
 	for _, sh := range s.Ships() {
 		if sh.AtoN {
