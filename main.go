@@ -403,23 +403,25 @@ var pageItems = [][]int{
 	{0, 0, 0, 0, 0, 0}, // root rows open subpages (dispatched by row index)
 	{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
-	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
-	{menuBM},
 	{menuAF, menuNR, menuHP, menuLP},
-	{menuADSBHost, menuADSBLat, menuADSBLon, menuADSBRadar, menuAISServer},
+	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuADSBRadar},
+	{menuBM},
+	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 }
 
-// The flat 16-row menu outgrew the screen, so it is now three
-// subpages reached from a 3-row root. pageItems maps (page → row)
-// to the item ids that adjustItem/activateItem already dispatch on.
+// The flat 16-row menu outgrew the screen, so it is now subpages
+// reached from a root list. pageItems maps (page → row) to the item
+// ids that adjustItem/activateItem already dispatch on. Root rows open
+// subpages BY POSITION (row i opens page i+1), so the page const order
+// MUST mirror the root row order: System last, Bookmarks before it.
 const (
 	pageRoot = iota
 	pageRx
 	pageFT8
-	pageSys
-	pageBM
 	pageAudio
 	pageADSB
+	pageBM
+	pageSys
 )
 
 func main() {
@@ -841,6 +843,8 @@ func main() {
 		uiMode = uiFT8Bands
 	case "audio":
 		uiMode, menuPage = uiMenu, pageAudio
+	case "adsbpage":
+		uiMode, menuPage = uiMenu, pageADSB
 	case "rtty":
 		uiMode = uiRTTY
 	case "adsb":
@@ -2150,10 +2154,10 @@ func main() {
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_rxpage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
-					ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"},
-					ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_audiopage"), Value: ">"},
-					ui.MenuItem{Label: i18n.T("m_adsbpage"), Value: ">"})
+					ui.MenuItem{Label: i18n.T("m_adsbpage"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"})
 			case pageRx:
 				freqDec := 5
 				switch r.Mode().Name {
@@ -2221,11 +2225,11 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_lp"), Value: lpVal})
 			case pageADSB:
 				items = append(items,
-					ui.MenuItem{Label: i18n.T("m_adsbhost"), Value: adsbHost},
 					ui.MenuItem{Label: i18n.T("m_adsblat"), Value: fmt.Sprintf("%.5f", adsbLat)},
 					ui.MenuItem{Label: i18n.T("m_adsblon"), Value: fmt.Sprintf("%.5f", adsbLon)},
-					ui.MenuItem{Label: i18n.T("m_adsbradar"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_aishost"), Value: aisHost})
+					ui.MenuItem{Label: i18n.T("m_adsbhost"), Value: adsbHost},
+					ui.MenuItem{Label: i18n.T("m_aishost"), Value: aisHost},
+					ui.MenuItem{Label: i18n.T("m_adsbradar"), Value: i18n.T("press_a")})
 			case pageSys:
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
