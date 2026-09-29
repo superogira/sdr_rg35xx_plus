@@ -170,7 +170,7 @@ func fetchUpdateMeta(base string) (stamp int64, sha string, size int64, err erro
 
 // runUpdate checks the server and, when a newer build exists, downloads,
 // verifies and swaps the binary, then re-execs into the new version.
-func runUpdate(u *updater, base string, manual bool) {
+func runUpdate(u *updater, base string, manual bool, beforeRestart func()) {
 	if !u.tryBegin() {
 		return
 	}
@@ -255,6 +255,12 @@ func runUpdate(u *updater, base string, manual bool) {
 		fmt.Fprintf(os.Stderr, "update: installed stamp %d (was %s), re-exec\n", stamp, buildStamp)
 		time.Sleep(700 * time.Millisecond) // let the message reach the screen
 		syncDir(dir)
+		if beforeRestart != nil {
+			// Persist this session before the process is replaced —
+			// Exec skips the quit path, so settings would revert to
+			// the last saved ini without this.
+			beforeRestart()
+		}
 		syscall.Exec(exe, os.Args, os.Environ())
 		u.setMsg("%s", i18n.T("upd_restart"))
 	}()
@@ -638,7 +644,7 @@ func main() {
 	if strings.EqualFold(cfg["update"], "off") {
 		fmt.Fprintln(os.Stderr, "update: auto-check disabled by config")
 	} else {
-		runUpdate(upd, updateBase, false)
+		runUpdate(upd, updateBase, false, nil)
 	}
 
 	disp, err := ui.OpenDisplay(*display)
@@ -759,7 +765,12 @@ func main() {
 	// Menu Exit: closing this unblocks the render loop's poll below,
 	// which runs the same quit path as the hold-to-exit combo.
 	exitMenu := make(chan struct{})
-	quit := func() {
+	// saveNow flushes the live session state to the ini. Called on
+	// quit, BEFORE an update re-exec (which otherwise loses every
+	// change made since boot — the bug behind settings reverting
+	// after an OTA update), and periodically from the render loop as
+	// a power-loss guard.
+	saveNow := func() {
 		langPref := i18n.Lang()
 		agcPref := "on"
 		if !r.AGCEnabled() {
@@ -774,6 +785,9 @@ func main() {
 		}
 		saveBwNow(cfg, r)
 		saveConfig(cfg, *host, r.Freq(), r.Mode().Name, r.Volume(), *gain, r.IQRate(), u.SpanFull/1000, dsPref, agcPref, langPref, stepHz, myCall, myGrid, myAnt, myRig, pskOn, wfMin, wfMax)
+	}
+	quit := func() {
+		saveNow()
 		stop()
 	}
 	// Screenshot support: the last presented frame and a transient status
@@ -1277,7 +1291,7 @@ func main() {
 		case menuShot:
 			capture()
 		case menuUpdate:
-			runUpdate(upd, updateBase, true)
+			runUpdate(upd, updateBase, true, saveNow)
 		default:
 			adjustItem(idx, +1)
 		}
@@ -1794,6 +1808,7 @@ func main() {
 		}
 	}()
 	lastBeat := time.Now()
+	lastSave := time.Now()
 
 	for {
 		select {
@@ -2130,6 +2145,13 @@ func main() {
 			// still wakes within ~0.1 s.
 			time.Sleep(70 * time.Millisecond)
 			frames++
+			// Power-loss guard: flush the ini every 2 minutes so a hard
+			// power-off mid-session keeps the recent settings (quit and the
+			// update path both save, but a pulled battery does not).
+			if time.Since(lastSave) >= 2*time.Minute {
+				saveNow()
+				lastSave = time.Now()
+			}
 			if time.Since(lastBeat) >= 10*time.Second {
 				s := r.Snapshot()
 				var af, astall int64
