@@ -2153,8 +2153,8 @@ func main() {
 			case pageRoot:
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_rxpage"), Value: ">"},
-					ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_audiopage"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_adsbpage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"})
