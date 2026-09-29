@@ -408,12 +408,12 @@ const (
 // was unreachable from the d-pad.
 var pageItems = [][]int{
 	{0, 0, 0, 0, 0, 0, menuExit}, // rows 0-5 open subpages by position; the last row is Exit
-	{menuFreq, menuMode, menuGain, menuSQL, menuSample, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
+	{menuHost, menuFreq, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax, menuSample},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
 	{menuAF, menuNR, menuHP, menuLP},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuADSBRadar},
 	{menuBM},
-	{menuHost, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
+	{menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 }
 
 // The flat 16-row menu outgrew the screen, so it is now subpages
@@ -2229,6 +2229,7 @@ func main() {
 					freqDec = 4
 				}
 				items = append(items,
+					ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
 					ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.*f MHz >", freqDec, float64(r.Freq())/1e6)},
 					func() ui.MenuItem {
 						m := ui.MenuItem{Label: i18n.T("m_mode"), Value: r.Mode().Name}
@@ -2239,14 +2240,14 @@ func main() {
 					}(),
 					ui.MenuItem{Label: i18n.T("m_gain"), Value: fmt.Sprintf("%.1f dB", r.GainDb())},
 					ui.MenuItem{Label: i18n.T("m_sql"), Value: sq},
-					ui.MenuItem{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
 					ui.MenuItem{Label: i18n.T("m_bw"), Value: bwLabel(r.Bandwidth())},
 					ui.MenuItem{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
 					ui.MenuItem{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
 					ui.MenuItem{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
 					ui.MenuItem{Label: i18n.T("m_step"), Value: stepLabel(stepHz)},
 					ui.MenuItem{Label: i18n.T("m_wfmin"), Value: fmt.Sprintf("+%.0f dB", wfMin)},
-					ui.MenuItem{Label: i18n.T("m_wfmax"), Value: fmt.Sprintf("%.0f dB", wfMax)})
+					ui.MenuItem{Label: i18n.T("m_wfmax"), Value: fmt.Sprintf("%.0f dB", wfMax)},
+					ui.MenuItem{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)})
 			case pageFT8:
 				pskVal := i18n.T("off")
 				if pskOn {
@@ -2294,7 +2295,6 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_adsbradar"), Value: i18n.T("press_a")})
 			case pageSys:
 				items = append(items,
-					ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
 					ui.MenuItem{Label: i18n.T("m_lang"), Value: langLabel()},
 					ui.MenuItem{Label: i18n.T("m_sysmon"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_logs"), Value: i18n.T("press_a")},
