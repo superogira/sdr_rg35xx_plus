@@ -2625,7 +2625,16 @@ func main() {
 					name = sh.MMSI
 				}
 				mx, my := mercPos(sh.Lat, sh.Lon)
-				blips = append(blips, ui.RadarBlip{Vessel: true, Call: name, ICAO: sh.MMSI, BrngDeg: br, DistKm: d, SogKt: sh.SogKt, HasPos: true, MercX: mx, MercY: my})
+				blips = append(blips, ui.RadarBlip{Vessel: true, AtoN: sh.AtoN, Call: name, ICAO: sh.MMSI, BrngDeg: br, DistKm: d, SogKt: sh.SogKt, HasPos: true, MercX: mx, MercY: my})
+				// Demo aids (the live Thai feed carries no types 6/21 right
+				// now) so the rhombus rendering stays verifiable.
+				if os.Getenv("SDR_ADSB_DEMO") != "" {
+					for _, ad := range [][2]float64{{13.640, 100.560}, {13.560, 100.620}} {
+						amx, amy := mercPos(ad[0], ad[1])
+						dd, bb := geo.DistanceBearingKm(adsbLat, adsbLon, ad[0], ad[1])
+						blips = append(blips, ui.RadarBlip{Vessel: true, AtoN: true, Call: "AID", ICAO: "992190761", BrngDeg: bb, DistKm: dd, HasPos: true, MercX: amx, MercY: amy})
+					}
+				}
 			}
 			if os.Getenv("SDR_ADSB_DEMO") != "" {
 				// Dev aid: fake traffic so the radar can be eyeballed

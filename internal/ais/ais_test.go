@@ -149,3 +149,54 @@ func TestDecodeIgnoresJunk(t *testing.T) {
 		t.Fatalf("junk decoded: %+v", s.Ships())
 	}
 }
+
+// buildAtoN assembles a type 21 (aid-to-navigation) or type 6 (assigned
+// mode base station) sentence with position at the given bit offsets.
+func buildAtoN(typ uint32, mmsi uint32, name string, lat, lon float64, latOff, lonOff int) string {
+	bits := field(typ, 6) + field(0, 2) + field(mmsi, 30)
+	// Pad to latOff, then 28+28 bits of position, then filler.
+	for len(bits) < latOff {
+		bits += "0"
+	}
+	bits += sfield(int32(math.Round(lat*600000)), 28) + sfield(int32(math.Round(lon*600000)), 28)
+	for len(bits)%6 != 0 {
+		bits += "0"
+	}
+	if name != "" && latOff > 43 {
+		// Type 21 puts the name at bit 43 — rebuild with it.
+		bits = field(typ, 6) + field(0, 2) + field(mmsi, 30) + tfield(name, 20) + "00" + "0"
+		for len(bits) < lonOff {
+			bits += "0"
+		}
+		bits += sfield(int32(math.Round(lon*600000)), 28) + sfield(int32(math.Round(lat*600000)), 28)
+		for len(bits)%6 != 0 {
+			bits += "0"
+		}
+	}
+	return fmt.Sprintf("!AIVDM,1,1,,A,%s,0*00", encodeBits(bits))
+}
+
+func TestDecodeAtoNTypes(t *testing.T) {
+	// Type 21: name at 43, lon at 165, lat at 193.
+	s := NewStore()
+	s.Decode(buildAtoN(21, 992190761, "BANGKOK LIGHT", 13.7210, 100.5120, 193, 165))
+	// Type 6: lat at 72, lon at 100.
+	s.Decode(buildAtoN(6, 993190762, "", 7.5000, 100.4000, 72, 100))
+	var aids, ships int
+	for _, sh := range s.Ships() {
+		if sh.AtoN {
+			aids++
+			if math.Abs(sh.Lat-13.7210) > 0.001 && math.Abs(sh.Lat-7.5) > 0.001 {
+				t.Fatalf("aid %s position %.4f %.4f", sh.MMSI, sh.Lat, sh.Lon)
+			}
+		} else {
+			ships++
+		}
+	}
+	if aids != 2 {
+		t.Fatalf("expected 2 aids-to-navigation, got %d (ships=%d)", aids, ships)
+	}
+	if ships != 0 {
+		t.Fatalf("AtoN entries counted as vessels: %d", ships)
+	}
+}
