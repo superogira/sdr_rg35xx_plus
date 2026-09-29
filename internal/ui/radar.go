@@ -317,7 +317,7 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			// Dark chip keeps the label readable over map colours.
 			u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+6, 13, 0, 0, 0, 170)
 		}
-		tf.DrawString(u.img, bright, tx, ty, label)
+		tf.DrawString(u.img, altitudeColor(b.AltFt), tx, ty, label)
 	}
 
 	// Header: host + connection + aircraft count.
@@ -433,4 +433,100 @@ func niceStep(km float64) float64 {
 		}
 	}
 	return 10 * pow
+}
+
+// altitudeColor returns HSL→RGB color for ADS-B labels, matching tar1090.
+func altitudeColor(altFt int) color.RGBA {
+	if altFt < 0 {
+		altFt = 0
+	}
+	h := 20.0
+	switch {
+	case altFt <= 2000:
+		h = 20
+	case altFt <= 4000:
+		h = 32.5 + (43-32.5)*float64(altFt-2000)/2000
+	case altFt <= 6000:
+		h = 43 + (54-43)*float64(altFt-4000)/2000
+	case altFt <= 8000:
+		h = 54 + (72-54)*float64(altFt-6000)/2000
+	case altFt <= 9000:
+		h = 72 + (85-72)*float64(altFt-8000)/1000
+	case altFt <= 11000:
+		h = 85 + (140-85)*float64(altFt-9000)/2000
+	case altFt <= 40000:
+		h = 140 + (300-140)*float64(altFt-11000)/29000
+	case altFt <= 51000:
+		h = 300 + (360-300)*float64(altFt-40000)/11000
+	default:
+		h = 360
+	}
+	s, l := 88.0, 50.0
+	if h >= 200 {
+		l = 58
+	} else if h >= 100 {
+		l = 41
+	} else if h >= 80 {
+		l = 41
+	} else if h >= 60 {
+		l = 43
+	} else if h >= 50 {
+		l = 46
+	} else if h >= 46 {
+		l = 51
+	} else if h >= 40 {
+		l = 52
+	} else if h >= 32 {
+		l = 54
+	} else if h >= 20 {
+		l = 50
+	} else {
+		l = 53
+	}
+	return hslToRGB(h, s, l)
+}
+
+func hslToRGB(h, s, l float64) color.RGBA {
+	s /= 100
+	l /= 100
+	c := (1 - absF64(2*l-1)) * s
+	hp := h / 60
+	x := c * (1 - absF64(mod(hp, 2)-1))
+	var r1, g1, b1 float64
+	switch {
+	case hp < 1:
+		r1, g1, b1 = c, x, 0
+	case hp < 2:
+		r1, g1, b1 = x, c, 0
+	case hp < 3:
+		r1, g1, b1 = 0, c, x
+	case hp < 4:
+		r1, g1, b1 = 0, x, c
+	case hp < 5:
+		r1, g1, b1 = x, 0, c
+	default:
+		r1, g1, b1 = c, 0, x
+	}
+	m := l - c/2
+	return color.RGBA{
+		uint8((r1 + m) * 255),
+		uint8((g1 + m) * 255),
+		uint8((b1 + m) * 255),
+		255,
+	}
+}
+
+func absF64(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+func mod(a, b float64) float64 {
+	r := a - b*float64(int(a/b))
+	if r < 0 {
+		r += b
+	}
+	return r
 }
