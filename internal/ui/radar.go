@@ -57,6 +57,7 @@ type RadarBlip struct {
 	MercX, MercY float64 // Web-Mercator world pixels (see MercView)
 	Call         string
 	ICAO         string
+	Country      string // ISO 3166-1 alpha-2 country code
 	BrngDeg      float64
 	DistKm       float64
 	TrackDeg     int
@@ -70,7 +71,7 @@ type RadarBlip struct {
 
 // DrawRadar renders the ADS-B radar. Blips beyond rangeKm clamp to the
 // outer ring at half brightness.
-func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView) {
+func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string) {
 	// Phosphor palette.
 	bg := color.RGBA{2, 10, 4, 255}
 	dim := color.RGBA{0, 110, 55, 255}
@@ -244,22 +245,33 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			if b.SogKt > 0.5 && !b.AtoN {
 				label = fmt.Sprintf("%s %.1fkt", call, b.SogKt)
 			}
+			var flag image.Image
+			fw := 0
+			if b.Country != "" {
+				flag = GetFlag(b.Country, flagDir)
+				if flag != nil {
+					fw = flag.Bounds().Dx() + 3
+				}
+			}
 			tx := x + 6
 			if x > u.W-120 {
-				tx = x - 6 - tf.TextWidth(label)
+				tx = x - 6 - tf.TextWidth(label) - fw
 			}
 			ty := y + 4
 			if y < 60 {
 				ty = y + 14
 			}
 			if basemap != nil {
-				u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+6, 13, 0, 0, 0, 170)
+				u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
 			}
 			lcol := color.RGBA{180, 255, 255, 255}
 			if b.AtoN {
 				lcol = color.RGBA{255, 235, 130, 255}
 			}
 			tf.DrawString(u.img, lcol, tx, ty, label)
+			if flag != nil {
+				drawImage(u.img, flag, tx+tf.TextWidth(label)+3, ty-10)
+			}
 			continue
 		}
 		// Velocity leader: where the aircraft will be in one minute
@@ -305,9 +317,17 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		if b.SpdKt > 0 {
 			label = fmt.Sprintf("%s %dft%s %dkt", call, b.AltFt, vr, b.SpdKt)
 		}
+		var flag image.Image
+		fw := 0
+		if b.Country != "" {
+			flag = GetFlag(b.Country, flagDir)
+			if flag != nil {
+				fw = flag.Bounds().Dx() + 3
+			}
+		}
 		tx := x + 8
 		if x > u.W-120 {
-			tx = x - 8 - tf.TextWidth(label)
+			tx = x - 8 - tf.TextWidth(label) - fw
 		}
 		ty := y + 4
 		if y < 60 {
@@ -315,9 +335,12 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		}
 		if basemap != nil {
 			// Dark chip keeps the label readable over map colours.
-			u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+6, 13, 0, 0, 0, 170)
+			u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
 		}
 		tf.DrawString(u.img, altitudeColor(b.AltFt), tx, ty, label)
+		if flag != nil {
+			drawImage(u.img, flag, tx+tf.TextWidth(label)+3, ty-10)
+		}
 	}
 
 	// Header: host + connection + aircraft count.

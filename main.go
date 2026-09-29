@@ -626,6 +626,7 @@ func main() {
 	// ADS-B: Beast TCP feed → decode → store, independent of the radio.
 	adsbStore := adsb.NewStore()
 	adsbRegs := adsb.NewRegDB(filepath.Join(filepath.Dir(mustExe()), "adsbreg.txt"))
+	flagDir := filepath.Join(filepath.Dir(mustExe()), "flags")
 	adsbClient := adsb.NewClient(adsbHost)
 	adsbClient.Connected = func(c bool) { adsbConnected = c }
 	go adsbClient.Run(ctx, func(msg []byte, mlat uint64, sig int) {
@@ -2119,7 +2120,11 @@ func main() {
 					}
 				}
 			}
-			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: m.Text, Anno: anno})
+			isoCC := ""
+			if toks := strings.Fields(m.Text); len(toks) >= 2 {
+				isoCC = geo.CountryISO(toks[1])
+			}
+			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: m.Text, Anno: anno, FlagCC: isoCC})
 			if len(ft8Log) > 100 {
 				ft8Log = ft8Log[len(ft8Log)-100:]
 			}
@@ -2358,7 +2363,7 @@ func main() {
 			}
 			u.DrawBookmarkList(labels, bmSel, active, r.Mode().Name)
 		} else if uiMode == uiFT8Log {
-			u.DrawFT8LogFull(ft8Log, ft8Scroll)
+			u.DrawFT8LogFull(ft8Log, ft8Scroll, flagDir)
 		} else if uiMode == uiSysMon {
 			sn := sysinfo.SensorSnapshot()
 			cpu, mem, swp := sysinfo.Snapshot()
@@ -2634,7 +2639,8 @@ func main() {
 						call = pl.ICAO
 					}
 				}
-				b := ui.RadarBlip{Call: call, ICAO: pl.ICAO, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, TrackDeg: pl.TrackDeg, VrateFpm: pl.VrateFpm, HasPos: pl.HasPos}
+				cc := geo.ICAOCountry(pl.ICAO)
+				b := ui.RadarBlip{Call: call, ICAO: pl.ICAO, Country: cc, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, TrackDeg: pl.TrackDeg, VrateFpm: pl.VrateFpm, HasPos: pl.HasPos}
 				if pl.HasPos {
 					b.DistKm, b.BrngDeg = geo.DistanceBearingKm(adsbLat, adsbLon, pl.Lat, pl.Lon)
 					b.MercX, b.MercY = mercPos(pl.Lat, pl.Lon)
@@ -2656,7 +2662,8 @@ func main() {
 					name = sh.Name
 				}
 				mx, my := mercPos(sh.Lat, sh.Lon)
-				blips = append(blips, ui.RadarBlip{Vessel: true, AtoN: sh.AtoN, Call: name, ICAO: sh.MMSI, BrngDeg: br, DistKm: d, SogKt: sh.SogKt, HasPos: true, MercX: mx, MercY: my})
+				cc := geo.MMSICountry(sh.MMSI)
+				blips = append(blips, ui.RadarBlip{Vessel: true, AtoN: sh.AtoN, Call: name, ICAO: sh.MMSI, Country: cc, BrngDeg: br, DistKm: d, SogKt: sh.SogKt, HasPos: true, MercX: mx, MercY: my})
 				// Demo aids (the live Thai feed carries no types 6/21 right
 				// now) so the rhombus rendering stays verifiable.
 				if os.Getenv("SDR_ADSB_DEMO") != "" {
@@ -2717,7 +2724,7 @@ func main() {
 			if adsbMosaic[L][z] != nil {
 				mercArg = merc
 			}
-			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg)
+			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
