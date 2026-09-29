@@ -220,9 +220,9 @@ type Chain struct {
 	// IF2 sample and is kept in [0, 2π).
 	offsetHz float64
 	ncoPhase float64
-	amDc     float64 // AM envelope DC tracker
-	fmDc     float64 // FM discriminator DC tracker (LO/ppm offset)
-	fx       *audProc // user audio effects: NR + HP/LP
+	amDc     float64      // AM envelope DC tracker
+	fmDc     float64      // FM discriminator DC tracker (LO/ppm offset)
+	fx       *audProc     // user audio effects: NR + HP/LP
 	rtty     *RTTYDecoder // RTTY monitor (fed alongside the FT8 branch)
 
 	// Squelch + metering state.

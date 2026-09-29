@@ -81,10 +81,10 @@ type RTTYDecoder struct {
 	candPrev              int // bit one quarter before the centre
 	bits                  uint8
 	nBits                 int
-	lastMarkQ, lastSpaceQ int // quarters since each tone was last seen
-	lastStopQ int // quarter of the previous accepted stop vote
-	runGood   int // consecutive frames at 7.5-bit spacing
-	pending   []uint8 // frames held until a run confirms them
+	lastMarkQ, lastSpaceQ int     // quarters since each tone was last seen
+	lastStopQ             int     // quarter of the previous accepted stop vote
+	runGood               int     // consecutive frames at 7.5-bit spacing
+	pending               []uint8 // frames held until a run confirms them
 	shiftFigs             bool
 	cur                   strings.Builder
 	lines                 []string

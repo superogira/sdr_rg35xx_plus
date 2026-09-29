@@ -11,8 +11,8 @@ import (
 // checks and the CRC-14 pass, so Text can be trusted as received.
 // SNRDb is the estimated signal strength above the tone-row noise.
 type FT8Message struct {
-	Text  string
-	Valid bool
+	Text   string
+	Valid  bool
 	SNRDb  float64
 	FreqHz float64
 }

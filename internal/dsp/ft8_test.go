@@ -173,6 +173,7 @@ func drainText(d *FT8Detector) []string {
 	}
 	return out
 }
+
 var fftTestInputRe, fftTestInputIm []float64
 
 func re0(n int) float64 { return fftTestInputRe[n] }

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+
 	"image"
 	"image/color"
 	"image/draw"
 	_ "image/png" // decoder for the embedded basemaps
 	"io/fs"
 	"math"
+	"sdr35/internal/i18n"
 	"sort"
 	"strings"
 	"time"
@@ -248,7 +250,7 @@ func (u *UI) DrawWorldMap(entries []MapEntry, sel *MapSelection) {
 	// Title chip.
 	u.fillBlend(8, 8, 220, 26, 0, 0, 0, 170)
 	tf := Face(13, false)
-	tf.DrawString(u.img, color.RGBA{255, 255, 255, 255}, 16, 26, "FT8 World Map - 10min")
+	tf.DrawString(u.img, color.RGBA{255, 255, 255, 255}, 16, 26, i18n.T("map_title"))
 
 	// Active basemap chip (top-right): style + overlay colour set.
 	mn := fmt.Sprintf("map %d/%d %s · %s", u.mapStyle+1, len(mapStyleNames), u.MapStyleName(), u.MapPaletteName())
@@ -275,11 +277,11 @@ func (u *UI) DrawWorldMap(entries []MapEntry, sel *MapSelection) {
 		u.fillBlend(8, u.H-30, cw+16, 22, 0, 0, 0, 170)
 		hf.DrawString(u.img, color.RGBA{120, 255, 120, 255}, 16, u.H-13, cnt)
 	}
-	hint := "L/R station  A info  B close"
+	hint := i18n.T("map_hint")
 	hw := hf.TextWidth(hint)
 	u.fillBlend(u.W-hw-24, u.H-30, hw+16, 22, 0, 0, 0, 170)
 	hf.DrawString(u.img, color.RGBA{220, 220, 220, 255}, u.W-hw-16, u.H-13, hint)
-	styleHint := "L1/R1 map style  L2/R2 colour"
+	styleHint := i18n.T("map_style_hint")
 	sw := hf.TextWidth(styleHint)
 	sx := u.W - hw - 24 - sw - 16
 	if sx > 4 {
