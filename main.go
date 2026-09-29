@@ -551,7 +551,7 @@ func main() {
 	// ADS-B: Beast client settings + radar range (L1/R1 cycles).
 	adsbHost := "192.168.2.152:30005"
 	adsbLat, adsbLon := 13.5955, 100.56178
-	adsbRanges := []float64{50, 100, 200, 400}
+	adsbRanges := []float64{25, 50, 100, 200, 400}
 	adsbRangeIdx := 1
 	if v := os.Getenv("SDR_ADSB_RANGE"); v != "" {
 		for i, rg := range adsbRanges {
@@ -574,7 +574,7 @@ func main() {
 			adsbLayerIdx = n
 		}
 	}
-	adsbZooms := []int{11, 10, 9, 8} // for ranges 50/100/200/400 km
+	adsbZooms := []int{12, 11, 10, 9, 8} // for ranges 25/50/100/200/400 km
 	osmCache := osm.NewCache(filepath.Join(filepath.Dir(mustExe()), "osmcache"))
 	adsbMosaic := make([][]*image.RGBA, len(osm.Layers))
 	adsbFetching := make([][]bool, len(osm.Layers))
