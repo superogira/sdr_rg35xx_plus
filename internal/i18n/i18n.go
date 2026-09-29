@@ -71,6 +71,7 @@ var strings = map[string][2]string{
 	"rtty_hint":    {"Y กลับขั้ว · X ล้าง · B กลับ", "Y reverse · X clear · B back"},
 	"m_bands":      {"ความถี่ FT8 >", "FT8 Frequencies >"},
 	"m_audiopage":  {"เสียง", "Audio"},
+	"m_aishost":    {"เซิร์ฟเวอร์ AIS (NMEA)", "AIS server (NMEA)"},
 	"m_af":         {"ตัวกรองเสียง", "Audio filter"},
 	"af_narrow":    {"แคบ", "Narrow"},
 	"af_normal":    {"ปกติ", "Normal"},
