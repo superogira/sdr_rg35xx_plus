@@ -58,7 +58,7 @@ var strings = map[string][2]string{
 	"m_wfmin":      {"Waterfall ระดับต่ำสุด", "Waterfall min level"},
 	"m_wfmax":      {"Waterfall ระดับสูงสุด", "Waterfall max level"},
 	"m_map":        {"แผนที่โลก FT8 >", "FT8 World Map >"},
-	"m_adsbpage":   {"ADS-B", "ADS-B"},
+	"m_adsbpage":   {"ADS-B / AIS", "ADS-B / AIS"},
 	"m_adsbhost":   {"Beast server", "Beast server"},
 	"m_adsblat":    {"ละติจูดจุดรับ", "Receiver latitude"},
 	"m_adsblon":    {"ลองจิจูดจุดรับ", "Receiver longitude"},
