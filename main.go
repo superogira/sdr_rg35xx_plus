@@ -625,6 +625,7 @@ func main() {
 	go r.Run(ctx)
 	// ADS-B: Beast TCP feed → decode → store, independent of the radio.
 	adsbStore := adsb.NewStore()
+	adsbRegs := adsb.NewRegDB(filepath.Join(filepath.Dir(mustExe()), "adsbreg.txt"))
 	adsbClient := adsb.NewClient(adsbHost)
 	adsbClient.Connected = func(c bool) { adsbConnected = c }
 	go adsbClient.Run(ctx, func(msg []byte, mlat uint64, sig int) {
@@ -2626,7 +2627,14 @@ func main() {
 			planes := adsbStore.Planes()
 			blips := make([]ui.RadarBlip, 0, len(planes))
 			for _, pl := range planes {
-				b := ui.RadarBlip{Call: pl.Callsign, ICAO: pl.ICAO, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, TrackDeg: pl.TrackDeg, VrateFpm: pl.VrateFpm, HasPos: pl.HasPos}
+				call := pl.Callsign
+				if !aisShowName {
+					call = adsbRegs.Lookup(pl.ICAO)
+					if call == "" {
+						call = pl.ICAO
+					}
+				}
+				b := ui.RadarBlip{Call: call, ICAO: pl.ICAO, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, TrackDeg: pl.TrackDeg, VrateFpm: pl.VrateFpm, HasPos: pl.HasPos}
 				if pl.HasPos {
 					b.DistKm, b.BrngDeg = geo.DistanceBearingKm(adsbLat, adsbLon, pl.Lat, pl.Lon)
 					b.MercX, b.MercY = mercPos(pl.Lat, pl.Lon)
