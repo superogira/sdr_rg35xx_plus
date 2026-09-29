@@ -72,6 +72,7 @@ var strings = map[string][2]string{
 	"m_bands":      {"ความถี่ FT8 >", "FT8 Frequencies >"},
 	"m_audiopage":  {"เสียง", "Audio"},
 	"m_aishost":    {"เซิร์ฟเวอร์ AIS (NMEA)", "AIS server (NMEA)"},
+	"m_exit":       {"ออกจากแอป", "Exit app"},
 	"m_af":         {"ตัวกรองเสียง", "Audio filter"},
 	"af_narrow":    {"แคบ", "Narrow"},
 	"af_normal":    {"ปกติ", "Normal"},
