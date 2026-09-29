@@ -32,7 +32,7 @@ var fft2560Scratch struct {
 func fft2560(re, im []float64) {
 	const N = ft8WFNFFT
 	const N1 = 512 // sub-FFT length (power of two)
-	const N2 = 5    // number of sub-FFTs
+	const N2 = 5   // number of sub-FFTs
 	for r := 0; r < N2; r++ {
 		if cap(fft2560Scratch.sub[r]) < N1 {
 			fft2560Scratch.sub[r] = make([]complex128, N1)

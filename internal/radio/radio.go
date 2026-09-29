@@ -73,14 +73,14 @@ type Radio struct {
 	gainDb    float64 // tuner gain in dB at connect; negative = AGC
 	vol       float64
 	sqlDb     float64 // NFM squelch threshold, absolute dBFS (>=0 = off)
-	nrLevel   int    // audio noise reduction 0..9
-	rttyOn   bool
-	rtty     *dsp.RTTYDecoder
-	hpHz      int    // user audio high-pass corner, 0 = off
-	lpHz      int    // user audio low-pass corner, 0 = off
-	iqRate    int     // capture sample rate in Hz (server default 2.048M)
-	dsMode    int     // -1 auto (DS below 24 MHz), 0 force off, 2 force on (Q)
-	agcOn     bool    // SSB/CW AGC enabled
+	nrLevel   int     // audio noise reduction 0..9
+	rttyOn    bool
+	rtty      *dsp.RTTYDecoder
+	hpHz      int  // user audio high-pass corner, 0 = off
+	lpHz      int  // user audio low-pass corner, 0 = off
+	iqRate    int  // capture sample rate in Hz (server default 2.048M)
+	dsMode    int  // -1 auto (DS below 24 MHz), 0 force off, 2 force on (Q)
+	agcOn     bool // SSB/CW AGC enabled
 	ft8On     bool
 	ft8       *dsp.FT8Detector
 	hfApplied int // direct-sampling mode currently set on the server
@@ -725,9 +725,9 @@ func (r *Radio) SquelchLabel() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.sqlDb >= 0 {
-		return "SQL OFF"
+		return i18n.T("sql_disabled")
 	}
-	return fmt.Sprintf("SQL %.0fdBFS", r.sqlDb)
+	return fmt.Sprintf(i18n.T("sql_fmt"), r.sqlDb)
 }
 
 func (r *Radio) Mode() dsp.Mode {

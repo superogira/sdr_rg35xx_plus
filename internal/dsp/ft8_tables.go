@@ -1,4 +1,5 @@
 package dsp
+
 // Code tables ported from kgoba/ft8_lib constants.c (WSJT-X ldpc_174_91).
 var ft8Nm = [83][7]int{
 	{4, 31, 59, 91, 92, 96, 153},

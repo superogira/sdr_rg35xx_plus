@@ -46,10 +46,10 @@ type FT8Detection struct {
 // FT8Detector streams 8 kHz audio into an STFT waterfall and decodes
 // FT8 messages via soft Costas correlation + LDPC.
 type FT8Detector struct {
-	mu        sync.Mutex
-	enabled   bool
-	results   []FT8Detection
-	synced    bool
+	mu      sync.Mutex
+	enabled bool
+	results []FT8Detection
+	synced  bool
 	// wf consumes audio incrementally; wfPending buffers sub-640-sample
 	// remainders between Feed calls.
 	wf        *ft8Waterfall

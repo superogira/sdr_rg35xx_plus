@@ -67,8 +67,8 @@ func rttyEncodeTones(text string, markHz, spaceHz float64) []float64 {
 		for k := 0; k < 5; k++ {
 			bit(tk.bits&(1<<k) != 0)
 		}
-		bit(true)                     // stop: 1 full bit
-		tone(markHz, bitLen/2)        // …plus half
+		bit(true)              // stop: 1 full bit
+		tone(markHz, bitLen/2) // …plus half
 	}
 	tone(markHz, rttyFeedRate) // trailing idle mark (real signals never end mid-stop)
 	return samples

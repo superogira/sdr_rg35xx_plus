@@ -87,10 +87,10 @@ func (n *NoiseReduction) Step(x float64) float64 {
 
 // biquad is a standard RBJ audio biquad.
 type biquad struct {
-	on                     bool
-	fcHz, fs               float64
-	b0, b1, b2, a1, a2     float64
-	x1, x2, y1, y2         float64
+	on                 bool
+	fcHz, fs           float64
+	b0, b1, b2, a1, a2 float64
+	x1, x2, y1, y2     float64
 }
 
 func (b *biquad) setHighpass(fc, fs float64) {

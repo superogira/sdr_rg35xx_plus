@@ -12,7 +12,7 @@ var dxcc = map[string]string{
 	"JN": "Japan", "JO": "Japan", "JP": "Japan", "JQ": "Japan", "JR": "Japan", "JS": "Japan",
 	"7J": "Japan", "7K": "Japan", "7L": "Japan", "7M": "Japan", "7N": "Japan",
 	"BG": "China", "BH": "China", "BI": "China", "BJ": "China", "BT": "China", "BY": "China",
-	"B": "China",
+	"B":  "China",
 	"BM": "Taiwan", "BN": "Taiwan", "BO": "Taiwan", "BU": "Taiwan", "BV": "Taiwan", "BW": "Taiwan",
 	"HS": "Thailand", "E2": "Thailand",
 	"YB": "Indonesia", "YC": "Indonesia", "YD": "Indonesia", "YE": "Indonesia",

@@ -249,13 +249,13 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			n++
 		}
 	}
-	sf.DrawString(u.img, green, 10, 58, fmt.Sprintf("%d aircraft", n))
+	sf.DrawString(u.img, green, 10, 58, fmt.Sprintf(i18n.T("radar_count"), n))
 	if mapName != "" {
 		sf.DrawString(u.img, green, 10, 74, "MAP "+mapName)
 	}
 
 	// Button hints: top-right (clear of the aircraft labels).
-	hint := "L1/R1 map  L2/R2 range  B close"
+	hint := i18n.T("radar_hint")
 	hw := sf.TextWidth(hint)
 	u.fillBlend(u.W-hw-14, 12, hw+10, 20, 2, 14, 7, 200)
 	sf.DrawString(u.img, bright, u.W-hw-9, 27, hint)
