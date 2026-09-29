@@ -38,9 +38,11 @@ type MercView struct {
 // project returns the screen offset from the radar centre for a target
 // at Mercator world pixels (mx, my) — computed at the SAME zoom as the
 // receiver reference, so a world-pixel difference IS the offset on the
-// mosaic tiles: screen = mercPx − rx + centre. Exact, no scale maths.
+// mosaic tiles. The sign convention matches osm.Mosaic exactly
+// (screen = worldPx − receiverPx + centre, y down), so a target north
+// of the receiver draws ABOVE the centre.
 func (m *MercView) project(mx, my float64) (int, int) {
-	return int(mx - m.Rx), -int(my - m.Ry)
+	return int(mx - m.Rx), int(my - m.Ry)
 }
 
 // pxPerKm is the map-true pixels per ground kilometre — drives the

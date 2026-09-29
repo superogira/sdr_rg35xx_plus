@@ -2594,9 +2594,11 @@ func main() {
 			zCur := adsbZooms[adsbRangeIdx]
 			mrx, mry := osm.MercatorPx(adsbLat, adsbLon, zCur)
 			merc := &ui.MercView{Zoom: zCur, Rx: mrx, Ry: mry, MPerPx: osm.MercMetresPx(adsbLat, zCur)}
+			// MUST be the same zoom as the receiver reference: project()
+			// subtracts world pixels, so mixed zooms push every target far
+			// off-screen (all blips clamped to the same edge point).
 			mercPos := func(lat, lon float64) (float64, float64) {
-				mx, my := osm.MercatorPx(lat, lon, 12)
-				return mx, my
+				return osm.MercatorPx(lat, lon, zCur)
 			}
 			planes := adsbStore.Planes()
 			blips := make([]ui.RadarBlip, 0, len(planes))
