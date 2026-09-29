@@ -558,8 +558,24 @@ func main() {
 	}
 	r.SetVolume(*vol)
 	// ADS-B: Beast client settings + radar range (L1/R1 cycles).
+	// Restore the saved ADS-B/AIS endpoints. These three were written to
+	// the ini but never read back, so a hand-edited Beast server /
+	// receiver position silently reverted to the defaults on restart.
 	adsbHost := "192.168.2.152:30005"
+	if v, ok := cfg["adsbhost"]; ok && v != "" {
+		adsbHost = v
+	}
 	adsbLat, adsbLon := 13.5955, 100.56178
+	if v, ok := cfg["adsblat"]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			adsbLat = f
+		}
+	}
+	if v, ok := cfg["adsblon"]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			adsbLon = f
+		}
+	}
 	adsbRanges := []float64{25, 50, 100, 200, 400}
 	adsbRangeIdx := 1
 	if v := os.Getenv("SDR_ADSB_RANGE"); v != "" {
@@ -601,6 +617,7 @@ func main() {
 		aisHost = v
 	}
 	aisConnected := false
+	fmt.Fprintf(os.Stderr, "adsb: beast=%s pos=%.5f,%.5f layer=%d | ais: %s", adsbHost, adsbLat, adsbLon, adsbLayerIdx, aisHost)
 
 	go r.Run(ctx)
 	// ADS-B: Beast TCP feed → decode → store, independent of the radio.
