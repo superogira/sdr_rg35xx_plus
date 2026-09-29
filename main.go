@@ -619,6 +619,7 @@ func main() {
 		aisHost = v
 	}
 	aisConnected := false
+	aisShowName := cfg["aisname"] != "false"
 	fmt.Fprintf(os.Stderr, "adsb: beast=%s pos=%.5f,%.5f layer=%d | ais: %s", adsbHost, adsbLat, adsbLon, adsbLayerIdx, aisHost)
 
 	go r.Run(ctx)
@@ -1563,6 +1564,9 @@ func main() {
 				adsbRangeIdx = (adsbRangeIdx + len(adsbRanges) - 1) % len(adsbRanges)
 			case input.R2:
 				adsbRangeIdx = (adsbRangeIdx + 1) % len(adsbRanges)
+			case input.A:
+				aisShowName = !aisShowName
+				cfg["aisname"] = fmt.Sprintf("%v", aisShowName)
 			case input.B, input.Start, input.Select:
 				uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuADSBRadar)
 			}
@@ -2639,9 +2643,9 @@ func main() {
 					continue
 				}
 				d, br := geo.DistanceBearingKm(adsbLat, adsbLon, sh.Lat, sh.Lon)
-				name := sh.Name
-				if name == "" {
-					name = sh.MMSI
+				name := sh.MMSI
+				if aisShowName && sh.Name != "" {
+					name = sh.Name
 				}
 				mx, my := mercPos(sh.Lat, sh.Lon)
 				blips = append(blips, ui.RadarBlip{Vessel: true, AtoN: sh.AtoN, Call: name, ICAO: sh.MMSI, BrngDeg: br, DistKm: d, SogKt: sh.SogKt, HasPos: true, MercX: mx, MercY: my})
@@ -2874,6 +2878,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["adsblayer"]; ok {
 		fmt.Fprintf(f, "adsblayer=%s\n", v)
+	}
+	if v, ok := cfg["aisname"]; ok {
+		fmt.Fprintf(f, "aisname=%s\n", v)
 	}
 	if v, ok := cfg["aishost"]; ok {
 		fmt.Fprintf(f, "aishost=%s\n", v)
