@@ -259,6 +259,9 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			if x > u.W-120 {
 				tx = x - 6 - tf.TextWidth(label) - fw
 			}
+			if flag != nil {
+				tx += fw // flag leads the label
+			}
 			ty := y + 4
 			if y < 60 {
 				ty = y + 14
@@ -272,7 +275,7 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			}
 			tf.DrawString(u.img, lcol, tx, ty, label)
 			if flag != nil {
-				drawImage(u.img, flag, tx+tf.TextWidth(label)+3, ty-10)
+				drawImage(u.img, flag, tx-fw, ty-10)
 			}
 			continue
 		}
@@ -331,6 +334,9 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		if x > u.W-120 {
 			tx = x - 8 - tf.TextWidth(label) - fw
 		}
+		if flag != nil {
+			tx += fw // flag leads the label
+		}
 		ty := y + 4
 		if y < 60 {
 			ty = y + 14
@@ -340,7 +346,7 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
 		tf.DrawString(u.img, altitudeColor(b.AltFt), tx, ty, label)
 		if flag != nil {
-			drawImage(u.img, flag, tx+tf.TextWidth(label)+3, ty-10)
+			drawImage(u.img, flag, tx-fw, ty-10)
 		}
 	}
 
