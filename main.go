@@ -399,6 +399,8 @@ const (
 	menuADSBLon
 	menuADSBRadar
 	menuAISServer
+	menuAISRF
+	menuAISLog
 	menuClearMap
 	menuPPM
 	menuExit
@@ -413,7 +415,7 @@ var pageItems = [][]int{
 	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 	{menuAF, menuNR, menuHP, menuLP},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
-	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuADSBRadar, menuClearMap},
+	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
 	{menuBM},
 	{menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 }
@@ -623,6 +625,9 @@ func main() {
 	}
 	aisConnected := false
 	aisShowName := cfg["aisname"] != "false"
+	aisLog := []ui.AISEntry{}
+	aisScroll := 0
+	aisLogMu := sync.Mutex{}
 	fmt.Fprintf(os.Stderr, "adsb: beast=%s pos=%.5f,%.5f layer=%d | ais: %s", adsbHost, adsbLat, adsbLon, adsbLayerIdx, aisHost)
 
 	go r.Run(ctx)
@@ -656,6 +661,42 @@ func main() {
 	aisClient := ais.NewClient(aisHost)
 	aisClient.Connected = func(c bool) { aisConnected = c }
 	go aisClient.Run(ctx, aisStore)
+	// Over-the-air AIS: decoded frames land in the same store (radar
+	// needs no changes) and in the message log windows.
+	r.SetAISPayloadFunc(func(payload []byte, ch int) {
+		typ, mmsi := aisStore.DecodeBits(payload)
+		if mmsi == "" || typ == 0 {
+			return
+		}
+		line := fmt.Sprintf("%d", typ)
+		if sh := aisStore.Ship(mmsi); sh != nil {
+			line = fmt.Sprintf("%s", sh.MMSI)
+			if sh.Name != "" {
+				line += " " + sh.Name
+			}
+			if sh.HasPos {
+				line += fmt.Sprintf("  %.4f,%.4f", sh.Lat, sh.Lon)
+				if sh.SogKt > 0.5 {
+					line += fmt.Sprintf("  %.1fkt", sh.SogKt)
+				}
+			} else {
+				line += "  (no pos)"
+			}
+		}
+		name := "A"
+		if ch == 1 {
+			name = "B"
+		}
+		aisLogMu.Lock()
+		aisLog = append(aisLog, ui.AISEntry{Time: time.Now().Format("15:04:05"), Ch: name, Text: line})
+		if len(aisLog) > 100 {
+			aisLog = aisLog[len(aisLog)-100:]
+		}
+		aisLogMu.Unlock()
+	})
+	if cfg["aisrf"] == "on" {
+		r.SetAISRFEnabled(true)
+	}
 	defer func() {
 		if out != nil {
 			out.Close()
@@ -885,6 +926,7 @@ func main() {
 		uiFreqEdit
 		uiHostEdit
 		uiHostList
+		uiAISLog
 		uiBeastList
 		uiAISList
 		uiFT8Log
@@ -1387,6 +1429,13 @@ func main() {
 			uiMode = uiHostEdit
 		case menuADSBRadar:
 			uiMode = uiADSB
+		case menuAISRF:
+			on := !r.AISRFEnabled()
+			r.SetAISRFEnabled(on)
+			cfg["aisrf"] = map[bool]string{true: "on", false: "off"}[on]
+		case menuAISLog:
+			aisScroll = 0
+			uiMode = uiAISLog
 		case menuClearMap:
 			// Tiles live in osmcache/ next to the exe; OTA never touches
 			// them, so this is the only way to start fresh.
@@ -1763,6 +1812,16 @@ func main() {
 				}
 			case input.B, input.Start:
 				uiMode = uiMenu
+			}
+		case uiAISLog:
+			// AIS message screen: up/down scroll, B/Start back.
+			switch b {
+			case input.Up:
+				aisScroll++
+			case input.Down:
+				aisScroll--
+			case input.B, input.Start, input.Select:
+				uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuAISLog)
 			}
 		case uiBeastList, uiAISList:
 			// Same rows/select/edit/delete mechanics as the radio host
@@ -2520,6 +2579,8 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_adsblon"), Value: fmt.Sprintf("%.5f", adsbLon)},
 					ui.MenuItem{Label: i18n.T("m_adsbhost"), Value: adsbHost},
 					ui.MenuItem{Label: i18n.T("m_aishost"), Value: aisHost},
+					ui.MenuItem{Label: i18n.T("m_aisrf"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.AISRFEnabled()]},
+					ui.MenuItem{Label: i18n.T("m_aislog"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_adsbradar"), Value: i18n.T("press_a")},
 					func() ui.MenuItem {
 						v := i18n.T("press_a")
@@ -2586,6 +2647,21 @@ func main() {
 			u.DrawBookmarkList(labels, bmSel, active, r.Mode().Name)
 		} else if uiMode == uiFT8Log {
 			u.DrawFT8LogFull(ft8Log, ft8Scroll, flagDir)
+		} else if uiMode == uiAISLog {
+			aisLogMu.Lock()
+			view := make([]ui.AISEntry, len(aisLog))
+			copy(view, aisLog)
+			aisLogMu.Unlock()
+			if aisScroll < 0 {
+				aisScroll = 0
+			}
+			if aisScroll > len(view)-1 {
+				aisScroll = len(view) - 1
+			}
+			if aisScroll < 0 {
+				aisScroll = 0
+			}
+			u.DrawAISLogFull(view, aisScroll)
 		} else if uiMode == uiSysMon {
 			sn := sysinfo.SensorSnapshot()
 			cpu, mem, swp := sysinfo.Snapshot()
@@ -2953,6 +3029,13 @@ func main() {
 			u.DrawFT8Grid(loHz, viewOff)
 			u.DrawFT8Log(ft8Log, flagDir)
 		}
+		if r.AISRFEnabled() && uiMode == uiMain && !r.FT8Enabled() {
+			aisLogMu.Lock()
+			view := make([]ui.AISEntry, len(aisLog))
+			copy(view, aisLog)
+			aisLogMu.Unlock()
+			u.DrawAISLog(view)
+		}
 		if uiMode == uiMain {
 			u.DrawSysBadge(cpu, mem, sysinfo.SensorSnapshot().BattPct)
 		}
@@ -3085,6 +3168,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["ppm"]; ok {
 		fmt.Fprintf(f, "ppm=%s\n", v)
+	}
+	if v, ok := cfg["aisrf"]; ok {
+		fmt.Fprintf(f, "aisrf=%s\n", v)
 	}
 	if v, ok := cfg["update"]; ok {
 		fmt.Fprintf(f, "update=%s\n", v)

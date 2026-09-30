@@ -41,6 +41,8 @@ var strings = map[string][2]string{
 	"host_add":      {"+ เพิ่มรายการใหม่", "+ Add new entry"},
 	"beast_title":   {"รายการ Beast Server", "Beast server list"},
 	"m_clearcache":  {"ล้างแคชแผนที่", "Clear map cache"},
+	"m_aisrf":       {"รับ AIS จากคลื่น (RF)", "AIS RF decode"},
+	"m_aislog":      {"ข้อความ AIS", "AIS messages"},
 	"cache_cleared": {"ล้างแล้ว", "cleared"},
 	"ais_title":     {"รายการ AIS Server", "AIS server list"},
 	"ft8_scroll":    {"▲▼ บรรทัด · ◀▶ หน้า · B/Select ปิด", "▲▼ line · ◀▶ page · B/Select close"},

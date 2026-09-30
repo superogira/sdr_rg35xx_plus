@@ -177,16 +177,41 @@ func (s *Store) Decode(line string) {
 		return
 	}
 
-	typ := u(p, 0, 6)
-	mmsi := fmt.Sprintf("%09d", u(p, 8, 30))
+	s.decodePayload(p)
+}
+
+// DecodeBits decodes a raw over-the-air AIS payload (the HDLC frame's
+// content, one bit per byte is NOT expected — plain bytes here) and
+// routes it through the same field decoder as AIVDM sentences. The
+// bytes are repacked into the 6-bit cells u/i/text read.
+func (s *Store) DecodeBits(payload []byte) (typ uint32, mmsi string) {
+	n6 := len(payload) * 8 / 6
+	if n6 < 20 {
+		return 0, ""
+	}
+	// HDLC octets go out LSB-first, so message bit j lives in byte j/8
+	// at position j%8 — the same packing the AIVDM armor uses.
+	p := make([]byte, n6)
+	for bit := 0; bit < n6*6; bit++ {
+		b := (payload[bit/8] >> uint(bit%8)) & 1
+		p[bit/6] = p[bit/6]<<1 | b
+	}
+	return s.decodePayload(p)
+}
+
+// decodePayload applies the AIS field layout to a 6-bit-cell payload
+// and updates the ship table. Shared by the AIVDM and RF paths.
+func (s *Store) decodePayload(p []byte) (typ uint32, mmsi string) {
+	typ = u(p, 0, 6)
+	mmsi = fmt.Sprintf("%09d", u(p, 8, 30))
 
 	switch typ {
 	case 1, 2, 3, 5, 6, 18, 21, 24:
 	default:
-		return
+		return typ, mmsi
 	}
 	if u(p, 8, 30) == 0 {
-		return
+		return typ, mmsi
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -223,6 +248,19 @@ func (s *Store) Decode(line string) {
 		sh.Name = text(p, 43, 120)
 		sh.Lat, sh.Lon, sh.HasPos = latLonAt(p, 193, 165)
 	}
+	return typ, mmsi
+}
+
+// Ship returns a copy of one ship's current state (nil if unknown).
+func (s *Store) Ship(mmsi string) *Ship {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sh := s.ships[mmsi]
+	if sh == nil {
+		return nil
+	}
+	cp := *sh
+	return &cp
 }
 
 // Client connects to an NMEA-over-TCP server and feeds the store.
