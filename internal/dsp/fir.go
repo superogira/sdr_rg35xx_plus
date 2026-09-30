@@ -43,6 +43,11 @@ func hamming(i, n int) float64 {
 // Output j uses inputs x[jD + D - 1 - k] for k in [0, len(taps)), reaching
 // into hist for the negative indices, so the cost is outputs×taps — the
 // dropped samples are never filtered.
+// FIRDecim is the exported complex decimating FIR (dev harnesses).
+func FIRDecim(taps []float64, hist *[]complex128, D int, in []complex128, out *[]complex128) {
+	complexFIRDecim(taps, hist, D, in, out)
+}
+
 func complexFIRDecim(taps []float64, hist *[]complex128, D int, in []complex128, out *[]complex128) {
 	L := len(taps)
 	H := *hist

@@ -204,6 +204,15 @@ type Chain struct {
 	ft8Scratch []complex128
 	ft8Side    []complex128
 
+	// AIS RF branch: two channel demods fed from the unrotated IF2.
+	aisA, aisB AISDemod
+	aisNco     [2]float64
+	aisPrevArg [2]float64
+	aisRot     []complex128
+	aisDec     [2][]complex128
+	aisHist    [2][]complex128
+	aisTaps    []float64
+
 	// Audio decimator: real, IF2Rate -> AudioRate.
 	auTaps []float64
 	auHist []float64
@@ -506,6 +515,10 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 		c.tap.Push(c.fif2)
 	}
 
+	if c.aisA != nil || c.aisB != nil {
+		c.feedAIS(c.fif2)
+	}
+
 	// Passband tuning: rotate at the FULL IQ rate (before IF2
 	// decimation) so the demodulation window is limited only by the
 	// IQ Nyquist, not the IF2 filter bandwidth. The NCO shifts the
@@ -686,6 +699,92 @@ func (c *Chain) feedMonitors() {
 	}
 	if c.rtty != nil {
 		c.rtty.Feed(buf)
+	}
+}
+
+// AISDemod consumes one channel's FM discriminator output plus the
+// pre-detection power, both at 64 ks/s (internal/ais.ChannelDemod).
+type AISDemod interface {
+	Feed(fm, power []float64)
+}
+
+// feedAIS demodulates both AIS channels from the unrotated IF2 stream.
+// The channels sit at ±25 kHz around the LO (tuned midway at
+// 162.000 MHz); each is NCO-shifted to DC, boxcar-decimated to 64 ks/s
+// and FM-demodulated by phase differencing. The power track drives the
+// demod's burst detector.
+func (c *Chain) feedAIS(in []complex128) {
+	const out = 64000
+	d := IF2Rate / out
+	if out*d != IF2Rate || IF2Rate < 128000 {
+		return // unsupported rate combo: branch stays silent
+	}
+	for ch := 0; ch < 2; ch++ {
+		var dem AISDemod
+		f := -25000.0 // channel A below the LO
+		if ch == 1 {
+			dem, f = c.aisB, 25000.0
+		} else {
+			dem = c.aisA
+		}
+		if dem == nil {
+			continue
+		}
+		incr := -2 * math.Pi * f / float64(IF2Rate)
+		rot := c.aisRot[:0]
+		for _, z := range in {
+			w := c.aisNco[ch]
+			cw, sw := math.Cos(w), math.Sin(w)
+			rot = append(rot, complex(real(z)*cw-imag(z)*sw, real(z)*sw+imag(z)*cw))
+			c.aisNco[ch] += incr
+			if c.aisNco[ch] > 2*math.Pi {
+				c.aisNco[ch] -= 2 * math.Pi
+			} else if c.aisNco[ch] < -2*math.Pi {
+				c.aisNco[ch] += 2 * math.Pi
+			}
+		}
+		c.aisRot = rot
+		// Channel filter: a plain boxcar left the other AIS channel
+		// (50 kHz away) aliasing into the passband — a real lowpass
+		// keeps it out before the decimation to 64 ks/s.
+		dec := c.aisDec[ch][:0]
+		complexFIRDecim(c.aisTaps, &c.aisHist[ch], d, rot, &dec)
+		c.aisDec[ch] = dec
+		fm := make([]float64, 0, len(dec))
+		pow := make([]float64, 0, len(dec))
+		for _, z := range dec {
+			arg := math.Atan2(imag(z), real(z))
+			delta := arg - c.aisPrevArg[ch]
+			// Fold into [-π, π]: the raw difference jumps ±2π
+			// whenever the phase wraps.
+			if delta > math.Pi {
+				delta -= 2 * math.Pi
+			} else if delta < -math.Pi {
+				delta += 2 * math.Pi
+			}
+			fm = append(fm, delta)
+			pow = append(pow, real(z)*real(z)+imag(z)*imag(z))
+			c.aisPrevArg[ch] = arg
+		}
+		if len(fm) > 0 {
+			dem.Feed(fm, pow)
+		}
+	}
+}
+
+// SetAISDemods attaches (or with nils detaches) the AIS RF channel
+// demods.
+func (c *Chain) SetAISDemods(a, b AISDemod) {
+	c.aisA, c.aisB = a, b
+	c.aisNco = [2]float64{}
+	c.aisPrevArg = [2]float64{}
+	c.aisHist = [2][]complex128{}
+	// Pass ±16 kHz (GMSK ±2.4 kHz plus margin), stop before the other
+	// channel at 37.5 kHz+.
+	if IF2Rate > 64000 {
+		c.aisTaps = DesignLowpass(127, 16000, float64(IF2Rate))
+	} else {
+		c.aisTaps = nil
 	}
 }
 

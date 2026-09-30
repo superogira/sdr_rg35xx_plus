@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"sdr35/internal/ais"
 	"sdr35/internal/audio"
 	"sdr35/internal/dsp"
 	"sdr35/internal/i18n"
@@ -66,26 +67,29 @@ type Radio struct {
 	out    *audio.Output    // nil = waterfall only
 	name   string           // audio backend name for status
 
-	mu        sync.Mutex
-	freqHz    int64
-	loHz      int64
-	mode      dsp.Mode
-	gainDb    float64 // tuner gain in dB at connect; negative = AGC
-	vol       float64
-	sqlDb     float64 // NFM squelch threshold, absolute dBFS (>=0 = off)
-	nrLevel   int     // audio noise reduction 0..9
-	rttyOn    bool
-	rtty      *dsp.RTTYDecoder
-	hpHz      int  // user audio high-pass corner, 0 = off
-	lpHz      int  // user audio low-pass corner, 0 = off
-	iqRate    int  // capture sample rate in Hz (server default 2.048M)
-	dsMode    int  // -1 auto (DS below 24 MHz), 0 force off, 2 force on (Q)
-	agcOn     bool // SSB/CW AGC enabled
-	ft8On     bool
-	ft8       *dsp.FT8Detector
-	hfApplied int // direct-sampling mode currently set on the server
-	ppm       int  // tuner frequency correction, applied live and at every (re)connect
-	ppmOff    bool // true = leave the correction to the server's own setting
+	mu         sync.Mutex
+	freqHz     int64
+	loHz       int64
+	mode       dsp.Mode
+	gainDb     float64 // tuner gain in dB at connect; negative = AGC
+	vol        float64
+	sqlDb      float64 // NFM squelch threshold, absolute dBFS (>=0 = off)
+	nrLevel    int     // audio noise reduction 0..9
+	rttyOn     bool
+	rtty       *dsp.RTTYDecoder
+	hpHz       int  // user audio high-pass corner, 0 = off
+	lpHz       int  // user audio low-pass corner, 0 = off
+	iqRate     int  // capture sample rate in Hz (server default 2.048M)
+	dsMode     int  // -1 auto (DS below 24 MHz), 0 force off, 2 force on (Q)
+	agcOn      bool // SSB/CW AGC enabled
+	ft8On      bool
+	ft8        *dsp.FT8Detector
+	aisRFOn    bool
+	aisA, aisB *ais.ChannelDemod
+	aisPay     func(payload []byte, ch int)
+	hfApplied  int  // direct-sampling mode currently set on the server
+	ppm        int  // tuner frequency correction, applied live and at every (re)connect
+	ppmOff     bool // true = leave the correction to the server's own setting
 
 	client  *rtltcp.Client
 	gains   int32
@@ -118,7 +122,7 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		gainDb = 49.6
 	}
 	rttyDec := dsp.NewRTTYDecoder()
-	return &Radio{
+	r := &Radio{
 		rtty:   rttyDec,
 		Host:   host,
 		tap:    dsp.NewSpectrumTap(),
@@ -135,6 +139,17 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		ft8:    dsp.NewFT8Detector(),
 		chain:  dsp.NewChain(mode, nil, nil),
 	}
+	r.aisA = ais.NewChannelDemod(64000, 0, "A", func(p []byte, ch int) {
+		if f := r.aisPay; f != nil {
+			f(p, ch)
+		}
+	})
+	r.aisB = ais.NewChannelDemod(64000, 1, "B", func(p []byte, ch int) {
+		if f := r.aisPay; f != nil {
+			f(p, ch)
+		}
+	})
+	return r
 }
 
 func (r *Radio) Tap() *dsp.SpectrumTap    { return r.tap }
@@ -287,6 +302,9 @@ func (r *Radio) session(ctx context.Context) error {
 		r.applyAudioFx()
 		if r.ft8On {
 			chain.SetFT8Detector(r.ft8)
+		}
+		if r.aisRFOn {
+			chain.SetAISDemods(r.aisA, r.aisB)
 		}
 		r.chain = chain
 		r.state = stateStreaming
@@ -679,6 +697,11 @@ func (r *Radio) SetMode(mode dsp.Mode) {
 		fmt.Fprintf(os.Stderr, "radio: mode change to %s ignored — FT8 locks USB\n", mode.Name)
 		return
 	}
+	if r.aisRFOn && mode.Name != dsp.ModeNFM.Name && mode.Name != r.mode.Name {
+		r.mu.Unlock()
+		fmt.Fprintf(os.Stderr, "radio: mode change to %s ignored (AIS RF locks NFM)"+string(rune(10)), mode.Name)
+		return
+	}
 	r.mode = mode
 	r.chain = dsp.NewChain(mode, r.tap, r.rawTap)
 	r.chain.SetVolume(r.vol)
@@ -687,6 +710,9 @@ func (r *Radio) SetMode(mode dsp.Mode) {
 	r.applyAudioFx()
 	if r.ft8On {
 		r.chain.SetFT8Detector(r.ft8)
+	}
+	if r.aisRFOn {
+		r.chain.SetAISDemods(r.aisA, r.aisB)
 	}
 	// The fresh chain starts at offset 0 — restore the passband offset
 	// so switching modes mid-scroll keeps listening where the dial says.
@@ -892,6 +918,50 @@ func (r *Radio) SetFT8Enabled(on bool) {
 		r.SetMode(dsp.ModeUSB)
 	}
 	fmt.Fprintf(os.Stderr, "radio: FT8 %v\n", on)
+}
+
+// AISRFEnabled reports whether the over-the-air AIS demodulator runs.
+func (r *Radio) AISRFEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.aisRFOn
+}
+
+// SetAISRFEnabled toggles the over-the-air AIS decoder. Turning it on
+// tunes the receiver midway between both AIS channels (162.000 MHz —
+// they sit at ±25 kHz) and locks the mode to NFM, mirroring the FT8
+// USB convention. FT8 is turned off first: both fight over the tuner.
+func (r *Radio) SetAISRFEnabled(on bool) {
+	if on && r.FT8Enabled() {
+		r.SetFT8Enabled(false)
+	}
+	r.mu.Lock()
+	r.aisRFOn = on
+	chain := r.chain
+	needNFM := on && r.mode.Name != dsp.ModeNFM.Name
+	r.mu.Unlock()
+	if chain != nil {
+		if on {
+			chain.SetAISDemods(r.aisA, r.aisB)
+		} else {
+			chain.SetAISDemods(nil, nil)
+		}
+	}
+	if needNFM {
+		r.SetMode(dsp.ModeNFM) // rebuilds the chain and re-attaches
+	}
+	if on && r.LO() != 162_000_000 {
+		r.SetFreq(162_000_000)
+	}
+	fmt.Fprintf(os.Stderr, "radio: AIS RF %v"+string(rune(10)), on)
+}
+
+// SetAISPayloadFunc installs the receiver for demodulated AIS payloads
+// (called from the DSP goroutine).
+func (r *Radio) SetAISPayloadFunc(f func(payload []byte, ch int)) {
+	r.mu.Lock()
+	r.aisPay = f
+	r.mu.Unlock()
 }
 
 // SyncFT8 marks now as end of a transmission.

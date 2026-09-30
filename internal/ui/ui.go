@@ -176,6 +176,98 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int, flagDir string) {
 	hintF.DrawString(u.img, gray, x+10, y+h-12, i18n.T("ft8_scroll"))
 }
 
+// AISEntry is one decoded over-the-air AIS message for the log windows.
+type AISEntry struct {
+	Time string
+	Ch   string // "A" / "B"
+	Text string
+}
+
+// DrawAISLog renders the mini overlay with the latest decoded AIS
+// messages over the waterfall (mirrors the FT8 mini window).
+func (u *UI) DrawAISLog(entries []AISEntry) {
+	lh := 15
+	maxShow := 6
+	if len(entries) > maxShow {
+		entries = entries[len(entries)-maxShow:]
+	}
+	pw := 440
+	ph := len(entries)*lh + 8
+	if len(entries) == 0 {
+		ph = lh + 8
+	}
+	px := 4
+	py := u.WaterfallRows - ph - 4
+	u.fillBlend(px, py, pw, ph, 0, 0, 0, 180)
+	tf := Face(11, false)
+	if len(entries) == 0 {
+		tf.DrawString(u.img, color.RGBA{150, 180, 150, 255}, px+4, py+14, "AIS · · ·")
+		return
+	}
+	for i, e := range entries {
+		y := py + 14 + i*lh
+		tf.DrawString(u.img, color.RGBA{150, 180, 150, 255}, px+4, y, e.Time)
+		tf.DrawString(u.img, color.RGBA{0, 220, 220, 255}, px+52, y, e.Ch)
+		tf.DrawString(u.img, ft8TextColor(e.Text), px+70, y, e.Text)
+	}
+}
+
+// DrawAISLogFull renders the scrollable AIS history window.
+func (u *UI) DrawAISLogFull(entries []AISEntry, scroll int) {
+	lh := 16
+	x, y := 12, 8
+	w := u.W - 24
+	h := u.WaterfallRows - 16
+	if h < 4*lh {
+		return
+	}
+	u.fillBlend(x, y, w, h, 0, 0, 0, 215)
+	u.fillBlend(x, y, w, 2, 0, 190, 220, 255)
+	u.fillBlend(x, y+h-2, w, 2, 0, 190, 220, 255)
+
+	titleF := Face(14, true)
+	lineF := Face(13, false)
+	hintF := Face(11, false)
+	white := color.RGBA{235, 235, 235, 255}
+	gray := color.RGBA{150, 180, 150, 255}
+
+	vis := (h - 2*lh - 14) / lh
+	if vis < 1 {
+		vis = 1
+	}
+	bottom := len(entries) - scroll
+	if bottom > len(entries) {
+		bottom = len(entries)
+	}
+	if bottom < vis {
+		bottom = vis
+	}
+	if bottom > len(entries) {
+		bottom = len(entries)
+	}
+	top := bottom - vis
+	if top < 0 {
+		top = 0
+	}
+
+	title := fmt.Sprintf("AIS  ·  %d", len(entries))
+	titleF.DrawString(u.img, white, x+10, y+20, title)
+	pos := fmt.Sprintf("%d-%d", top+1, bottom)
+	lineF.DrawString(u.img, gray, x+w-10-lineF.TextWidth(pos), y+20, pos)
+
+	if len(entries) == 0 {
+		lineF.DrawString(u.img, gray, x+10, y+lh+22, "· · ·")
+	}
+	for i := top; i < bottom; i++ {
+		e := entries[i]
+		yy := y + lh + 22 + (i-top)*lh
+		lineF.DrawString(u.img, gray, x+10, yy, e.Time)
+		lineF.DrawString(u.img, color.RGBA{0, 220, 220, 255}, x+78, yy, e.Ch)
+		lineF.DrawString(u.img, ft8TextColor(e.Text), x+104, yy, e.Text)
+	}
+	hintF.DrawString(u.img, gray, x+10, y+h-12, i18n.T("ft8_scroll"))
+}
+
 // MenuItem is one row of the settings menu.
 type MenuItem struct {
 	Label string

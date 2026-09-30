@@ -35,7 +35,7 @@ func TestRootRowsOpenMatchingPages(t *testing.T) {
 		{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 		{menuAF, menuNR, menuHP, menuLP},
 		{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
-		{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuADSBRadar, menuClearMap},
+		{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
 		{menuBM},
 		{menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 	}
