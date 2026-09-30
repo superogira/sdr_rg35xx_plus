@@ -628,6 +628,10 @@ func main() {
 	adsbStore := adsb.NewStore()
 	adsbRegs := adsb.NewRegDB(filepath.Join(filepath.Dir(mustExe()), "adsbreg.txt"))
 	flagDir := filepath.Join(filepath.Dir(mustExe()), "flags")
+	// One-off background warmup: the whole flag set (~250 icons, a few
+	// hundred KB) so labels work with no internet at all. Misses still
+	// fall back to the on-demand fetch.
+	go ui.PrefetchAllFlags(flagDir)
 	adsbClient := adsb.NewClient(adsbHost)
 	adsbClient.Connected = func(c bool) { adsbConnected = c }
 	go adsbClient.Run(ctx, func(msg []byte, mlat uint64, sig int) {
