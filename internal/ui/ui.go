@@ -178,14 +178,15 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int, flagDir string) {
 
 // AISEntry is one decoded over-the-air AIS message for the log windows.
 type AISEntry struct {
-	Time string
-	Ch   string // "A" / "B"
-	Text string
+	Time   string
+	Ch     string // "A" / "B"
+	Text   string
+	FlagCC string // MMSI country → flag icon after the text
 }
 
 // DrawAISLog renders the mini overlay with the latest decoded AIS
 // messages over the waterfall (mirrors the FT8 mini window).
-func (u *UI) DrawAISLog(entries []AISEntry) {
+func (u *UI) DrawAISLog(entries []AISEntry, flagDir string) {
 	lh := 15
 	maxShow := 6
 	if len(entries) > maxShow {
@@ -209,11 +210,14 @@ func (u *UI) DrawAISLog(entries []AISEntry) {
 		tf.DrawString(u.img, color.RGBA{150, 180, 150, 255}, px+4, y, e.Time)
 		tf.DrawString(u.img, color.RGBA{0, 220, 220, 255}, px+52, y, e.Ch)
 		tf.DrawString(u.img, ft8TextColor(e.Text), px+70, y, e.Text)
+		if flag := GetFlag(e.FlagCC, flagDir); flag != nil {
+			drawImage(u.img, flag, px+70+tf.TextWidth(e.Text)+3, y-9)
+		}
 	}
 }
 
 // DrawAISLogFull renders the scrollable AIS history window.
-func (u *UI) DrawAISLogFull(entries []AISEntry, scroll int) {
+func (u *UI) DrawAISLogFull(entries []AISEntry, scroll int, flagDir string) {
 	lh := 16
 	x, y := 12, 8
 	w := u.W - 24
@@ -264,6 +268,9 @@ func (u *UI) DrawAISLogFull(entries []AISEntry, scroll int) {
 		lineF.DrawString(u.img, gray, x+10, yy, e.Time)
 		lineF.DrawString(u.img, color.RGBA{0, 220, 220, 255}, x+78, yy, e.Ch)
 		lineF.DrawString(u.img, ft8TextColor(e.Text), x+104, yy, e.Text)
+		if flag := GetFlag(e.FlagCC, flagDir); flag != nil {
+			drawImage(u.img, flag, x+104+lineF.TextWidth(e.Text)+3, yy-9)
+		}
 	}
 	hintF.DrawString(u.img, gray, x+10, y+h-12, i18n.T("ft8_scroll"))
 }
