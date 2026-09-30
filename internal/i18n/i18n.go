@@ -40,6 +40,7 @@ var strings = map[string][2]string{
 	"host_hint":     {"A ใช้ · X แก้ไข · Y ลบ · B กลับ", "A use · X edit · Y delete · B back"},
 	"host_add":      {"+ เพิ่มรายการใหม่", "+ Add new entry"},
 	"beast_title":   {"รายการ Beast Server", "Beast server list"},
+	"host_disable":  {"(ปิดใช้งาน — ไม่เชื่อมต่อ)", "(disabled — no connection)"},
 	"m_clearcache":  {"ล้างแคชแผนที่", "Clear map cache"},
 	"m_aisrf":       {"รับ AIS จากคลื่น (RF)", "AIS RF decode"},
 	"m_aislog":      {"ข้อความ AIS", "AIS messages"},

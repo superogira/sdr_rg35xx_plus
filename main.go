@@ -566,8 +566,10 @@ func main() {
 	// the ini but never read back, so a hand-edited Beast server /
 	// receiver position silently reverted to the defaults on restart.
 	adsbHost := "192.168.2.152:30005"
-	if v, ok := cfg["adsbhost"]; ok && v != "" {
+	if v, ok := cfg["adsbhost"]; ok && v != "" && v != "off" {
 		adsbHost = v
+	} else if v == "off" {
+		adsbHost = ""
 	}
 	adsbLat, adsbLon := 13.5955, 100.56178
 	if v, ok := cfg["adsblat"]; ok {
@@ -618,10 +620,13 @@ func main() {
 		adsbMosaic[i] = make([]*image.RGBA, len(adsbRanges))
 		adsbFetching[i] = make([]bool, len(adsbRanges))
 	}
-	// AIS: NMEA ship feed from aiscatcher.
+	// AIS: NMEA ship feed from aiscatcher ("off" = feed disabled, RF
+	// decode only).
 	aisHost := "192.168.2.151:29420"
-	if v, ok := cfg["aishost"]; ok && v != "" {
+	if v, ok := cfg["aishost"]; ok && v != "" && v != "off" {
 		aisHost = v
+	} else if v == "off" {
+		aisHost = ""
 	}
 	aisConnected := false
 	aisShowName := cfg["aisname"] != "false"
@@ -1825,25 +1830,39 @@ func main() {
 			}
 		case uiBeastList, uiAISList:
 			// Same rows/select/edit/delete mechanics as the radio host
-			// list, aimed at the Beast or AIS target.
+			// list, aimed at the Beast or AIS target — plus a leading
+			// "disabled" row that disconnects the feed entirely (RF
+			// decode only).
 			list := &beastList
 			sel := &beastSel
 			if uiMode == uiAISList {
 				list, sel = &aisList, &aisSel
 			}
-			rows := len(*list) + 1
+			rows := len(*list) + 2 // disable row + add row
 			switch b {
 			case input.Up:
 				*sel = (*sel + rows - 1) % rows
 			case input.Down:
 				*sel = (*sel + 1) % rows
 			case input.A:
-				if *sel == len(*list) {
+				if *sel == 0 {
+					// Disable: an empty host keeps the client idle.
+					if uiMode == uiAISList {
+						aisHost = ""
+						cfg["aishost"] = "off"
+						aisClient.SetHost("")
+					} else {
+						adsbHost = ""
+						cfg["adsbhost"] = "off"
+						adsbClient.SetHost("")
+					}
+					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuBeastRow(uiMode))
+				} else if *sel == len(*list)+1 {
 					hostText, hostEditIdx, kbTarget = "", -1, listTargetOf(uiMode)
 					hostKbR, hostKbC = 0, 0
 					uiMode = uiHostEdit
 				} else {
-					h := (*list)[*sel]
+					h := (*list)[*sel-1]
 					if uiMode == uiAISList {
 						aisHost = h
 						cfg["aishost"] = h
@@ -1858,19 +1877,26 @@ func main() {
 					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuBeastRow(uiMode))
 				}
 			case input.X:
-				if *sel < len(*list) {
-					hostText, hostEditIdx, kbTarget = (*list)[*sel], *sel, listTargetOf(uiMode)
+				if *sel >= 1 && *sel <= len(*list) {
+					hostText, hostEditIdx, kbTarget = (*list)[*sel-1], *sel-1, listTargetOf(uiMode)
 					hostKbR, hostKbC = 0, 0
 					uiMode = uiHostEdit
 				}
 			case input.Y:
-				if *sel < len(*list) {
-					*list = append((*list)[:*sel], (*list)[*sel+1:]...)
+				if *sel >= 1 && *sel <= len(*list) {
+					i := *sel - 1
+					*list = append((*list)[:i], (*list)[i+1:]...)
 					if len(*list) == 0 {
-						*list = []string{adsbHost}
+						fallback := adsbHost
+						if uiMode == uiAISList {
+							fallback = aisHost
+						}
+						if fallback != "" {
+							*list = []string{fallback}
+						}
 					}
-					if *sel >= len(*list) {
-						*sel = len(*list)
+					if *sel > len(*list)+1 {
+						*sel = len(*list) + 1
 					}
 					if uiMode == uiBeastList {
 						saveBeastHosts()
@@ -2577,8 +2603,20 @@ func main() {
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_adsblat"), Value: fmt.Sprintf("%.5f", adsbLat)},
 					ui.MenuItem{Label: i18n.T("m_adsblon"), Value: fmt.Sprintf("%.5f", adsbLon)},
-					ui.MenuItem{Label: i18n.T("m_adsbhost"), Value: adsbHost},
-					ui.MenuItem{Label: i18n.T("m_aishost"), Value: aisHost},
+					func() ui.MenuItem {
+						v := adsbHost
+						if v == "" {
+							v = "(" + i18n.T("off") + ")"
+						}
+						return ui.MenuItem{Label: i18n.T("m_adsbhost"), Value: v}
+					}(),
+					func() ui.MenuItem {
+						v := aisHost
+						if v == "" {
+							v = "(" + i18n.T("off") + ")"
+						}
+						return ui.MenuItem{Label: i18n.T("m_aishost"), Value: v}
+					}(),
 					ui.MenuItem{Label: i18n.T("m_aisrf"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.AISRFEnabled()]},
 					ui.MenuItem{Label: i18n.T("m_aislog"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_adsbradar"), Value: i18n.T("press_a")},
@@ -2612,21 +2650,31 @@ func main() {
 			}
 			u.DrawHostList(hostList, hostSel, active, i18n.T("host_title"))
 		} else if uiMode == uiBeastList {
+			rows := append([]string{i18n.T("host_disable")}, beastList...)
 			active := -1
-			for i, h := range beastList {
-				if h == adsbHost {
-					active = i
+			if adsbHost == "" {
+				active = 0
+			} else {
+				for i, h := range beastList {
+					if h == adsbHost {
+						active = i + 1
+					}
 				}
 			}
-			u.DrawHostList(beastList, beastSel, active, i18n.T("beast_title"))
+			u.DrawHostList(rows, beastSel, active, i18n.T("beast_title"))
 		} else if uiMode == uiAISList {
+			rows := append([]string{i18n.T("host_disable")}, aisList...)
 			active := -1
-			for i, h := range aisList {
-				if h == aisHost {
-					active = i
+			if aisHost == "" {
+				active = 0
+			} else {
+				for i, h := range aisList {
+					if h == aisHost {
+						active = i + 1
+					}
 				}
 			}
-			u.DrawHostList(aisList, aisSel, active, i18n.T("ais_title"))
+			u.DrawHostList(rows, aisSel, active, i18n.T("ais_title"))
 		} else if uiMode == uiBmList {
 			labels := make([]string, len(bookmarks))
 			active := -1
@@ -3023,7 +3071,11 @@ func main() {
 			if adsbMosaic[L][z] != nil {
 				mercArg = merc
 			}
-			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], adsbHost, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir)
+			hostLbl := adsbHost
+			if hostLbl == "" {
+				hostLbl = "(" + i18n.T("off") + ")"
+			}
+			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)

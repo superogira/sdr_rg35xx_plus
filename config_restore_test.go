@@ -17,7 +17,7 @@ func TestConfigKeysRoundTrip(t *testing.T) {
 	ini := filepath.Join(dir, "sdrg35xx.ini")
 	body := strings.Join([]string{
 		"host=127.0.0.1:1",
-		"adsbhost=192.168.9.99:30005",
+		"adsbhost=off",
 		"adsblat=13.70000",
 		"adsblon=100.70000",
 		"adsblayer=2",
@@ -38,11 +38,14 @@ func TestConfigKeysRoundTrip(t *testing.T) {
 	}
 	// The values must be exactly what the user typed (host strings are
 	// not reformatted, so the reconnect target is preserved).
-	if cfg["adsbhost"] != "192.168.9.99:30005" {
-		t.Fatalf("adsbhost = %q", cfg["adsbhost"])
+	if cfg["adsbhost"] != "off" {
+		t.Fatalf("adsbhost = %q, want off", cfg["adsbhost"])
 	}
 	if cfg["aishost"] != "192.168.8.88:29420" {
 		t.Fatalf("aishost = %q", cfg["aishost"])
+	}
+	if cfg["adsbhost"] != "off" {
+		t.Fatal("adsbhost 'off' sentinel not preserved")
 	}
 	// And every key we persist must have a read path in the source.
 	src, err := os.ReadFile("main.go")
