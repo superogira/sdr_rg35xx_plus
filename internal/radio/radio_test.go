@@ -46,3 +46,18 @@ func TestPpmClamp(t *testing.T) {
 		}
 	}
 }
+
+func TestPpmOffToggle(t *testing.T) {
+	r := New("x:1", 100_000_000, dsp.ModeAM, 0, nil)
+	if r.PpmOff() {
+		t.Fatal("default should not be off")
+	}
+	r.SetPpmOff(true)
+	if !r.PpmOff() || r.Ppm() != 0 {
+		t.Fatalf("off=%v ppm=%d", r.PpmOff(), r.Ppm())
+	}
+	r.SetPpm(30)
+	if !r.PpmOff() || r.Ppm() != 30 {
+		t.Fatalf("off must not clear the stored ppm: off=%v ppm=%d", r.PpmOff(), r.Ppm())
+	}
+}

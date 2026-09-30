@@ -51,7 +51,7 @@ type FT8Entry struct {
 
 // DrawFT8Log renders a semi-transparent log of the latest FT8 decodes
 // in the bottom-left corner of the waterfall area.
-func (u *UI) DrawFT8Log(entries []FT8Entry) {
+func (u *UI) DrawFT8Log(entries []FT8Entry, flagDir string) {
 	lh := 15
 	maxShow := 6
 	if len(entries) > maxShow {
@@ -78,7 +78,13 @@ func (u *UI) DrawFT8Log(entries []FT8Entry) {
 		tf.DrawString(u.img, ft8TextColor(e.Text), px+106, y, e.Text)
 		if e.Anno != "" {
 			aw := tf.TextWidth(e.Anno)
-			tf.DrawString(u.img, color.RGBA{140, 170, 140, 255}, px+pw-aw-6, y, e.Anno)
+			// Country flag trails the annotation (after the distance).
+			fx := px + pw - 22
+			if flag := GetFlag(e.FlagCC, flagDir); flag != nil {
+				drawImage(u.img, flag, fx, y-9)
+				fx -= flag.Bounds().Dx() + 3
+			}
+			tf.DrawString(u.img, color.RGBA{140, 170, 140, 255}, fx-aw, y, e.Anno)
 		}
 	}
 }
@@ -144,14 +150,13 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int, flagDir string) {
 		lineF.DrawString(u.img, ft8TextColor(e.Text), x+210, yy, e.Text)
 		if e.Anno != "" {
 			aw := lineF.TextWidth(e.Anno)
-			// Flag icon before the annotation, sized to the line.
-			fx := x + w - aw - 10
+			// Flag trails the annotation (very end, after the distance).
+			fx := x + w - 20
 			if flag := GetFlag(e.FlagCC, flagDir); flag != nil {
-				fb := flag.Bounds()
-				drawImage(u.img, flag, fx-fb.Dx()-3, yy-9)
-				fx -= fb.Dx() + 3
+				drawImage(u.img, flag, fx, yy-9)
+				fx -= flag.Bounds().Dx() + 3
 			}
-			lineF.DrawString(u.img, color.RGBA{140, 170, 140, 255}, fx, yy, e.Anno)
+			lineF.DrawString(u.img, color.RGBA{140, 170, 140, 255}, fx-aw, yy, e.Anno)
 		}
 	}
 	hintF.DrawString(u.img, gray, x+10, y+h-12, i18n.T("ft8_scroll"))

@@ -14,7 +14,7 @@ func TestSNRVisible(t *testing.T) {
 		{Time: "21:15:18", SNRDb: 4, Text: "CQ DX VU2KPH NL25"},
 	}
 	frame := u.Frame(FrameStats{FreqHz: 21074000, Mode: "USB"})
-	u.DrawFT8Log(entries)
+	u.DrawFT8Log(entries, "")
 	// Blue-ish pixels (120,200,255) must exist in the overlay region
 	// (bottom-left, y > H-120): the SNR column.
 	found := false

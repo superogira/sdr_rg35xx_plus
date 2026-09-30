@@ -85,6 +85,7 @@ type Radio struct {
 	ft8       *dsp.FT8Detector
 	hfApplied int // direct-sampling mode currently set on the server
 	ppm       int  // tuner frequency correction, applied live and at every (re)connect
+	ppmOff    bool // true = leave the correction to the server's own setting
 
 	client  *rtltcp.Client
 	gains   int32
@@ -289,7 +290,7 @@ func (r *Radio) session(ctx context.Context) error {
 		}
 		r.chain = chain
 		r.state = stateStreaming
-		freq, gainDb, lo, ppm := r.freqHz, r.gainDb, r.loHz, r.ppm
+		freq, gainDb, lo, ppm, ppmOff := r.freqHz, r.gainDb, r.loHz, r.ppm, r.ppmOff
 		r.mu.Unlock()
 		chain.Reset()
 		// Restore the passband offset on the fresh chain (the server
@@ -311,8 +312,12 @@ func (r *Radio) session(ctx context.Context) error {
 		// SDRSharp opens with the same freq-correction command — so the
 		// kick doubles as applying the user's ppm on every (re)connect
 		// (a live change was verified safe against the real server).
-		if err := client.SetFreqCorrection(int32(ppm)); err != nil {
-			return fmt.Errorf("freq correction kick: %w", err)
+		// ppmOff sends nothing: a server with its own calibration must
+		// not be overridden, so the initial tune below serves as kick.
+		if !ppmOff {
+			if err := client.SetFreqCorrection(int32(ppm)); err != nil {
+				return fmt.Errorf("freq correction kick: %w", err)
+			}
 		}
 		// Dongle bring-up. Configure once, then only ever retune:
 		// this server build (fixed 2.048 Msps, big-endian protocol)
@@ -763,6 +768,21 @@ func (r *Radio) Ppm() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.ppm
+}
+
+// PpmOff reports whether the app leaves the correction to the server.
+func (r *Radio) PpmOff() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ppmOff
+}
+
+// SetPpmOff toggles hands-off mode (no SetFreqCorrection is sent, on
+// this connection or any later one, until it is turned off again).
+func (r *Radio) SetPpmOff(off bool) {
+	r.mu.Lock()
+	r.ppmOff = off
+	r.mu.Unlock()
 }
 
 // SetPpm stores the frequency correction and, while streaming, sends it
