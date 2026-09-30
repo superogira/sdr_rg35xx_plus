@@ -171,7 +171,7 @@ func main() {
 
 	store := ais.NewStore()
 	frames := 0
-	onPayload := func(p []byte, ch int) {
+	onPayload := func(p []byte, ch int, levelDb float64) {
 		frames++
 		typ, mmsi := store.DecodeBits(p)
 		name := "A"

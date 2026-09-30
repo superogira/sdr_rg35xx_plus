@@ -668,7 +668,7 @@ func main() {
 	go aisClient.Run(ctx, aisStore)
 	// Over-the-air AIS: decoded frames land in the same store (radar
 	// needs no changes) and in the message log windows.
-	r.SetAISPayloadFunc(func(payload []byte, ch int) {
+	r.SetAISPayloadFunc(func(payload []byte, ch int, levelDb float64) {
 		typ, mmsi := aisStore.DecodeBits(payload)
 		if mmsi == "" || typ == 0 {
 			return
@@ -694,7 +694,7 @@ func main() {
 		}
 		cc := geo.MMSICountry(mmsi)
 		aisLogMu.Lock()
-		aisLog = append(aisLog, ui.AISEntry{Time: time.Now().Format("15:04:05"), Ch: name, Text: line, FlagCC: cc})
+		aisLog = append(aisLog, ui.AISEntry{Time: time.Now().Format("15:04:05"), Ch: name, Text: line, FlagCC: cc, Db: levelDb})
 		if len(aisLog) > 100 {
 			aisLog = aisLog[len(aisLog)-100:]
 		}

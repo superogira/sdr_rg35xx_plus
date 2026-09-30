@@ -140,8 +140,8 @@ func TestFeedAISBothChannels(t *testing.T) {
 	var gotA, gotB [][]byte
 	// The real over-the-air demodulators (feedAIS resamples to 48k).
 	c.SetAISDemods(
-		ais.NewChannelDemod(48000, 0, "A", func(p []byte, ch int) { gotA = append(gotA, p) }),
-		ais.NewChannelDemod(48000, 1, "B", func(p []byte, ch int) { gotB = append(gotB, p) }),
+		ais.NewChannelDemod(48000, 0, "A", func(p []byte, ch int, levelDb float64) { gotA = append(gotA, p) }),
+		ais.NewChannelDemod(48000, 1, "B", func(p []byte, ch int, levelDb float64) { gotB = append(gotB, p) }),
 	)
 	// Padding is ambient noise (zero IQ would pin the power floor at
 	// zero and the burst end condition could never fire).

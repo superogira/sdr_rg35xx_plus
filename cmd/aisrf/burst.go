@@ -91,7 +91,7 @@ func burstMode(path string) {
 		// demod with the exact NCO
 		got := 0
 		var text []string
-		dem := ais.NewChannelDemod(48000, 0, "A", func(p []byte, ch int) {
+		dem := ais.NewChannelDemod(48000, 0, "A", func(p []byte, ch int, levelDb float64) {
 			got++
 			st := ais.NewStore()
 			typ, mmsi := st.DecodeBits(p)

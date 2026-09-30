@@ -86,7 +86,7 @@ type Radio struct {
 	ft8        *dsp.FT8Detector
 	aisRFOn    bool
 	aisA, aisB *ais.ChannelDemod
-	aisPay     func(payload []byte, ch int)
+	aisPay     func(payload []byte, ch int, levelDb float64)
 	hfApplied  int  // direct-sampling mode currently set on the server
 	ppm        int  // tuner frequency correction, applied live and at every (re)connect
 	ppmOff     bool // true = leave the correction to the server's own setting
@@ -139,14 +139,14 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		ft8:    dsp.NewFT8Detector(),
 		chain:  dsp.NewChain(mode, nil, nil),
 	}
-	r.aisA = ais.NewChannelDemod(48000, 0, "A", func(p []byte, ch int) {
+	r.aisA = ais.NewChannelDemod(48000, 0, "A", func(p []byte, ch int, levelDb float64) {
 		if f := r.aisPay; f != nil {
-			f(p, ch)
+			f(p, ch, levelDb)
 		}
 	})
-	r.aisB = ais.NewChannelDemod(48000, 1, "B", func(p []byte, ch int) {
+	r.aisB = ais.NewChannelDemod(48000, 1, "B", func(p []byte, ch int, levelDb float64) {
 		if f := r.aisPay; f != nil {
-			f(p, ch)
+			f(p, ch, levelDb)
 		}
 	})
 	return r
@@ -958,7 +958,7 @@ func (r *Radio) SetAISRFEnabled(on bool) {
 
 // SetAISPayloadFunc installs the receiver for demodulated AIS payloads
 // (called from the DSP goroutine).
-func (r *Radio) SetAISPayloadFunc(f func(payload []byte, ch int)) {
+func (r *Radio) SetAISPayloadFunc(f func(payload []byte, ch int, levelDb float64)) {
 	r.mu.Lock()
 	r.aisPay = f
 	r.mu.Unlock()
