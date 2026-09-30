@@ -43,6 +43,12 @@ func hamming(i, n int) float64 {
 // Output j uses inputs x[jD + D - 1 - k] for k in [0, len(taps)), reaching
 // into hist for the negative indices, so the cost is outputs×taps — the
 // dropped samples are never filtered.
+// ResampleLinear is the exported linear rational resampler (dev
+// harnesses; the AIS branch uses it to reach the demod's 48 ks/s).
+func ResampleLinear(in []complex128, pos *float64, ratio float64, out *[]complex128) {
+	resampleLinear(in, pos, ratio, out)
+}
+
 // FIRDecim is the exported complex decimating FIR (dev harnesses).
 func FIRDecim(taps []float64, hist *[]complex128, D int, in []complex128, out *[]complex128) {
 	complexFIRDecim(taps, hist, D, in, out)

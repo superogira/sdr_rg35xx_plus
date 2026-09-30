@@ -10,7 +10,10 @@
 // waterfall/spectrum display.
 package dsp
 
-import "math"
+import (
+	"math"
+	"sort"
+)
 
 // Rates. The e25wop server accepts ONE SetSampleRate per connection
 // (mid-stream changes make its stream unstable), so the app sends the
@@ -207,11 +210,20 @@ type Chain struct {
 	// AIS RF branch: two channel demods fed from the unrotated IF2.
 	aisA, aisB AISDemod
 	aisNco     [2]float64
-	aisPrevArg [2]float64
 	aisRot     []complex128
 	aisDec     [2][]complex128
 	aisHist    [2][]complex128
 	aisTaps    []float64
+	aisResPos  [2]float64 // 64k→48k linear resampler positions
+	aisOut     [2][]complex128
+
+	// Channel AFC: dongle ppm moves both AIS channels by several kHz,
+	// beyond the demod's ±1.2 kHz FLL. A per-second FFT finds each
+	// channel's true centre and steers the NCO.
+	afcScan   []complex128 // every-2nd-sample snapshot buffer
+	afcSpec   [1024]float64
+	afcHave   int
+	afcOffset [2]float64 // live NCO offset error per channel (Hz)
 
 	// Audio decimator: real, IF2Rate -> AudioRate.
 	auTaps []float64
@@ -702,28 +714,29 @@ func (c *Chain) feedMonitors() {
 	}
 }
 
-// AISDemod consumes one channel's FM discriminator output plus the
-// pre-detection power, both at 64 ks/s (internal/ais.ChannelDemod).
+// AISDemod consumes one channel-centred complex stream at 48 ks/s
+// (internal/ais.ChannelDemod).
 type AISDemod interface {
-	Feed(fm, power []float64)
+	Feed(cx []complex128)
 }
 
 // feedAIS demodulates both AIS channels from the unrotated IF2 stream.
 // The channels sit at ±25 kHz around the LO (tuned midway at
-// 162.000 MHz); each is NCO-shifted to DC, boxcar-decimated to 64 ks/s
-// and FM-demodulated by phase differencing. The power track drives the
-// demod's burst detector.
+// 162.000 MHz); each is NCO-shifted to DC, low-pass decimated to
+// 64 ks/s and then linearly resampled to the demod's fixed 48 ks/s.
 func (c *Chain) feedAIS(in []complex128) {
 	const out = 64000
 	d := IF2Rate / out
 	if out*d != IF2Rate || IF2Rate < 128000 {
 		return // unsupported rate combo: branch stays silent
 	}
+	_ = d
+	c.afcFeed(in)
 	for ch := 0; ch < 2; ch++ {
 		var dem AISDemod
-		f := -25000.0 // channel A below the LO
+		f := -25000.0 + c.afcOffset[0] // channel A below the LO
 		if ch == 1 {
-			dem, f = c.aisB, 25000.0
+			dem, f = c.aisB, 25000.0+c.afcOffset[1]
 		} else {
 			dem = c.aisA
 		}
@@ -750,24 +763,104 @@ func (c *Chain) feedAIS(in []complex128) {
 		dec := c.aisDec[ch][:0]
 		complexFIRDecim(c.aisTaps, &c.aisHist[ch], d, rot, &dec)
 		c.aisDec[ch] = dec
-		fm := make([]float64, 0, len(dec))
-		pow := make([]float64, 0, len(dec))
-		for _, z := range dec {
-			arg := math.Atan2(imag(z), real(z))
-			delta := arg - c.aisPrevArg[ch]
-			// Fold into [-π, π]: the raw difference jumps ±2π
-			// whenever the phase wraps.
-			if delta > math.Pi {
-				delta -= 2 * math.Pi
-			} else if delta < -math.Pi {
-				delta += 2 * math.Pi
-			}
-			fm = append(fm, delta)
-			pow = append(pow, real(z)*real(z)+imag(z)*imag(z))
-			c.aisPrevArg[ch] = arg
+		out := c.aisOut[ch][:0]
+		resampleLinear(dec, &c.aisResPos[ch], 48000.0/64000.0, &out)
+		c.aisOut[ch] = out
+		if len(out) > 0 {
+			dem.Feed(out)
 		}
-		if len(fm) > 0 {
-			dem.Feed(fm, pow)
+	}
+}
+
+// resampleLinear resamples in (at inRate implied by the ratio) into out
+// by linear interpolation, tracking a fractional read position in pos
+// across calls. The signal is already band-limited well below the
+// output Nyquist, so a linear kernel suffices.
+func resampleLinear(in []complex128, pos *float64, ratio float64, out *[]complex128) {
+	n := len(in)
+	for *pos < float64(n-1) {
+		i := int(*pos)
+		frac := *pos - float64(i)
+		a, b := in[i], in[i+1]
+		*out = append(*out, a+complex(frac, 0)*(b-a))
+		*pos += 1.0 / ratio
+	}
+	*pos -= float64(n)
+}
+
+// afcFeed accumulates a decimated snapshot of the unrotated IF2 and,
+// once per second of data, locates each AIS channel's spectral peak
+// near ±25 kHz. AIS bursts are 25 kHz-channel GMSK and symmetric, so
+// the strongest max-hold bin is the channel centre; the NCO then
+// absorbs the dongle's ppm error.
+func (c *Chain) afcFeed(in []complex128) {
+	want := 2048 // 1024-point FFT at IF2Rate/2
+	if c.afcScan == nil {
+		c.afcScan = make([]complex128, 0, want)
+	}
+	for i := 0; i < len(in); i += 2 {
+		c.afcScan = append(c.afcScan, in[i])
+		if len(c.afcScan) == want {
+			c.afcRun()
+			c.afcScan = c.afcScan[:0]
+		}
+	}
+}
+
+func (c *Chain) afcRun() {
+	n := 1024
+	re := make([]float64, n)
+	im := make([]float64, n)
+	sub := c.afcScan
+	step := len(sub) / n
+	for i := 0; i < n; i++ {
+		z := sub[i*step]
+		re[i] = real(z)
+		im[i] = imag(z)
+	}
+	FFT(re, im)
+	rate := float64(IF2Rate) / 2
+	for ch := 0; ch < 2; ch++ {
+		base := -25000.0
+		if ch == 1 {
+			base = 25000.0
+		}
+		// GMSK has a broad symmetric spectrum with no carrier line,
+		// so the channel centre is the energy-weighted centroid of the
+		// search window, not the strongest bin.
+		var sumP, sumFP float64
+		var win []float64
+		for off := -8000.0; off <= 8000.0; off += 125.0 {
+			f := base + off
+			// Standard FFT bin order: k·rate/n, with negative
+			// frequencies living in the upper half.
+			bin := int(math.Round(f / (rate / float64(n))))
+			if bin < 0 {
+				bin += n
+			}
+			if bin < 1 || bin >= n {
+				continue
+			}
+			p := re[bin]*re[bin] + im[bin]*im[bin]
+			win = append(win, p)
+			sumP += p
+			sumFP += f * p
+		}
+		if sumP <= 0 {
+			continue
+		}
+		centre := sumFP / sumP
+		// Gate on total window power vs its median: during idle noise
+		// the centroid is meaningless and would drag the NCO off.
+		sort.Float64s(win)
+		med := win[len(win)/2]
+		if med > 0 && sumP > med*float64(len(win))*2.5 {
+			c.afcOffset[ch] += 0.15 * (centre - base - c.afcOffset[ch])
+			if c.afcOffset[ch] > 8000 {
+				c.afcOffset[ch] = 8000
+			} else if c.afcOffset[ch] < -8000 {
+				c.afcOffset[ch] = -8000
+			}
 		}
 	}
 }
@@ -777,8 +870,10 @@ func (c *Chain) feedAIS(in []complex128) {
 func (c *Chain) SetAISDemods(a, b AISDemod) {
 	c.aisA, c.aisB = a, b
 	c.aisNco = [2]float64{}
-	c.aisPrevArg = [2]float64{}
+	c.aisResPos = [2]float64{}
 	c.aisHist = [2][]complex128{}
+	c.afcScan = nil
+	c.afcOffset = [2]float64{}
 	// Pass ±16 kHz (GMSK ±2.4 kHz plus margin), stop before the other
 	// channel at 37.5 kHz+.
 	if IF2Rate > 64000 {

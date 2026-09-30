@@ -12,11 +12,15 @@ import (
 // frequency f: NRZI-GMSK-ish FM with dev 2400 Hz, upsampled x4 from
 // the 64k symbol-rate domain.
 func synthChannelIQ(bits []byte, f float64, up int, rng *rand.Rand) []complex128 {
-	spb := 64000.0 / 9600.0
-	// level per 64k-sample
+	// Generate at the full IF2-input rate (256k = 64000*up) with
+	// per-sample GMSK-ish smoothing — a hold-upsampled 64k phase
+	// staircase would smear the coherent demodulator.
+	rate := float64(64000 * up)
+	spb := rate / 9600.0
 	lvl := 1.0
-	var y []float64 // fm value at 64k
 	cur := 0.0
+	ph := 0.0
+	var out []complex128
 	for bi, b := range bits {
 		if b == 0 {
 			lvl = -lvl
@@ -24,19 +28,9 @@ func synthChannelIQ(bits []byte, f float64, up int, rng *rand.Rand) []complex128
 		start := int(float64(bi) * spb)
 		end := int(float64(bi+1) * spb)
 		for s := start; s < end; s++ {
-			cur += 0.45 * (lvl - cur)
-			y = append(y, 2400*cur+rng.NormFloat64()*300)
-		}
-	}
-	// integrate phase at 64k then upsample (hold) and mix to f.
-	out := make([]complex128, len(y)*up)
-	ph := 0.0
-	for i, v := range y {
-		ph += 2 * math.Pi * v / 64000.0
-		c := complex(math.Cos(ph), math.Sin(ph))
-		for u := 0; u < up; u++ {
-			t := float64(i*up+u) / float64(64000*up)
-			out[i*up+u] = c * complex(math.Cos(2*math.Pi*f*t), math.Sin(2*math.Pi*f*t))
+			cur += 0.45 * (lvl - cur) / float64(up)
+			ph += 2 * math.Pi * (2400*cur + f) / rate
+			out = append(out, complex(math.Cos(ph), math.Sin(ph)))
 		}
 	}
 	return out
@@ -76,38 +70,65 @@ func TestFeedAISBothChannels(t *testing.T) {
 		t.Skipf("IF2Rate=%d", IF2Rate)
 	}
 	rng := rand.New(rand.NewSource(3))
-	// Two distinct payloads (A = type-1-ish filler, B different).
+	// Two distinct VALID payloads (the type field must be a real
+	// message type or cannotBeValid aborts the frame): the reference
+	// type-1 payload and a mutation of it.
+	var abits []byte
+	armor := "15M67FC000G?ufbE`FepT@3n00Sa"
+	for k := 0; k < len(armor); k++ {
+		v := armor[k] - 48
+		if v > 40 {
+			v -= 8
+		}
+		for b := 5; b >= 0; b-- {
+			abits = append(abits, (v>>uint(b))&1)
+		}
+	}
 	payA := make([]byte, 21)
-	payB := make([]byte, 21)
-	for i := range payA {
-		payA[i] = byte(i * 11)
-		payB[i] = byte(i*7 + 3)
-	}
-	iqA := synthChannelIQ(aisBits(payA, x25), -25000, 4, rng)
-	iqB := synthChannelIQ(aisBits(payB, x25), 25000, 4, rng)
-	n := len(iqA)
-	if len(iqB) > n {
-		n = len(iqB)
-	}
-	iq := make([]complex128, n)
-	for i := 0; i < n; i++ {
-		a := complex(0, 0)
-		if i < len(iqA) {
-			a += iqA[i]
+	for i := 0; i+7 < len(abits); i += 8 {
+		by := byte(0)
+		for k := 0; k < 8; k++ {
+			by |= abits[i+k] << k
 		}
-		if i < len(iqB) {
-			a += iqB[i]
+		payA[i/8] = by
+	}
+	payB := append([]byte{}, payA...)
+	payB[20] ^= 0x55
+	// Three bursts per channel with gaps — live AIS traffic is
+	// continuous, and a mid-stream AFC slew must not cost more than
+	// the burst it lands on.
+	var iq []complex128
+	gap := func() {
+		for i := 0; i < 5120; i++ {
+			iq = append(iq, complex(rng.NormFloat64()*0.05, rng.NormFloat64()*0.05))
 		}
-		// ambient noise
-		a += complex(rng.NormFloat64()*0.05, rng.NormFloat64()*0.05)
-		iq[i] = a
+	}
+	for rep := 0; rep < 3; rep++ {
+		iqA := synthChannelIQ(aisBits(payA, x25), -25000, 4, rng)
+		iqB := synthChannelIQ(aisBits(payB, x25), 25000, 4, rng)
+		n := len(iqA)
+		if len(iqB) > n {
+			n = len(iqB)
+		}
+		for i := 0; i < n; i++ {
+			a := complex(0, 0)
+			if i < len(iqA) {
+				a += iqA[i]
+			}
+			if i < len(iqB) {
+				a += iqB[i]
+			}
+			a += complex(rng.NormFloat64()*0.05, rng.NormFloat64()*0.05)
+			iq = append(iq, a)
+		}
+		gap()
 	}
 	c := NewChain(ModeNFM, nil, nil)
 	var gotA, gotB [][]byte
-	// The real over-the-air demodulators.
+	// The real over-the-air demodulators (feedAIS resamples to 48k).
 	c.SetAISDemods(
-		ais.NewChannelDemod(64000, 0, "A", func(p []byte, ch int) { gotA = append(gotA, p) }),
-		ais.NewChannelDemod(64000, 1, "B", func(p []byte, ch int) { gotB = append(gotB, p) }),
+		ais.NewChannelDemod(48000, 0, "A", func(p []byte, ch int) { gotA = append(gotA, p) }),
+		ais.NewChannelDemod(48000, 1, "B", func(p []byte, ch int) { gotB = append(gotB, p) }),
 	)
 	// Padding is ambient noise (zero IQ would pin the power floor at
 	// zero and the burst end condition could never fire).
@@ -128,11 +149,15 @@ func TestFeedAISBothChannels(t *testing.T) {
 	if len(gotA) == 0 || len(gotB) == 0 {
 		t.Fatalf("A frames=%d B frames=%d", len(gotA), len(gotB))
 	}
-	if string(gotA[0]) != string(payA) {
-		t.Errorf("channel A payload mismatch")
+	for _, p := range gotA {
+		if string(p) != string(payA) {
+			t.Fatalf("channel A payload mismatch")
+		}
 	}
-	if string(gotB[0]) != string(payB) {
-		t.Errorf("channel B payload mismatch")
+	for _, p := range gotB {
+		if string(p) != string(payB) {
+			t.Fatalf("channel B payload mismatch")
+		}
 	}
 }
 
