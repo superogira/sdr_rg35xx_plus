@@ -4,3 +4,9 @@ AIS-catcher.exe
 *.dll
 aisrf.exe
 aistest.exe
+
+burst_*.raw
+synth_ais.raw
+truth_*.txt
+wfm_*.wav
+known_payloads.txt
