@@ -73,8 +73,13 @@ type frameDecoder struct {
 	position      int
 	oneSeq        int
 	bits          []byte
-	emit          func(payload []byte, ch int)
+	emit          func(payload []byte, ch int, levelDb float64)
 	ch            int
+
+	// Signal level: sum of |z|² over the frame's symbol samples
+	// (AIS-catcher's tag.level recipe) → mean power → dB.
+	lvlSum float64
+	lvlN   int
 }
 
 func (d *frameDecoder) reset() {
@@ -117,6 +122,7 @@ func (d *frameDecoder) run(transition byte) {
 				d.position = 0
 				d.oneSeq = 0
 				d.bits = d.bits[:0]
+				d.lvlSum, d.lvlN = 0, 0
 			} else {
 				d.reset()
 			}
@@ -129,6 +135,7 @@ func (d *frameDecoder) run(transition byte) {
 		}
 	case stDataFCS:
 		d.bits = append(d.bits, nrzi)
+		d.lvlN++
 		if nrzi == 1 {
 			if d.oneSeq == 5 {
 				// Six consecutive 1s: the closing flag starts here.
@@ -233,7 +240,11 @@ func (d *frameDecoder) process(n int) {
 		}
 	}
 	if d.emit != nil {
-		d.emit(payload, d.ch)
+		lvl := -99.0
+		if d.lvlN > 0 && d.lvlSum > 0 {
+			lvl = 10 * math.Log10(d.lvlSum/float64(d.lvlN))
+		}
+		d.emit(payload, d.ch, lvl)
 	}
 }
 
@@ -328,7 +339,7 @@ func (p *phaseClassifier) symbol(re, im float64) byte {
 type ChannelDemod struct {
 	Ch    int
 	CName string
-	emit  func(payload []byte, ch int)
+	emit  func(payload []byte, ch int, levelDb float64)
 
 	// Square-law frequency-offset correction (AIS-catcher's
 	// SquareFreqOffsetCorrection): every 512 samples, FFT of z² locates
@@ -355,14 +366,14 @@ type ChannelDemod struct {
 }
 
 // NewChannelDemod builds a demod for one channel; rate must be 48000.
-func NewChannelDemod(rate int, chIdx int, name string, emit func(payload []byte, ch int)) *ChannelDemod {
+func NewChannelDemod(rate int, chIdx int, name string, emit func(payload []byte, ch int, levelDb float64)) *ChannelDemod {
 	if rate != aisSampleRate {
 		panic("ais: ChannelDemod requires 48 ks/s")
 	}
 	d := &ChannelDemod{Ch: chIdx, CName: name, ffcRot: 1}
-	filtered := func(p []byte, ch int) {
+	filtered := func(p []byte, ch int, levelDb float64) {
 		if !d.dupOfRecent(p) {
-			emit(p, ch)
+			emit(p, ch, levelDb)
 		}
 	}
 	d.emit = filtered
@@ -484,6 +495,9 @@ func (d *ChannelDemod) sample(z complex128) {
 	}
 
 	soft := d.clas[d.sel].symbol(re, im)
+	if d.dec[d.sel].state == stDataFCS {
+		d.dec[d.sel].lvlSum += re*re + im*im
+	}
 	d.dec[d.sel].run(soft)
 	d.sel = (d.sel + 1) % 5
 }

@@ -12,7 +12,7 @@ func TestDecoderRandomNoFalseFrames(t *testing.T) {
 	const trials = 2000
 	accepted := 0
 	for i := 0; i < trials; i++ {
-		d := &frameDecoder{emit: func(p []byte, ch int) { accepted++ }}
+		d := &frameDecoder{emit: func(p []byte, ch int, levelDb float64) { accepted++ }}
 		d.reset()
 		// ~600 random transition bits per trial
 		for k := 0; k < 600; k++ {

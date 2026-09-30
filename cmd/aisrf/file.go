@@ -54,7 +54,7 @@ func fileMode(path string, _ int64) {
 	loadKnown(os.Getenv("AIS_KNOWN"))
 	store := ais.NewStore()
 	frames := 0
-	onPayload := func(p []byte, ch int) {
+	onPayload := func(p []byte, ch int, levelDb float64) {
 		frames++
 		typ, mmsi := store.DecodeBits(p)
 		name := "A"
@@ -66,7 +66,7 @@ func fileMode(path string, _ int64) {
 		if sh != nil && sh.HasPos {
 			extra = fmt.Sprintf(" pos=%.4f,%.4f sog=%.1f", sh.Lat, sh.Lon, sh.SogKt)
 		}
-		fmt.Printf("ch%s type %2d MMSI %s%s\n", name, typ, mmsi, extra)
+		fmt.Printf("ch%s %5.1fdB type %2d MMSI %s%s\n", name, levelDb, typ, mmsi, extra)
 	}
 	demA := ais.NewChannelDemod(48000, 0, "A", onPayload)
 	demB := ais.NewChannelDemod(48000, 1, "B", onPayload)

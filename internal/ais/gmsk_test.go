@@ -86,7 +86,7 @@ func TestGMSKRoundTrip(t *testing.T) {
 	for _, c := range cases {
 		rng := rand.New(rand.NewSource(42))
 		var got []byte
-		d := NewChannelDemod(48000, 0, "A", func(p []byte, ch int) {
+		d := NewChannelDemod(48000, 0, "A", func(p []byte, ch int, levelDb float64) {
 			if got == nil {
 				got = append([]byte{}, p...)
 			}
@@ -122,7 +122,7 @@ func TestGMSKDecodeBitsIntegration(t *testing.T) {
 	payload := aivdmPayload("15M67FC000G?ufbE`FepT@3n00Sa")
 	rng := rand.New(rand.NewSource(7))
 	s := NewStore()
-	d := NewChannelDemod(48000, 1, "B", func(p []byte, ch int) {
+	d := NewChannelDemod(48000, 1, "B", func(p []byte, ch int, levelDb float64) {
 		s.DecodeBits(p)
 	})
 	iq := synthAISIQ(payload, 0.3, 700, 0.18, rng)
