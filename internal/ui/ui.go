@@ -57,7 +57,10 @@ func (u *UI) DrawFT8Log(entries []FT8Entry, flagDir string) {
 	if len(entries) > maxShow {
 		entries = entries[len(entries)-maxShow:]
 	}
-	pw := 320
+	// Wide enough for the decoded text plus the country/distance
+	// annotation + flag on the right (320 collided once annotations
+	// landed — see TestFT8MiniWindowFits).
+	pw := 440
 	ph := len(entries)*lh + 8
 	if len(entries) == 0 {
 		ph = lh + 8 // keep a placeholder window while waiting
@@ -75,7 +78,18 @@ func (u *UI) DrawFT8Log(entries []FT8Entry, flagDir string) {
 		tf.DrawString(u.img, color.RGBA{150, 180, 150, 255}, px+4, y, e.Time)
 		tf.DrawString(u.img, color.RGBA{120, 200, 255, 255}, px+52, y, fmt.Sprintf("%3.0f", e.SNRDb))
 		tf.DrawString(u.img, color.RGBA{170, 200, 170, 255}, px+76, y, fmt.Sprintf("%4.0f", e.FreqHz))
-		tf.DrawString(u.img, ft8TextColor(e.Text), px+106, y, e.Text)
+		// The annotation block (flag + text) is right-aligned; the
+		// message is clipped to whatever room is left so the two can
+		// never collide on a long callsign list.
+		rightEdge := px + pw - 6
+		if e.Anno != "" {
+			rightEdge = px + pw - 22 // flag zone
+		}
+		txt := e.Text
+		for tf.TextWidth(txt) > rightEdge-(px+106) && len(txt) > 4 {
+			txt = txt[:len(txt)-2] + "…"
+		}
+		tf.DrawString(u.img, ft8TextColor(e.Text), px+106, y, txt)
 		if e.Anno != "" {
 			aw := tf.TextWidth(e.Anno)
 			// Country flag trails the annotation (after the distance).

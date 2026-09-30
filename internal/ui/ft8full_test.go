@@ -23,3 +23,23 @@ func TestFT8LogFullBounds(t *testing.T) {
 	}
 	_ = frame
 }
+
+// The mini decode window must fit a realistic worst-case line: decoded
+// text + gap + annotation + flag inside the panel width.
+func TestFT8MiniWindowFits(t *testing.T) {
+	tf := Face(11, false)
+	pw := 440
+	cases := []struct{ text, anno string }{
+		{"CQ PY2ABCD GG66omp", "Brazil 16500km"},
+		{"KH6/KM4YEG JA3ABC PM74", "USA 11300km"},
+		{"TU4X EA8ABC IL18", "Ivory Coast 11200km"},
+	}
+	for _, c := range cases {
+		txtW := tf.TextWidth(c.text)
+		annoW := tf.TextWidth(c.anno)
+		need := 106 + txtW + 8 + annoW + 3 + 18 + 6 // columns..gap..anno..gap..flag..pad
+		if need > pw {
+			t.Errorf("%q + %q needs %dpx > %dpx", c.text, c.anno, need, pw)
+		}
+	}
+}
