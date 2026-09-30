@@ -189,11 +189,13 @@ func (s *Store) DecodeBits(payload []byte) (typ uint32, mmsi string) {
 	if n6 < 20 {
 		return 0, ""
 	}
-	// HDLC octets go out LSB-first, so message bit j lives in byte j/8
-	// at position j%8 — the same packing the AIVDM armor uses.
+	// The demodulator assembles HDLC octets (LSB-first on air); the
+	// message bit stream then reads each octet MSB-first into the
+	// 6-bit armor cells — verified against AIS-catcher on a live
+	// recording (Thai MMSIs and positions matched exactly).
 	p := make([]byte, n6)
 	for bit := 0; bit < n6*6; bit++ {
-		b := (payload[bit/8] >> uint(bit%8)) & 1
+		b := (payload[bit/8] >> uint(7-bit%8)) & 1
 		p[bit/6] = p[bit/6]<<1 | b
 	}
 	return s.decodePayload(p)

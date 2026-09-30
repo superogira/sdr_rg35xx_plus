@@ -139,12 +139,12 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		ft8:    dsp.NewFT8Detector(),
 		chain:  dsp.NewChain(mode, nil, nil),
 	}
-	r.aisA = ais.NewChannelDemod(64000, 0, "A", func(p []byte, ch int) {
+	r.aisA = ais.NewChannelDemod(48000, 0, "A", func(p []byte, ch int) {
 		if f := r.aisPay; f != nil {
 			f(p, ch)
 		}
 	})
-	r.aisB = ais.NewChannelDemod(64000, 1, "B", func(p []byte, ch int) {
+	r.aisB = ais.NewChannelDemod(48000, 1, "B", func(p []byte, ch int) {
 		if f := r.aisPay; f != nil {
 			f(p, ch)
 		}
