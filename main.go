@@ -1213,30 +1213,34 @@ func main() {
 			r.SetBandwidth(bws[idx])
 			saveBwNow(cfg, r)
 		case menuPPM:
-			// −120…+120 then OFF (hands-off: a server with its own
-			// calibration is left untouched), squelch-style.
+			// Cycle −120…−1, OFF, 0…+120 — OFF sits one step below
+			// zero (hands-off: a server with its own calibration is
+			// left untouched, nothing is ever sent).
 			if r.PpmOff() {
-				r.SetPpmOff(false)
 				if dir > 0 {
-					r.SetPpm(-120)
+					r.SetPpmOff(false)
+					r.SetPpm(0)
 				} else {
-					r.SetPpm(120)
+					r.SetPpmOff(false)
+					r.SetPpm(-1)
 				}
 			} else {
 				v := r.Ppm()
 				if dir > 0 {
-					v++
-					if v > 120 {
-						r.SetPpmOff(true)
+					if v == -1 {
+						r.SetPpmOff(true) // −1 → OFF → 0
+					} else if v >= 120 {
+						r.SetPpm(-120) // wrap past the top
 					} else {
-						r.SetPpm(v)
+						r.SetPpm(v + 1)
 					}
 				} else {
-					v--
-					if v < -120 {
-						r.SetPpmOff(true)
+					if v == 0 {
+						r.SetPpmOff(true) // 0 → OFF → −1
+					} else if v <= -120 {
+						r.SetPpm(120) // wrap past the bottom
 					} else {
-						r.SetPpm(v)
+						r.SetPpm(v - 1)
 					}
 				}
 			}
