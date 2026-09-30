@@ -19,7 +19,7 @@ func TestFT8LogFullBounds(t *testing.T) {
 		for i := range entries {
 			entries[i].Time, entries[i].Text = "13:00:00", "CALL1 CALL2 EN37"
 		}
-			u.DrawFT8LogFull(entries, c.scroll, "")
+		u.DrawFT8LogFull(entries, c.scroll, "")
 	}
 	_ = frame
 }

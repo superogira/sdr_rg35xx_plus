@@ -1,30 +1,28 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"sdr35/internal/ui"
 )
 
 func main() {
-	dir := filepath.Join(os.TempDir(), "flagview")
+	dir := filepath.Join(os.TempDir(), "flagprefetch")
 	os.MkdirAll(dir, 0755)
-	entries := []ui.FT8Entry{
-		{Time: "13:01:0" + "1", SNRDb: -8, FreqHz: 415, Text: "CQ HS0ZLG KO88", Anno: "Thailand 9500km", FlagCC: "TH"},
-		{Time: "13:01:0" + "2", SNRDb: -12, FreqHz: 890, Text: "JA1ABC W1AW FN31", Anno: "Japan 8500km", FlagCC: "JP"},
-	}
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if ui.GetFlag("TH", dir) != nil && ui.GetFlag("JP", dir) != nil {
-			break
+	ui.PrefetchAllFlags(dir)
+	entries, _ := os.ReadDir(dir)
+	n := 0
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".png" {
+			n++
 		}
-		time.Sleep(300 * time.Millisecond)
 	}
-	u := ui.New(640, 480)
-	img := u.Frame(ui.FrameStats{FreqHz: 14085000, Mode: "USB"})
-	u.DrawFT8Log(entries, dir)
-	u.DrawFT8LogFull(entries, 0, dir)
-	ui.SavePNG(filepath.Join(dir, "ft8flags.png"), img)
+	fmt.Println("png files:", n)
+	if _, err := os.Stat(filepath.Join(dir, "all.done")); err != nil {
+		fmt.Println("MARKER MISSING")
+		os.Exit(1)
+	}
+	fmt.Println("marker ok, dir:", dir)
 }

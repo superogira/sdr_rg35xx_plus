@@ -6,7 +6,7 @@ import (
 
 func TestAltitudeColor(t *testing.T) {
 	cases := []struct {
-		ft int
+		ft      int
 		wantHue float64
 	}{
 		{0, 20},
