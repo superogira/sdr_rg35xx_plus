@@ -1659,19 +1659,20 @@ func main() {
 				uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuMap)
 			}
 		case uiADSB:
-			// Radar: L1/R1 cycle the map layer, L2/R2 the range,
-			// B/Start back.
+			// Radar: L2/R2 cycle the map layer, L1/R1 the range
+			// (swapped per user request — zoom on the shoulder the
+			// thumb rests on), B/Start back.
 			switch b {
 			case input.L1:
+				adsbRangeIdx = (adsbRangeIdx + len(adsbRanges) - 1) % len(adsbRanges)
+			case input.R1:
+				adsbRangeIdx = (adsbRangeIdx + 1) % len(adsbRanges)
+			case input.L2:
 				adsbLayerIdx = (adsbLayerIdx + len(osm.Layers) - 1) % len(osm.Layers)
 				cfg["adsblayer"] = fmt.Sprintf("%d", adsbLayerIdx)
-			case input.R1:
+			case input.R2:
 				adsbLayerIdx = (adsbLayerIdx + 1) % len(osm.Layers)
 				cfg["adsblayer"] = fmt.Sprintf("%d", adsbLayerIdx)
-			case input.L2:
-				adsbRangeIdx = (adsbRangeIdx + len(adsbRanges) - 1) % len(adsbRanges)
-			case input.R2:
-				adsbRangeIdx = (adsbRangeIdx + 1) % len(adsbRanges)
 			case input.A:
 				aisShowName = !aisShowName
 				cfg["aisname"] = fmt.Sprintf("%v", aisShowName)
