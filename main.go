@@ -399,6 +399,7 @@ const (
 	menuADSBLon
 	menuADSBRadar
 	menuAISServer
+	menuClearMap
 	menuPPM
 	menuExit
 )
@@ -412,7 +413,7 @@ var pageItems = [][]int{
 	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 	{menuAF, menuNR, menuHP, menuLP},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
-	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuADSBRadar},
+	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuADSBRadar, menuClearMap},
 	{menuBM},
 	{menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 }
@@ -610,6 +611,7 @@ func main() {
 	osmCache := osm.NewCache(filepath.Join(filepath.Dir(mustExe()), "osmcache"))
 	adsbMosaic := make([][]*image.RGBA, len(osm.Layers))
 	adsbFetching := make([][]bool, len(osm.Layers))
+	mapCacheClearedAt := time.Time{} // row shows "cleared" for a beat after
 	for i := range adsbMosaic {
 		adsbMosaic[i] = make([]*image.RGBA, len(adsbRanges))
 		adsbFetching[i] = make([]bool, len(adsbRanges))
@@ -628,10 +630,6 @@ func main() {
 	adsbStore := adsb.NewStore()
 	adsbRegs := adsb.NewRegDB(filepath.Join(filepath.Dir(mustExe()), "adsbreg.txt"))
 	flagDir := filepath.Join(filepath.Dir(mustExe()), "flags")
-	// One-off background warmup: the whole flag set (~250 icons, a few
-	// hundred KB) so labels work with no internet at all. Misses still
-	// fall back to the on-demand fetch.
-	go ui.PrefetchAllFlags(flagDir)
 	adsbClient := adsb.NewClient(adsbHost)
 	adsbClient.Connected = func(c bool) { adsbConnected = c }
 	go adsbClient.Run(ctx, func(msg []byte, mlat uint64, sig int) {
@@ -1389,6 +1387,17 @@ func main() {
 			uiMode = uiHostEdit
 		case menuADSBRadar:
 			uiMode = uiADSB
+		case menuClearMap:
+			// Tiles live in osmcache/ next to the exe; OTA never touches
+			// them, so this is the only way to start fresh.
+			if err := osmCache.Clear(); err == nil {
+				for i := range adsbMosaic {
+					for j := range adsbMosaic[i] {
+						adsbMosaic[i][j] = nil
+					}
+				}
+				mapCacheClearedAt = time.Now()
+			}
 		case menuAISServer:
 			aisSel = 0
 			uiMode = uiAISList
@@ -2510,7 +2519,14 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_adsblon"), Value: fmt.Sprintf("%.5f", adsbLon)},
 					ui.MenuItem{Label: i18n.T("m_adsbhost"), Value: adsbHost},
 					ui.MenuItem{Label: i18n.T("m_aishost"), Value: aisHost},
-					ui.MenuItem{Label: i18n.T("m_adsbradar"), Value: i18n.T("press_a")})
+					ui.MenuItem{Label: i18n.T("m_adsbradar"), Value: i18n.T("press_a")},
+					func() ui.MenuItem {
+						v := i18n.T("press_a")
+						if time.Since(mapCacheClearedAt) < 10*time.Second {
+							v = i18n.T("cache_cleared")
+						}
+						return ui.MenuItem{Label: i18n.T("m_clearcache"), Value: v}
+					}())
 			case pageSys:
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_lang"), Value: langLabel()},
@@ -2845,7 +2861,7 @@ func main() {
 					}
 				}
 				cc := geo.ICAOCountry(pl.ICAO)
-				b := ui.RadarBlip{Call: call, ICAO: pl.ICAO, Country: cc, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, TrackDeg: pl.TrackDeg, VrateFpm: pl.VrateFpm, HasPos: pl.HasPos}
+				b := ui.RadarBlip{Call: call, ICAO: pl.ICAO, Country: cc, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, TrackDeg: pl.TrackDeg, VrateFpm: pl.VrateFpm, HasPos: pl.HasPos, Seen: pl.LastSeen}
 				if pl.HasPos {
 					b.DistKm, b.BrngDeg = geo.DistanceBearingKm(adsbLat, adsbLon, pl.Lat, pl.Lon)
 					b.MercX, b.MercY = mercPos(pl.Lat, pl.Lon)
@@ -2868,14 +2884,15 @@ func main() {
 				}
 				mx, my := mercPos(sh.Lat, sh.Lon)
 				cc := geo.MMSICountry(sh.MMSI)
-				blips = append(blips, ui.RadarBlip{Vessel: true, AtoN: sh.AtoN, Call: name, ICAO: sh.MMSI, Country: cc, BrngDeg: br, DistKm: d, SogKt: sh.SogKt, HasPos: true, MercX: mx, MercY: my})
+				blips = append(blips, ui.RadarBlip{Vessel: true, AtoN: sh.AtoN, Call: name, ICAO: sh.MMSI, Country: cc, BrngDeg: br, DistKm: d, SogKt: sh.SogKt, HasPos: true, MercX: mx, MercY: my, Seen: sh.LastSeen})
 				// Demo aids (the live Thai feed carries no types 6/21 right
 				// now) so the rhombus rendering stays verifiable.
 				if os.Getenv("SDR_ADSB_DEMO") != "" {
+					demoNow := time.Now()
 					for _, ad := range [][2]float64{{13.640, 100.560}, {13.560, 100.620}} {
 						amx, amy := mercPos(ad[0], ad[1])
 						dd, bb := geo.DistanceBearingKm(adsbLat, adsbLon, ad[0], ad[1])
-						blips = append(blips, ui.RadarBlip{Vessel: true, AtoN: true, Call: "AID", ICAO: "992190761", BrngDeg: bb, DistKm: dd, HasPos: true, MercX: amx, MercY: amy})
+						blips = append(blips, ui.RadarBlip{Vessel: true, AtoN: true, Call: "AID", ICAO: "992190761", BrngDeg: bb, DistKm: dd, HasPos: true, MercX: amx, MercY: amy, Seen: demoNow})
 					}
 				}
 			}
@@ -2923,7 +2940,7 @@ func main() {
 			}
 			mapName, mapAttr := "", ""
 			if !osm.Layers[L].NoFetch && adsbMosaic[L][z] != nil {
-				mapName, mapAttr = osm.Layers[L].Name, osm.Layers[L].Attr
+				mapName, mapAttr = osm.Layers[L].Name, osm.Layers[L].Attr+" · flags © country-flag-icons (MIT)"
 			}
 			var mercArg *ui.MercView
 			if adsbMosaic[L][z] != nil {

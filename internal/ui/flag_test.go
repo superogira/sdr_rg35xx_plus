@@ -2,10 +2,6 @@ package ui
 
 import (
 	"bytes"
-	"encoding/json"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -28,32 +24,12 @@ func TestRebaseViewBox(t *testing.T) {
 	}
 }
 
-func TestListFlagCodesParses(t *testing.T) {
-	// listFlagCodes hits the network; its JSON shape is pinned here via
-	// the same struct decoding used in the real call.
-	body := []byte(`[{"id":1,"name":"AC.svg"},{"id":2,"name":"AD.svg"},{"id":3,"name":"README.md"}]`)
-	var entries []struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(body, &entries); err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for _, e := range entries {
-		if len(e.Name) == 6 && strings.HasSuffix(e.Name, ".svg") {
-			got = append(got, e.Name[:2])
+func TestEmbeddedFlagsAvailable(t *testing.T) {
+	// The bundled set must serve a few known flags with no network and
+	// no flagDir contents at all.
+	for _, cc := range []string{"TH", "JP", "GB", "US", "BR"} {
+		if GetFlag(cc, t.TempDir()) == nil {
+			t.Errorf("embedded flag %s missing", cc)
 		}
 	}
-	if len(got) != 2 || got[0] != "AC" || got[1] != "AD" {
-		t.Fatalf("codes = %v", got)
-	}
-}
-
-func TestPrefetchSkipsWhenMarkerPresent(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "all.done"), []byte("x"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// Must return immediately without any network attempt.
-	PrefetchAllFlags(dir)
 }

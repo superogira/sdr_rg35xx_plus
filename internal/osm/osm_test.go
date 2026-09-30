@@ -2,7 +2,11 @@ package osm
 
 import (
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"image"
 )
 
 func TestMercatorPx(t *testing.T) {
@@ -23,5 +27,24 @@ func TestMercatorPx(t *testing.T) {
 	_, yb := MercatorPx(-13.6, 100.5, 10)
 	if math.Abs((ya+yb)-256.0*1024) > 1 {
 		t.Fatalf("lat mirror broken: %.1f %.1f", ya, yb)
+	}
+}
+
+func TestCacheClear(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "osmcache")
+	c := NewCache(dir)
+	os.MkdirAll(filepath.Join(dir, Layers[0].Name), 0755)
+	c.remember("x", image.NewRGBA(image.Rect(0, 0, 1, 1)))
+	if err := c.Clear(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("cache dir still present: %v", err)
+	}
+	c.mu.Lock()
+	n := len(c.mem)
+	c.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("memory cache not emptied: %d", n)
 	}
 }
