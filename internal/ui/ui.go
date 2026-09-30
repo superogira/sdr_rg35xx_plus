@@ -213,10 +213,12 @@ func (u *UI) DrawAISLog(entries []AISEntry, flagDir string) {
 		if e.Db > -98 {
 			tf.DrawString(u.img, color.RGBA{120, 200, 255, 255}, px+70, y, fmt.Sprintf("%3.0f", e.Db))
 		}
-		tf.DrawString(u.img, ft8TextColor(e.Text), px+98, y, e.Text)
+		tx := px + 98
 		if flag := GetFlag(e.FlagCC, flagDir); flag != nil {
-			drawImage(u.img, flag, px+98+tf.TextWidth(e.Text)+3, y-9)
+			drawImage(u.img, flag, tx, y-9)
+			tx += flag.Bounds().Dx() + 3
 		}
+		tf.DrawString(u.img, ft8TextColor(e.Text), tx, y, e.Text)
 	}
 }
 
@@ -274,10 +276,12 @@ func (u *UI) DrawAISLogFull(entries []AISEntry, scroll int, flagDir string) {
 		if e.Db > -98 {
 			lineF.DrawString(u.img, color.RGBA{120, 200, 255, 255}, x+100, yy, fmt.Sprintf("%4.0f dB", e.Db))
 		}
-		lineF.DrawString(u.img, ft8TextColor(e.Text), x+152, yy, e.Text)
+		tx := x + 152
 		if flag := GetFlag(e.FlagCC, flagDir); flag != nil {
-			drawImage(u.img, flag, x+152+lineF.TextWidth(e.Text)+3, yy-9)
+			drawImage(u.img, flag, tx, yy-9)
+			tx += flag.Bounds().Dx() + 3
 		}
+		lineF.DrawString(u.img, ft8TextColor(e.Text), tx, yy, e.Text)
 	}
 	hintF.DrawString(u.img, gray, x+10, y+h-12, i18n.T("ft8_scroll"))
 }
