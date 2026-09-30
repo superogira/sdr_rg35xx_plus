@@ -695,8 +695,11 @@ func main() {
 			wfMax = f
 		}
 	}
-	// Tuner frequency correction (ppm) — sent live and on every reconnect.
-	if v, ok := cfg["ppm"]; ok {
+	// Tuner frequency correction (ppm) — sent live and on every
+	// reconnect; "off" leaves the correction to the server itself.
+	if v, ok := cfg["ppm"]; ok && v == "off" {
+		r.SetPpmOff(true)
+	} else if v, ok := cfg["ppm"]; ok {
 		if n, err := strconv.Atoi(v); err == nil {
 			r.SetPpm(n)
 		}
@@ -1210,14 +1213,38 @@ func main() {
 			r.SetBandwidth(bws[idx])
 			saveBwNow(cfg, r)
 		case menuPPM:
-			v := r.Ppm()
-			if dir > 0 {
-				v++
+			// −120…+120 then OFF (hands-off: a server with its own
+			// calibration is left untouched), squelch-style.
+			if r.PpmOff() {
+				r.SetPpmOff(false)
+				if dir > 0 {
+					r.SetPpm(-120)
+				} else {
+					r.SetPpm(120)
+				}
 			} else {
-				v--
+				v := r.Ppm()
+				if dir > 0 {
+					v++
+					if v > 120 {
+						r.SetPpmOff(true)
+					} else {
+						r.SetPpm(v)
+					}
+				} else {
+					v--
+					if v < -120 {
+						r.SetPpmOff(true)
+					} else {
+						r.SetPpm(v)
+					}
+				}
 			}
-			r.SetPpm(v)
-			cfg["ppm"] = fmt.Sprintf("%d", r.Ppm())
+			if r.PpmOff() {
+				cfg["ppm"] = "off"
+			} else {
+				cfg["ppm"] = fmt.Sprintf("%d", r.Ppm())
+			}
 		case menuDS:
 			// -1 auto → 2 on → 0 off → back to auto.
 			switch r.DirectSamplingMode() {
@@ -2409,7 +2436,12 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
 					ui.MenuItem{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
 					ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.*f MHz >", freqDec, float64(r.Freq())/1e6)},
-					ui.MenuItem{Label: i18n.T("m_ppm"), Value: fmt.Sprintf("%+d ppm", r.Ppm())},
+					func() ui.MenuItem {
+						if r.PpmOff() {
+							return ui.MenuItem{Label: i18n.T("m_ppm"), Value: i18n.T("off")}
+						}
+						return ui.MenuItem{Label: i18n.T("m_ppm"), Value: fmt.Sprintf("%+d ppm", r.Ppm())}
+					}(),
 					func() ui.MenuItem {
 						m := ui.MenuItem{Label: i18n.T("m_mode"), Value: r.Mode().Name}
 						if r.FT8Enabled() {
@@ -2893,7 +2925,7 @@ func main() {
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
-			u.DrawFT8Log(ft8Log)
+			u.DrawFT8Log(ft8Log, flagDir)
 		}
 		if uiMode == uiMain {
 			u.DrawSysBadge(cpu, mem, sysinfo.SensorSnapshot().BattPct)

@@ -63,7 +63,7 @@ func TestFT8ColorsRender(t *testing.T) {
 		{Time: "21:15:33", SNRDb: 5, Text: "TF8KW BG0HP RR73"},
 	}
 	frame := u.Frame(FrameStats{FreqHz: 21074000, Mode: "USB"})
-	u.DrawFT8Log(entries)
+	u.DrawFT8Log(entries, "")
 	if os.Getenv("SDR_COLORSHOT") != "" {
 		f, _ := os.Create("ft8colors.png")
 		defer f.Close()
@@ -80,7 +80,7 @@ func TestFT8ColorsPixels(t *testing.T) {
 		{Time: "21:15:33", SNRDb: 5, Text: "TF8KW BG0HP RR73"},
 	}
 	frame := u.Frame(FrameStats{FreqHz: 21074000, Mode: "USB"})
-	u.DrawFT8Log(entries)
+	u.DrawFT8Log(entries, "")
 	has := func(match func(r, g, b int) bool) bool {
 		for y := 0; y < 480; y++ {
 			for x := 0; x < 340; x++ {
