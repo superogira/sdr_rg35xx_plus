@@ -692,8 +692,9 @@ func main() {
 		if ch == 1 {
 			name = "B"
 		}
+		cc := geo.MMSICountry(mmsi)
 		aisLogMu.Lock()
-		aisLog = append(aisLog, ui.AISEntry{Time: time.Now().Format("15:04:05"), Ch: name, Text: line})
+		aisLog = append(aisLog, ui.AISEntry{Time: time.Now().Format("15:04:05"), Ch: name, Text: line, FlagCC: cc})
 		if len(aisLog) > 100 {
 			aisLog = aisLog[len(aisLog)-100:]
 		}
@@ -1525,11 +1526,14 @@ func main() {
 			}
 			autoStep(m)
 		case input.Select:
-			// Big scrollable FT8 history window (mode cycling moved to
-			// A alone).
+			// Big scrollable history window (FT8 or, when the AIS RF
+			// decoder runs, the AIS messages).
 			if r.FT8Enabled() {
 				ft8Scroll = 0
 				uiMode = uiFT8Log
+			} else if r.AISRFEnabled() {
+				aisScroll = 0
+				uiMode = uiAISLog
 			}
 		case input.Y:
 			if r.FT8Enabled() {
@@ -2709,7 +2713,7 @@ func main() {
 			if aisScroll < 0 {
 				aisScroll = 0
 			}
-			u.DrawAISLogFull(view, aisScroll)
+			u.DrawAISLogFull(view, aisScroll, flagDir)
 		} else if uiMode == uiSysMon {
 			sn := sysinfo.SensorSnapshot()
 			cpu, mem, swp := sysinfo.Snapshot()
@@ -3086,7 +3090,7 @@ func main() {
 			view := make([]ui.AISEntry, len(aisLog))
 			copy(view, aisLog)
 			aisLogMu.Unlock()
-			u.DrawAISLog(view)
+			u.DrawAISLog(view, flagDir)
 		}
 		if uiMode == uiMain {
 			u.DrawSysBadge(cpu, mem, sysinfo.SensorSnapshot().BattPct)
