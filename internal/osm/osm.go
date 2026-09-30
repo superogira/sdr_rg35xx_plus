@@ -137,6 +137,15 @@ func (c *Cache) tile(layer, zoom, x, y int) *image.RGBA {
 	return img
 }
 
+// Clear drops every cached tile from memory and disk; the next radar
+// view refetches from the tile servers.
+func (c *Cache) Clear() error {
+	c.mu.Lock()
+	c.mem = map[string]*image.RGBA{}
+	c.mu.Unlock()
+	return os.RemoveAll(c.dir)
+}
+
 func (c *Cache) remember(key string, img *image.RGBA) {
 	c.mu.Lock()
 	c.mem[key] = img

@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"sort"
 	"time"
 
 	"sdr35/internal/i18n"
@@ -67,6 +68,7 @@ type RadarBlip struct {
 	VrateFpm     int
 	HasPos       bool
 	Trail        []RadarDot
+	Seen         time.Time // last position update; newest draws on top
 }
 
 // DrawRadar renders the ADS-B radar. Blips beyond rangeKm clamp to the
@@ -261,9 +263,9 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			if y < 60 {
 				ty = y + 14
 			}
-			if basemap != nil {
-				u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
-			}
+			// Unconditional: the chip also dims any older label this one
+			// lands on (labels sort oldest-first, newest on top).
+			u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
 			lcol := color.RGBA{180, 255, 255, 255}
 			if b.AtoN {
 				lcol = color.RGBA{255, 235, 130, 255}
@@ -333,10 +335,9 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		if y < 60 {
 			ty = y + 14
 		}
-		if basemap != nil {
-			// Dark chip keeps the label readable over map colours.
-			u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
-		}
+		// Unconditional: the chip also dims any older label this one
+		// lands on (labels sort oldest-first, newest on top).
+		u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
 		tf.DrawString(u.img, altitudeColor(b.AltFt), tx, ty, label)
 		if flag != nil {
 			drawImage(u.img, flag, tx+tf.TextWidth(label)+3, ty-10)
@@ -352,6 +353,19 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 	hf.DrawString(u.img, bright, 10, 24, fmt.Sprintf("ADS-B  %s", host))
 	sf := Face(11, false)
 	sf.DrawString(u.img, green, 10, 42, fmt.Sprintf("%s  %d km  RX %.4f %.4f", state, int(rangeKm), rxLat, rxLon))
+	// Deterministic z-order: oldest first so the freshest target paints
+	// LAST, on top. Blips used to arrive in Go map order, which reshuffles
+	// every frame — overlapping labels flickered as they fought for the
+	// top spot. Callsign breaks ties so the order never wobbles.
+	ordered := make([]RadarBlip, len(blips))
+	copy(ordered, blips)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if !ordered[i].Seen.Equal(ordered[j].Seen) {
+			return ordered[i].Seen.Before(ordered[j].Seen)
+		}
+		return ordered[i].Call < ordered[j].Call
+	})
+	blips = ordered
 	n := 0
 	for _, b := range blips {
 		if b.HasPos {

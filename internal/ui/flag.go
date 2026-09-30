@@ -1,8 +1,13 @@
 package ui
 
+// The bundled flag icons come from catamphetamine/country-flag-icons
+// (MIT — see flagicons/LICENSE): 3x2 set rendered to 18×12 PNG at build
+// time. The runtime fetch below stays as a fallback for codes that are
+// not in the bundled set.
+
 import (
 	"bytes"
-	"encoding/json"
+	"embed"
 	"fmt"
 	"image"
 	"image/color"
@@ -12,13 +17,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/srwiley/oksvg"
 	"github.com/srwiley/rasterx"
 )
+
+//go:embed flagicons/*.png
+var flagEmbedded embed.FS
 
 var (
 	flagCache   = make(map[string]image.Image)
@@ -39,6 +46,12 @@ func GetFlag(cc, flagDir string) image.Image {
 	if img, ok := flagCache[cc]; ok {
 		return img
 	}
+	if data, err := flagEmbedded.ReadFile("flagicons/" + cc + ".png"); err == nil {
+		if img, err := png.Decode(bytes.NewReader(data)); err == nil {
+			flagCache[cc] = img
+			return img
+		}
+	}
 	diskPath := filepath.Join(flagDir, cc+".png")
 	if data, err := os.ReadFile(diskPath); err == nil {
 		if img, err := png.Decode(bytes.NewReader(data)); err == nil {
@@ -51,76 +64,6 @@ func GetFlag(cc, flagDir string) image.Image {
 		go fetchFlag(cc, flagDir, diskPath)
 	}
 	return nil
-}
-
-// PrefetchAllFlags downloads every flag from the repo once (paced like
-// the OSM tile fetcher) so the set works fully offline afterwards —
-// ~250 icons at ~0.5 KB each. A marker file (all.done) stops repeats;
-// misses stay retrievable through the normal on-demand path.
-func PrefetchAllFlags(flagDir string) {
-	marker := filepath.Join(flagDir, "all.done")
-	if _, err := os.Stat(marker); err == nil {
-		return
-	}
-	codes, err := listFlagCodes()
-	if err != nil {
-		return // offline or API hiccup: retry on a later boot
-	}
-	os.MkdirAll(flagDir, 0755)
-	fetched := 0
-	for _, cc := range codes {
-		diskPath := filepath.Join(flagDir, cc+".png")
-		if _, err := os.Stat(diskPath); err == nil {
-			continue
-		}
-		fetchFlag(cc, flagDir, diskPath)
-		fetched++
-		// Be a polite client even though this is a one-off warmup.
-		time.Sleep(150 * time.Millisecond)
-	}
-	if f, err := os.Create(marker); err == nil {
-		fmt.Fprintf(f, "%s %d\n", time.Now().UTC().Format(time.RFC3339), fetched)
-		f.Close()
-	}
-}
-
-// listFlagCodes lists the ISO codes available in the 3x2 directory of
-// the flag-icons repository (paginated GitLab tree API).
-func listFlagCodes() ([]string, error) {
-	var codes []string
-	for page := 1; page <= 10; page++ {
-		u := fmt.Sprintf("https://gitlab.com/api/v4/projects/catamphetamine%%2Fcountry-flag-icons/repository/tree?path=flags%%2F3x2&per_page=100&page=%d", page)
-		resp, err := flagClient.Get(u)
-		if err != nil {
-			return nil, err
-		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		resp.Body.Close()
-		if resp.StatusCode != 200 {
-			return nil, fmt.Errorf("tree api: %s", resp.Status)
-		}
-		var entries []struct {
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal(body, &entries); err != nil {
-			return nil, err
-		}
-		if len(entries) == 0 {
-			break
-		}
-		for _, e := range entries {
-			if len(e.Name) == 6 && strings.HasSuffix(e.Name, ".svg") {
-				codes = append(codes, e.Name[:2])
-			}
-		}
-		if len(entries) < 100 {
-			break
-		}
-	}
-	if len(codes) == 0 {
-		return nil, fmt.Errorf("no flags listed")
-	}
-	return codes, nil
 }
 
 func fetchFlag(cc, flagDir, diskPath string) {
