@@ -1,6 +1,10 @@
 package radio
 
-import "testing"
+import (
+	"testing"
+
+	"sdr35/internal/dsp"
+)
 
 func TestGainDbMapping(t *testing.T) {
 	cases := []struct {
@@ -26,5 +30,19 @@ func TestGainDbMapping(t *testing.T) {
 	}
 	if len(r828dGains) != 29 {
 		t.Errorf("gain table has %d entries, expected 29 (RTL-SDR Blog V4)", len(r828dGains))
+	}
+}
+
+// SetPpm clamps to the ±120 window the menu expects; the stored value
+// also survives via the session snapshot (applied at every reconnect).
+func TestPpmClamp(t *testing.T) {
+	r := New("x:1", 100_000_000, dsp.ModeAM, 0, nil)
+	for _, c := range []struct{ in, want int }{
+		{0, 0}, {5, 5}, {999, 120}, {-999, -120}, {120, 120}, {-120, -120},
+	} {
+		r.SetPpm(c.in)
+		if got := r.Ppm(); got != c.want {
+			t.Fatalf("SetPpm(%d) = %d, want %d", c.in, got, c.want)
+		}
 	}
 }

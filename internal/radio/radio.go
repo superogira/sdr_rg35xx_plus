@@ -84,6 +84,7 @@ type Radio struct {
 	ft8On     bool
 	ft8       *dsp.FT8Detector
 	hfApplied int // direct-sampling mode currently set on the server
+	ppm       int  // tuner frequency correction, applied live and at every (re)connect
 
 	client  *rtltcp.Client
 	gains   int32
@@ -288,7 +289,7 @@ func (r *Radio) session(ctx context.Context) error {
 		}
 		r.chain = chain
 		r.state = stateStreaming
-		freq, gainDb, lo := r.freqHz, r.gainDb, r.loHz
+		freq, gainDb, lo, ppm := r.freqHz, r.gainDb, r.loHz, r.ppm
 		r.mu.Unlock()
 		chain.Reset()
 		// Restore the passband offset on the fresh chain (the server
@@ -307,8 +308,10 @@ func (r *Radio) session(ctx context.Context) error {
 		}
 		// Stream kick: this server holds the IQ stream until the first
 		// command arrives (a silent connect can sit at zero bytes), and
-		// SDRSharp opens with the same harmless freq-correction command.
-		if err := client.SetFreqCorrection(0); err != nil {
+		// SDRSharp opens with the same freq-correction command — so the
+		// kick doubles as applying the user's ppm on every (re)connect
+		// (a live change was verified safe against the real server).
+		if err := client.SetFreqCorrection(int32(ppm)); err != nil {
 			return fmt.Errorf("freq correction kick: %w", err)
 		}
 		// Dongle bring-up. Configure once, then only ever retune:
@@ -755,6 +758,31 @@ func (r *Radio) Volume() float64 {
 }
 
 // SetHost changes the server address; the next reconnect uses it.
+// Ppm returns the tuner frequency correction in ppm.
+func (r *Radio) Ppm() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ppm
+}
+
+// SetPpm stores the frequency correction and, while streaming, sends it
+// straight away (proven safe mid-session against the user's server).
+func (r *Radio) SetPpm(v int) {
+	if v > 120 {
+		v = 120
+	}
+	if v < -120 {
+		v = -120
+	}
+	r.mu.Lock()
+	r.ppm = v
+	client := r.client
+	r.mu.Unlock()
+	if client != nil {
+		client.SetFreqCorrection(int32(v))
+	}
+}
+
 func (r *Radio) SetHost(host string) {
 	r.mu.Lock()
 	if r.Host == host {
