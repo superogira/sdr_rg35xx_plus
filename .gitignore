@@ -1,21 +1,6 @@
-# Build output
-dist/
-
-# Dev-machine test artifacts
-*.exe
-*.wav
-*.raw
-capture_*.png
-smoke*.png
-screenshot*.png
-shot*.png
-thai_test.png
-
-# Go
-*.test
-
-# FTP credentials for upload.sh (never commit)
-ftp.env
-
-# Source basemap copy (embedded from internal/ui/world_map.png)
-/world_map.png
+ais_60s.raw
+aisc.zip
+AIS-catcher.exe
+*.dll
+aisrf.exe
+aistest.exe
