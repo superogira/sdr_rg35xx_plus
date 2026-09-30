@@ -22,6 +22,7 @@ func TestConfigKeysRoundTrip(t *testing.T) {
 		"adsblon=100.70000",
 		"adsblayer=2",
 		"aishost=192.168.8.88:29420",
+		"ppm=-7",
 		"beasthosts=192.168.9.99:30005,10.0.0.5:30005",
 		"aishosts=192.168.8.88:29420,10.0.0.6:29420",
 	}, "\n")
@@ -29,7 +30,7 @@ func TestConfigKeysRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := readIni(ini)
-	for _, k := range []string{"adsbhost", "adsblat", "adsblon", "adsblayer", "aishost", "beasthosts", "aishosts"} {
+	for _, k := range []string{"adsbhost", "adsblat", "adsblon", "adsblayer", "aishost", "beasthosts", "aishosts", "ppm"} {
 		if cfg[k] == "" {
 			t.Fatalf("key %q not parsed from ini", k)
 		}
@@ -48,7 +49,7 @@ func TestConfigKeysRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(src)
-	for _, k := range []string{"adsbhost", "adsblat", "adsblon", "adsblayer", "aishost", "beasthosts", "aishosts"} {
+	for _, k := range []string{"adsbhost", "adsblat", "adsblon", "adsblayer", "aishost", "beasthosts", "aishosts", "ppm"} {
 		if !strings.Contains(s, `cfg["`+k+`"]`) {
 			t.Fatalf("key %q never read in main.go", k)
 		}

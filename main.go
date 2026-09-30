@@ -399,6 +399,7 @@ const (
 	menuADSBLon
 	menuADSBRadar
 	menuAISServer
+	menuPPM
 	menuExit
 )
 
@@ -408,7 +409,7 @@ const (
 // was unreachable from the d-pad.
 var pageItems = [][]int{
 	{0, 0, 0, 0, 0, 0, menuExit}, // rows 0-5 open subpages by position; the last row is Exit
-	{menuHost, menuSample, menuFreq, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
+	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 	{menuAF, menuNR, menuHP, menuLP},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuADSBRadar},
@@ -693,6 +694,15 @@ func main() {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 10 && f <= 120 {
 			wfMax = f
 		}
+	}
+	// Tuner frequency correction (ppm) — sent live and on every reconnect.
+	if v, ok := cfg["ppm"]; ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			r.SetPpm(n)
+		}
+	}
+	if cfg["ppm"] == "" {
+		cfg["ppm"] = "0"
 	}
 	u.SetWaterfallRange(wfMin, wfMax)
 	if span > 0 {
@@ -1199,6 +1209,15 @@ func main() {
 			idx = (idx + len(bws) + dir) % len(bws)
 			r.SetBandwidth(bws[idx])
 			saveBwNow(cfg, r)
+		case menuPPM:
+			v := r.Ppm()
+			if dir > 0 {
+				v++
+			} else {
+				v--
+			}
+			r.SetPpm(v)
+			cfg["ppm"] = fmt.Sprintf("%d", r.Ppm())
 		case menuDS:
 			// -1 auto → 2 on → 0 off → back to auto.
 			switch r.DirectSamplingMode() {
@@ -2390,6 +2409,7 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
 					ui.MenuItem{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
 					ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.*f MHz >", freqDec, float64(r.Freq())/1e6)},
+					ui.MenuItem{Label: i18n.T("m_ppm"), Value: fmt.Sprintf("%+d ppm", r.Ppm())},
 					func() ui.MenuItem {
 						m := ui.MenuItem{Label: i18n.T("m_mode"), Value: r.Mode().Name}
 						if r.FT8Enabled() {
@@ -3004,6 +3024,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	// Squelch level from the live config map.
 	if v, ok := cfg["sql"]; ok {
 		fmt.Fprintf(f, "sql=%s\n", v)
+	}
+	if v, ok := cfg["ppm"]; ok {
+		fmt.Fprintf(f, "ppm=%s\n", v)
 	}
 	if v, ok := cfg["update"]; ok {
 		fmt.Fprintf(f, "update=%s\n", v)

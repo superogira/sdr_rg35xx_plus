@@ -50,6 +50,7 @@ var strings = map[string][2]string{
 	"m_rate":         {"Sample Rate", "Sample Rate"},
 	"m_bw":           {"Bandwidth", "Bandwidth"},
 	"m_ds":           {"HF Direct Sampling", "HF Direct Sampling"},
+	"m_ppm":          {"แก้ความถี่ (ppm)", "Freq correction (ppm)"},
 	"m_ft8":          {"ถอดรหัส FT8", "FT8 decode"},
 	"m_host":         {"เครื่องแม่ข่าย / IP", "Host / IP"},
 	"m_call":         {"คอลไซน์ของเรา", "My callsign"},
