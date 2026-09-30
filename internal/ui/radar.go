@@ -71,8 +71,8 @@ type RadarBlip struct {
 	Seen         time.Time // last position update; newest draws on top
 }
 
-// DrawRadar renders the ADS-B radar. Blips beyond rangeKm clamp to the
-// outer ring at half brightness.
+// DrawRadar renders the ADS-B radar. Targets beyond rangeKm are not
+// drawn at all — they appear when the user zooms out to their range.
 func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string) {
 	// Phosphor palette.
 	bg := color.RGBA{2, 10, 4, 255}
@@ -164,28 +164,22 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		// land EXACTLY on the tiles; on the phosphor fallback the polar
 		// (bearing+distance) rings apply.
 		var x, y int
-		clamped := false
 		if merc != nil {
 			dx, dy := merc.project(b.MercX, b.MercY)
 			if math.Hypot(float64(dx), float64(dy)) > maxR {
-				dx, dy = clampVec(dx, dy, int(maxR))
-				clamped = true
+				continue // beyond the selected range: wait for zoom-out
 			}
 			x, y = cx+dx, cy+dy
 		} else {
 			r := b.DistKm / rangeKm * maxR
 			if r > maxR {
-				r = maxR
-				clamped = true
+				continue // beyond the selected range: wait for zoom-out
 			}
 			ang := b.BrngDeg * 3.14159265 / 180
 			x = cx + int(r*math.Sin(ang))
 			y = cy - int(r*math.Cos(ang))
 		}
 		col := green
-		if clamped {
-			col = dim
-		}
 		// Flown track: breadcrumbs every 5 s of flight within a
 		// five-minute window. Every dot is a full 2x2 body — 1-px dots
 		// proved invisible on the handheld screen.
@@ -455,12 +449,6 @@ func (u *UI) blendPx(x, y int, r, g, b uint8, a uint8) {
 	u.img.Pix[o+1] = uint8((int(g)*int(a) + int(u.img.Pix[o+1])*int(ia)) / 255)
 	u.img.Pix[o+2] = uint8((int(b)*int(a) + int(u.img.Pix[o+2])*int(ia)) / 255)
 	u.img.Pix[o+3] = 255
-}
-
-// clampVec shortens a vector to the given length (edge-clamped blips).
-func clampVec(x, y, max int) (int, int) {
-	f := float64(max) / math.Hypot(float64(x), float64(y))
-	return int(float64(x) * f), int(float64(y) * f)
 }
 
 // niceStep rounds km to the nearest 1-2-5 decade value so ring labels

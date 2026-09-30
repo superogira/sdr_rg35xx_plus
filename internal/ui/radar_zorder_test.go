@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"image"
 	"image/color"
 	"testing"
 	"time"
@@ -46,4 +47,43 @@ func near(r, g, b uint8, c color.RGBA) bool {
 		return int(b - a)
 	}
 	return d(r, c.R) < 40 && d(g, c.G) < 40 && d(b, c.B) < 40
+}
+
+// A target beyond the selected range must not draw anything: the frame
+// with one such blip has to be identical to an empty radar (the header
+// counts drawn blips only). Retry guards the seconds-tick of the clock.
+func TestRadarOutOfRangeHidden(t *testing.T) {
+	u := New(640, 480)
+	mk := func(blips []RadarBlip) *image.RGBA {
+		img := u.Frame(FrameStats{FreqHz: 1090000000, Mode: "AM"})
+		u.DrawRadar(blips, 100, "x:1", true, 13.5, 100.5, 12, nil, "", "", nil, t.TempDir())
+		return img
+	}
+	far := []RadarBlip{
+		{Call: "FAR1", ICAO: "880003", AltFt: 35000, HasPos: true, MercX: 400, MercY: 0, DistKm: 400, BrngDeg: 90, Seen: time.Now()},
+		{Vessel: true, Call: "FARSHP", ICAO: "567999999", HasPos: true, MercX: -400, MercY: 0, DistKm: 400, BrngDeg: 270, Seen: time.Now()},
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		a := mk(far)
+		b := mk(nil)
+		if sameImage(a, b) {
+			return
+		}
+		time.Sleep(1100 * time.Millisecond) // clock probably ticked; retry
+	}
+	t.Fatal("out-of-range blips still visible")
+}
+
+func sameImage(a, b *image.RGBA) bool {
+	if a.Rect != b.Rect {
+		return false
+	}
+	for y := a.Rect.Min.Y; y < a.Rect.Max.Y; y++ {
+		for x := a.Rect.Min.X; x < a.Rect.Max.X; x++ {
+			if a.At(x, y) != b.At(x, y) {
+				return false
+			}
+		}
+	}
+	return true
 }
