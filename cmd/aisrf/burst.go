@@ -120,7 +120,42 @@ func burstMode(path string) {
 		var r48 []complex128
 		dsp.ResampleLinear(out48, &pos, 0.75, &r48)
 		dem.Feed(r48)
-		fmt.Printf("burst %d: f=%+.0f frames=%d %v"+string(rune(92))+"n", k, bestF, got, text)
+		ais.DbgAttempts = nil
+		dem.Feed(r48)
+		fmt.Printf("burst %d: f=%+.0f frames=%d %v attempts=%d\n", k, bestF, got, text, len(ais.DbgAttempts))
+		// Ground truth from AIS-catcher for this band: MMSI 567004372
+		// sentence "18Lg<m8P007<M1L7iAl>4?v43@7u". Compare every failed
+		// FCS attempt's DATA prefix with the message bit stream (the
+		// message bit order itself is order-independent; the octet
+		// order question is answered by which attempts match at all).
+		armor := "18Lg<m8P007<M1L7iAl>4?v43@7u"
+		var S []byte
+		for k2 := 0; k2 < len(armor); k2++ {
+			v := armor[k2] - 48
+			if v > 40 {
+				v -= 8
+			}
+			for b := 5; b >= 0; b-- {
+				S = append(S, (v>>uint(b))&1)
+			}
+		}
+		for ai, att := range ais.DbgAttempts {
+			m := 0
+			for j := 0; j < len(att) && j < len(S); j++ {
+				if att[j] == S[j] {
+					m++
+				}
+			}
+			inv := 0
+			for j := 0; j < len(att) && j < len(S); j++ {
+				if att[j] == 1-S[j] {
+					inv++
+				}
+			}
+			if m > len(S)/2 || inv > len(S)/2 {
+				fmt.Printf("  attempt %d len=%d: direct=%d inverted=%d (of %d)\n", ai, len(att), m, inv, len(S))
+			}
+		}
 	}
 }
 
@@ -129,4 +164,68 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+// writeBursts dumps each analysed burst window as a mini raw file for
+// AIS-catcher cross-checks.
+func writeBursts(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Println("read:", err)
+		os.Exit(1)
+	}
+	n := len(data) / 2
+	type blk struct {
+		off int
+		p   float64
+	}
+	var blocks []blk
+	for off := 0; off+16384 <= n; off += 8192 {
+		coeff := 2 * math.Cos(2*math.Pi*23000/1024000)
+		var s1r, s2r, s1i, s2i float64
+		for i := off; i < off+8192; i++ {
+			re := float64(data[2*i]) - 127.5
+			im := float64(data[2*i+1]) - 127.5
+			sr := re + coeff*s1r - s2r
+			si := im + coeff*s1i - s2i
+			s2r, s1r = s1r, sr
+			s2i, s1i = s1i, si
+		}
+		p := (s1r*s1r + s2r*s2r - coeff*s1r*s2r) + (s1i*s1i + s2i*s2i - coeff*s1i*s2i)
+		blocks = append(blocks, blk{off, p})
+	}
+	ranked := append([]blk{}, blocks...)
+	for i := 1; i < len(ranked); i++ {
+		for j := i; j > 0 && ranked[j].p > ranked[j-1].p; j-- {
+			ranked[j], ranked[j-1] = ranked[j-1], ranked[j]
+		}
+	}
+	var top []blk
+	for _, b := range ranked {
+		ok := true
+		for _, t := range top {
+			if abs(t.off-b.off) < 32768 {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			top = append(top, b)
+		}
+		if len(top) == 12 {
+			break
+		}
+	}
+	for k, b := range top {
+		lo := b.off - 65536
+		if lo < 0 {
+			lo = 0
+		}
+		hi := b.off + 131072
+		if hi > n {
+			hi = n
+		}
+		os.WriteFile(fmt.Sprintf("burst_%02d.raw", k), data[2*lo:2*hi], 0644)
+		fmt.Printf("burst_%02d.raw: samples %d..%d power=%.3g\n", k, lo, hi, b.p)
+	}
 }

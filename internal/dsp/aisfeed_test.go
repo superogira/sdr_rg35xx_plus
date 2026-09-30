@@ -43,22 +43,35 @@ func aisBits(payload []byte, crc func([]byte) uint16) []byte {
 	}
 	flag := func() { bits = append(bits, 0, 1, 1, 1, 1, 1, 1, 0) }
 	flag()
-	fcs := crc(payload)
-	frame := append(append([]byte{}, payload...), byte(fcs), byte(fcs>>8))
-	ones := 0
-	for _, by := range frame {
+	var air []byte
+	for _, by := range payload {
 		for k := 0; k < 8; k++ {
-			b := (by >> k) & 1
-			bits = append(bits, b)
-			if b == 1 {
-				ones++
-			} else {
-				ones = 0
-			}
-			if ones == 5 {
-				bits = append(bits, 0)
-				ones = 0
-			}
+			air = append(air, (by>>uint(k))&1)
+		}
+	}
+	c := uint32(0xFFFF)
+	for _, b := range air {
+		if (uint32(b)^c)&1 != 0 {
+			c = (c >> 1) ^ 0x8408
+		} else {
+			c >>= 1
+		}
+	}
+	inv := uint16(^c)
+	for i := 0; i < 16; i++ {
+		air = append(air, byte((inv>>uint(i))&1))
+	}
+	ones := 0
+	for _, b := range air {
+		bits = append(bits, b)
+		if b == 1 {
+			ones++
+		} else {
+			ones = 0
+		}
+		if ones == 5 {
+			bits = append(bits, 0)
+			ones = 0
 		}
 	}
 	flag()
@@ -88,7 +101,7 @@ func TestFeedAISBothChannels(t *testing.T) {
 	for i := 0; i+7 < len(abits); i += 8 {
 		by := byte(0)
 		for k := 0; k < 8; k++ {
-			by |= abits[i+k] << k
+			by |= abits[i+k] << (7 - k)
 		}
 		payA[i/8] = by
 	}
