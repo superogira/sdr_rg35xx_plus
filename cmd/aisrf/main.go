@@ -106,6 +106,14 @@ func main() {
 		burstMode(p)
 		return
 	}
+	if p := os.Getenv("AIS_MKSYNTH"); p != "" {
+		mkSynth(p)
+		return
+	}
+	if p := os.Getenv("AIS_BURSTS"); p != "" {
+		writeBursts(p)
+		return
+	}
 	c, err := net.Dial("tcp", host)
 	if err != nil {
 		fmt.Println("dial:", err)
@@ -131,6 +139,35 @@ func main() {
 	// leave the rate alone and run the front-end at 256k directly.
 	send(0x01, 162000000)
 	fmt.Println("streaming", secs, "s from", host)
+
+	// Measure the true stream rate (the shared server's configuration
+	// drifts between 256 ksps and ~1.024 Msps) and pre-decimate when
+	// needed so the front-end always sees 256 ksps.
+	bufRate := make([]byte, 65536)
+	t0 := time.Now()
+	total := 0
+	for time.Since(t0) < 2*time.Second {
+		m, err := c.Read(bufRate)
+		if err != nil {
+			break
+		}
+		total += m
+	}
+	iqRate := float64(total) / time.Since(t0).Seconds() / 2
+	fmt.Printf("measured IQ rate: %.0f sps\n", iqRate)
+	var preTaps []float64
+	var preHist []complex128
+	if iqRate > 700000 {
+		preTaps = dsp.DesignLowpass(255, 100000, 1024000)
+	}
+	pre := func(in []complex128) []complex128 {
+		if preTaps == nil {
+			return in
+		}
+		var out []complex128
+		dsp.FIRDecim(preTaps, &preHist, 4, in, &out)
+		return out
+	}
 
 	store := ais.NewStore()
 	frames := 0
@@ -175,10 +212,11 @@ func main() {
 			break
 		}
 		iq := buf[:n]
-		fif2 := make([]complex128, 0, n/2)
+		full := make([]complex128, 0, n/2)
 		for i := 0; i+1 < len(iq); i += 2 {
-			fif2 = append(fif2, complex(float64(iq[i])-127.5, float64(iq[i+1])-127.5))
+			full = append(full, complex(float64(iq[i])-127.5, float64(iq[i+1])-127.5))
 		}
+		fif2 := pre(full)
 		// Same per-second centroid AFC as the app's Chain: the shared
 		// server's tuning state drifts (aiscatcher retunes it), so the
 		// harness must find the channels itself.

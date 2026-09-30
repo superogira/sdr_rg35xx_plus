@@ -23,7 +23,7 @@ func aivdmPayload(armored string) []byte {
 	out := make([]byte, len(bits)/8)
 	for i := range out {
 		for k := 0; k < 8; k++ {
-			out[i] |= bits[i*8+k] << k
+			out[i] |= bits[i*8+k] << (7 - k)
 		}
 	}
 	return out
@@ -34,31 +34,7 @@ func aivdmPayload(armored string) []byte {
 // GMSK phase smoothing, a carrier phase offset, a frequency offset and
 // complex noise.
 func synthAISIQ(payload []byte, carrierPhase, freqOffset, noise float64, rng *rand.Rand) []complex128 {
-	var bits []byte
-	for i := 0; i < 24; i++ {
-		bits = append(bits, byte(i%2)) // 0101… training (data domain)
-	}
-	flag := func() { bits = append(bits, 0, 1, 1, 1, 1, 1, 1, 0) }
-	flag()
-	fcs := crcX25(payload)
-	frame := append(append([]byte{}, payload...), byte(fcs), byte(fcs>>8))
-	ones := 0
-	for _, by := range frame {
-		for k := 0; k < 8; k++ {
-			b := (by >> k) & 1
-			bits = append(bits, b)
-			if b == 1 {
-				ones++
-			} else {
-				ones = 0
-			}
-			if ones == 5 {
-				bits = append(bits, 0)
-				ones = 0
-			}
-		}
-	}
-	flag()
+	bits := frameAirBits(payload, 24)
 
 	spb := 48000.0 / 9600.0
 	lvl := 1.0 // NRZI level (0 toggles)
@@ -164,4 +140,52 @@ func TestGMSKDecodeBitsIntegration(t *testing.T) {
 	if !sh[0].HasPos {
 		t.Fatal("no position decoded")
 	}
+}
+
+// frameAirBits builds the on-air bit sequence (training + flag +
+// stuffed payload+FCS + flag) for a payload, in the AIS air order:
+// octets MSB-first, FCS = complement of the post-data X.25 state with
+// its bits LSB-first (the receiver's reflected loop then sees the
+// 0xF0B8 residue).
+func frameAirBits(payload []byte, training int) []byte {
+	var bits []byte
+	for i := 0; i < training; i++ {
+		bits = append(bits, byte(i%2))
+	}
+	flag := func() { bits = append(bits, 0, 1, 1, 1, 1, 1, 1, 0) }
+	flag()
+	// Air order: HDLC LSB-first per octet.
+	var air []byte
+	for _, by := range payload {
+		for k := 0; k < 8; k++ {
+			air = append(air, (by>>uint(k))&1)
+		}
+	}
+	crc := uint32(0xFFFF)
+	for _, b := range air {
+		if (uint32(b)^crc)&1 != 0 {
+			crc = (crc >> 1) ^ 0x8408
+		} else {
+			crc >>= 1
+		}
+	}
+	inv := uint16(^crc)
+	for i := 0; i < 16; i++ {
+		air = append(air, byte((inv>>uint(i))&1))
+	}
+	ones := 0
+	for _, b := range air {
+		bits = append(bits, b)
+		if b == 1 {
+			ones++
+		} else {
+			ones = 0
+		}
+		if ones == 5 {
+			bits = append(bits, 0)
+			ones = 0
+		}
+	}
+	flag()
+	return bits
 }

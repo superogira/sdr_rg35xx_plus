@@ -1,6 +1,10 @@
 package ais
 
-import "math"
+import (
+	"math"
+	"sort"
+	"time"
+)
 
 // AIS over-the-air demodulator, ported from AIS-catcher's proven
 // "ModelDefault" architecture (jvde-github/AIS-catcher, GPL-3 —
@@ -188,6 +192,11 @@ func (d *frameDecoder) field(off, n int) uint32 {
 	return v
 }
 
+// DbgAttempts captures the longest bit sequences that reached the
+// FCS stage even when the CRC failed (test aid for ground-truth
+// comparison against a reference decoder).
+var DbgAttempts [][]byte
+
 // process CRC-checks data+FCS and emits the payload (AIS::processData;
 // the running X.25 CRC over data+FCS must equal the 0xF0B8 residue).
 func (d *frameDecoder) process(n int) {
@@ -203,12 +212,20 @@ func (d *frameDecoder) process(n int) {
 		}
 	}
 	if crc != 0xF0B8 {
+		if len(DbgAttempts) < 400 {
+			cp := append([]byte{}, d.bits[:n]...)
+			DbgAttempts = append(DbgAttempts, cp)
+		}
 		return
 	}
 	nBits := n - 16
 	if nBits%8 != 0 || nBits/8 < 21 {
 		return
 	}
+	// AIS octets go on the air LSB-first (HDLC order) — verified
+	// against AIS-catcher on a live recording: the X.25 FCS is fully
+	// reflected, so a bit-swapped reading ALSO passes CRC, which is
+	// exactly how the junk 94x MMSIs crept through the MSB build.
 	payload := make([]byte, nBits/8)
 	for i := range payload {
 		for k := 0; k < 8; k++ {
@@ -218,6 +235,19 @@ func (d *frameDecoder) process(n int) {
 	if d.emit != nil {
 		d.emit(payload, d.ch)
 	}
+}
+
+// dupOfRecent reports whether this exact payload was emitted within
+// the last second (several phase streams can decode the same burst —
+// AIS-catcher cross-resets its decoders for the same effect).
+func (d *ChannelDemod) dupOfRecent(payload []byte) bool {
+	now := time.Now()
+	if now.Sub(d.lastSeen) < time.Second && string(d.lastPay) == string(payload) {
+		return true
+	}
+	d.lastPay = append(d.lastPay[:0], payload...)
+	d.lastSeen = now
+	return false
 }
 
 // phaseClassifier is the 16-phase projection demod (Demod::
@@ -231,77 +261,16 @@ type phaseClassifier struct {
 	bitsH [nPhases]uint8
 	maxI  int
 
-	// Frequency-offset lock loop: the 4th power of the symbol-to-symbol
-	// rotation removes the ±90° data modulation (4·90° ≡ 0), leaving
-	// 4·Δ from the carrier offset. Correcting Δ before the projection
-	// stage is what makes the demodulator ppm-robust — the raw
-	// classifier only tracks a few tens of Hz by itself.
-	prevZc complex128
-	flc    complex128 // filtered 4th-power discriminator
-	freq   float64    // tracked per-symbol rotation (rad) — the offset
-	theta  float64    // NCO correction phase applied to incoming symbols
-	idle   int        // consecutive low-confidence symbols
-}
-
-// lockStep derotates one symbol sample by the tracked offset and
-// advances the loop. Returns the corrected sample.
-func (p *phaseClassifier) lockStep(z complex128) complex128 {
-	// z' = z · e^{-iθ}
-	c, s2 := math.Cos(-p.theta), math.Sin(-p.theta)
-	zc := complex(real(z)*c-imag(z)*s2, real(z)*s2+imag(z)*c)
-	if p.prevZc != 0 {
-		d := complex(real(p.prevZc), -imag(p.prevZc)) * zc // conj(prev)·z
-		// d⁴ normalised: phase = 4Δ (data term ×4 ≡ 0 mod 2π).
-		m := math.Hypot(real(d), imag(d))
-		if m > 0 {
-			d = d / complex(m, 0)
-			d4 := d * d * d * d
-			p.flc = p.flc*0.9 + d4*0.1
-			conf := math.Hypot(real(p.flc), imag(p.flc))
-			if conf > 0.25 {
-				// Coherent symbol-to-symbol rotation: trust the loop.
-				delta := math.Atan2(imag(p.flc), real(p.flc)) / 4
-				// Second-order loop: integrate the rate error into a
-				// frequency estimate, then advance the NCO phase by
-				// it. A proportional-only loop settles at a standing
-				// error and never removes the offset.
-				p.freq += 0.06 * delta
-				if p.freq > 1.6 {
-					p.freq = 1.6 // ±~2.4 kHz of carrier offset
-				} else if p.freq < -1.6 {
-					p.freq = -1.6
-				}
-				p.theta += p.freq + 0.04*delta
-				if p.theta > math.Pi {
-					p.theta -= 2 * math.Pi
-				} else if p.theta < -math.Pi {
-					p.theta += 2 * math.Pi
-				}
-			} else {
-				// Idle channel: relax and eventually reset the loop so
-				// noise cannot poison the next burst's acquisition.
-				p.freq *= 0.995
-				p.idle++
-				if p.idle == 20 {
-					p.flc = 0
-					p.freq = 0
-				}
-			}
-			if conf > 0.25 {
-				p.idle = 0
-			}
-		}
-	}
-	p.prevZc = zc
-	return zc
+	// No local frequency loop: AIS-catcher's SquareFreqOffsetCorrection
+	// upstream (ffcRun) already removes the carrier offset at ~47 Hz
+	// resolution each block; the EMA phase tracker below absorbs the
+	// remainder.
 }
 
 // symbol consumes one symbol-spaced complex sample and returns the
 // soft NRZI transition bit (XOR of the two most recent decisions at
 // the EMA-tracked best phase).
 func (p *phaseClassifier) symbol(re, im float64) byte {
-	zc := p.lockStep(complex(re, im))
-	re, im = real(zc), imag(zc)
 	// Multiply by (1j)**i to pull the rotating constellation onto
 	// a line.
 	var cre, cim float64
@@ -361,10 +330,28 @@ type ChannelDemod struct {
 	CName string
 	emit  func(payload []byte, ch int)
 
+	// Square-law frequency-offset correction (AIS-catcher's
+	// SquareFreqOffsetCorrection): every 512 samples, FFT of z² locates
+	// the GMSK spectrum's two halves (separated by exactly the symbol
+	// rate), giving the residual carrier offset at ~47 Hz resolution —
+	// the mechanism that makes real dongle ppm survivable. The block is
+	// then derotated by the measured offset.
+	ffcBuf []complex128
+	ffcRot complex128
+	ffcRe  []float64
+	ffcIm  []float64
+	ffcCum []float64
+
 	firHist []complex128 // coherent filter history
 	clas    [5]phaseClassifier
 	dec     [5]frameDecoder
 	sel     int
+
+	// Duplicate suppression: several of the 5 phase streams can decode
+	// the same burst (AIS-catcher cross-resets its decoders for this);
+	// identical payloads within a second are dropped.
+	lastPay  []byte
+	lastSeen time.Time
 }
 
 // NewChannelDemod builds a demod for one channel; rate must be 48000.
@@ -372,9 +359,15 @@ func NewChannelDemod(rate int, chIdx int, name string, emit func(payload []byte,
 	if rate != aisSampleRate {
 		panic("ais: ChannelDemod requires 48 ks/s")
 	}
-	d := &ChannelDemod{Ch: chIdx, CName: name, emit: emit}
+	d := &ChannelDemod{Ch: chIdx, CName: name, ffcRot: 1}
+	filtered := func(p []byte, ch int) {
+		if !d.dupOfRecent(p) {
+			emit(p, ch)
+		}
+	}
+	d.emit = filtered
 	for i := range d.dec {
-		d.dec[i].emit = emit
+		d.dec[i].emit = filtered
 		d.dec[i].ch = chIdx
 	}
 	return d
@@ -388,23 +381,111 @@ func NewChannelDemod(rate int, chIdx int, name string, emit func(payload []byte,
 // and it replaces any timing recovery loop.
 func (d *ChannelDemod) Feed(cx []complex128) {
 	for _, z := range cx {
-		// Coherent matched filter (history buffer, newest last).
-		d.firHist = append(d.firHist, z)
-		if len(d.firHist) > len(coherentTaps) {
-			copy(d.firHist, d.firHist[1:])
-			d.firHist = d.firHist[:len(coherentTaps)]
+		d.ffcBuf = append(d.ffcBuf, z)
+		if len(d.ffcBuf) == 512 {
+			d.ffcRun()
+			for _, c := range d.ffcBuf {
+				d.sample(c)
+			}
+			d.ffcBuf = d.ffcBuf[:0]
 		}
-		var re, im float64
-		for k, h := range d.firHist {
-			tap := coherentTaps[len(coherentTaps)-1-k]
-			re += real(h) * tap
-			im += imag(h) * tap
-		}
-
-		soft := d.clas[d.sel].symbol(re, im)
-		d.dec[d.sel].run(soft)
-		d.sel = (d.sel + 1) % 5
 	}
+}
+
+// ffcRun measures and removes the block's frequency offset.
+func (d *ChannelDemod) ffcRun() {
+	const n = 512
+	if d.ffcRe == nil {
+		d.ffcRe = make([]float64, n)
+		d.ffcIm = make([]float64, n)
+	}
+	for i, z := range d.ffcBuf {
+		d.ffcRe[i] = real(z)*real(z) - imag(z)*imag(z)
+		d.ffcIm[i] = 2 * real(z) * imag(z)
+	}
+	FFT(d.ffcRe, d.ffcIm)
+	delta := int(math.Round(9600.0 / 48000.0 * float64(n))) // symbol-rate separation (bins)
+	// Wide mode (their default): first locate the most energetic
+	// spectral window, with a bonus for the bin pair one symbol-rate
+	// apart — that is where the two GMSK spectrum halves sit.
+	m := int(math.Round(12500.0 / 48000.0 * float64(n)))
+	ofs := (m - delta) / 2
+	if d.ffcCum == nil {
+		d.ffcCum = make([]float64, n)
+	}
+	absAt := func(i int) float64 {
+		return mag(d.ffcRe[(i+n/2)%n], d.ffcIm[(i+n/2)%n])
+	}
+	d.ffcCum[0] = 0
+	for i := 1; i < n; i++ {
+		d.ffcCum[i] = d.ffcCum[i-1] + absAt(i)
+	}
+	wm, wi := -1.0, 0
+	for i := 0; i < n-m; i++ {
+		v := d.ffcCum[i+m] - d.ffcCum[i] +
+			0.6*(absAt(i+ofs)+absAt(i+ofs+delta))
+		if v > wm {
+			wm, wi = v, i
+		}
+	}
+	wi = wi + m/2 - n/2
+
+	// Fine peak: strongest bin pair straddling the measured centre.
+	maxVal, bi := 0.0, 0
+	const window = 187
+	for i := wi + window; i < wi+n-window-delta; i++ {
+		ii := ((i % n) + n) % n
+		jj := ((i+delta)%n + n) % n
+		h := mag(d.ffcRe[(ii+n/2)%n], d.ffcIm[(ii+n/2)%n]) +
+			mag(d.ffcRe[(jj+n/2)%n], d.ffcIm[(jj+n/2)%n])
+		if h > maxVal {
+			maxVal, bi = h, ii
+		}
+	}
+	// Idle gate: with no signal the peak is noise — derotating by it
+	// only injects phase jumps the classifier must then survive.
+	spec := make([]float64, 0, n)
+	for i := 0; i < n; i++ {
+		spec = append(spec, mag(d.ffcRe[i], d.ffcIm[i]))
+	}
+	sort.Float64s(spec)
+	if maxVal < 8*spec[n/2] {
+		return
+	}
+	if false {
+		return
+	}
+	fz := float64(n)/2 - (float64(bi) + float64(delta)/2)
+	f := fz / 2 / float64(n)
+	step := complex(math.Cos(f*2*math.Pi), math.Sin(f*2*math.Pi))
+	for i := range d.ffcBuf {
+		d.ffcRot *= step
+		d.ffcBuf[i] *= d.ffcRot
+	}
+	d.ffcRot /= complex(math.Hypot(real(d.ffcRot), imag(d.ffcRot)), 0)
+}
+
+func mag(re, im float64) float64 { return math.Sqrt(re*re + im*im) }
+
+// sample runs one derotated sample through the matched filter and the
+// classifier bank.
+func (d *ChannelDemod) sample(z complex128) {
+	// Coherent matched filter (history buffer, newest last).
+	d.firHist = append(d.firHist, z)
+	if len(d.firHist) > len(coherentTaps) {
+		copy(d.firHist, d.firHist[1:])
+		d.firHist = d.firHist[:len(coherentTaps)]
+	}
+	var re, im float64
+	for k, h := range d.firHist {
+		tap := coherentTaps[len(coherentTaps)-1-k]
+		re += real(h) * tap
+		im += imag(h) * tap
+	}
+
+	soft := d.clas[d.sel].symbol(re, im)
+	d.dec[d.sel].run(soft)
+	d.sel = (d.sel + 1) % 5
 }
 
 func boolBit(b bool) byte {
@@ -435,4 +516,45 @@ func crcX25(b []byte) uint16 {
 		}
 	}
 	return crc ^ 0xFFFF
+}
+
+// FFT is a compact in-place radix-2 FFT (power-of-two sizes) — the
+// package cannot import internal/dsp (import cycle).
+func FFT(re, im []float64) {
+	n := len(re)
+	if n&(n-1) != 0 {
+		panic("ais: FFT size must be a power of two")
+	}
+	// Bit-reversal permutation.
+	for i, j := 1, 0; i < n; i++ {
+		bit := n >> 1
+		for ; j&bit != 0; bit >>= 1 {
+			j ^= bit
+		}
+		j |= bit
+		if i < j {
+			re[i], re[j] = re[j], re[i]
+			im[i], im[j] = im[j], im[i]
+		}
+	}
+	for length := 2; length <= n; length <<= 1 {
+		ang := -2 * math.Pi / float64(length)
+		wRe, wIm := math.Cos(ang), math.Sin(ang)
+		for i := 0; i < n; i += length {
+			curRe, curIm := 1.0, 0.0
+			for k := 0; k < length/2; k++ {
+				a := i + k
+				b := i + k + length/2
+				tRe := re[b]*curRe - im[b]*curIm
+				tIm := re[b]*curIm + im[b]*curRe
+				re[b] = re[a] - tRe
+				im[b] = im[a] - tIm
+				re[a] += tRe
+				im[a] += tIm
+				nRe := curRe*wRe - curIm*wIm
+				curIm = curRe*wIm + curIm*wRe
+				curRe = nRe
+			}
+		}
+	}
 }

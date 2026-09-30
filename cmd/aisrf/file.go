@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 
 	"sdr35/internal/ais"
 	"sdr35/internal/dsp"
@@ -11,6 +12,38 @@ import (
 
 // fileMode replays a recorded raw CU8 file through the same
 // front-end + demodulator as the live harness.
+var known [][]byte
+
+func loadKnown(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.FieldsFunc(string(data), func(r rune) bool { return r == '\n' || r == '\r' }) {
+		f := strings.Split(line, ",")
+		if len(f) < 6 {
+			continue
+		}
+		var bits []byte
+		for k := 0; k < len(f[5]); k++ {
+			c := f[5][k]
+			if c < '0' || c > 'z' {
+				continue
+			}
+			v := c - 48
+			if v > 40 {
+				v -= 8
+			}
+			for b := 5; b >= 0; b-- {
+				bits = append(bits, (v>>uint(b))&1)
+			}
+		}
+		if len(bits) >= 168 {
+			known = append(known, bits)
+		}
+	}
+}
+
 func fileMode(path string, _ int64) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -18,6 +51,7 @@ func fileMode(path string, _ int64) {
 		os.Exit(1)
 	}
 	fmt.Println("file bytes:", len(data))
+	loadKnown(os.Getenv("AIS_KNOWN"))
 	store := ais.NewStore()
 	frames := 0
 	onPayload := func(p []byte, ch int) {
@@ -85,6 +119,47 @@ func fileMode(path string, _ int64) {
 		afc[0], afc[1] = afcOff[0], afcOff[1]
 	}
 	fmt.Println("frames:", frames)
+	// Ground truth comparison: known payload bit streams (AIS-catcher
+	// decoded this same file) vs every failed FCS attempt.
+	if len(known) > 0 && len(ais.DbgAttempts) > 0 {
+		hit, direct, inv, bestM := 0, 0, 0, 0
+		for _, att := range ais.DbgAttempts {
+			for _, kb := range known {
+				n := len(kb)
+				if n > len(att) {
+					n = len(att)
+				}
+				if n < 120 {
+					continue
+				}
+				m, iv := 0, 0
+				for j := 0; j < n; j++ {
+					if att[j] == kb[j] {
+						m++
+					} else {
+						iv++
+					}
+				}
+				if m > bestM {
+					bestM = m
+				}
+				if iv > bestM {
+					bestM = iv
+				}
+				if m*100/n > 90 {
+					hit++
+					direct++
+					break
+				}
+				if iv*100/n > 90 {
+					hit++
+					inv++
+					break
+				}
+			}
+		}
+		fmt.Printf("attempts=%d matching known payloads: %d (direct=%d inverted=%d) best=%d/168\n", len(ais.DbgAttempts), hit, direct, inv, bestM)
+	}
 	fmt.Printf("afc: A=%+.0f B=%+.0f\n", afcOff[0], afcOff[1])
 }
 
