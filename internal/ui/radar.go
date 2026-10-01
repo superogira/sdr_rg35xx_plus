@@ -521,17 +521,25 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		}
 		sel := drawnList[selIdx]
 		if sx, sy, ok := u.blipScreenPos(sel, merc, rangeKm, maxR, cx, cy); ok {
-			// Selection marker: a thick yellow ring plus four corner
-			// ticks pointing at the target — 1-px dots proved too faint
-			// on the handheld screen over map layers.
+			// Selection marker: a dark halo disc gives contrast on the
+			// bright map layers, then a thick bright ring + four long
+			// corner ticks — plain 1-px dots were invisible both on the
+			// phosphor and over satellite tiles.
+			for a := 0; a < 360; a += 2 {
+				ca, sa := math.Cos(float64(a)*math.Pi/180), math.Sin(float64(a)*math.Pi/180)
+				for rr := 10; rr <= 15; rr++ {
+					u.blendPx(sx+int(float64(rr)*ca), sy+int(float64(rr)*sa), 0, 0, 0, 200)
+				}
+			}
 			ring := color.RGBA{255, 255, 60, 255}
 			for a := 0; a < 360; a += 3 {
 				ca, sa := math.Cos(float64(a)*math.Pi/180), math.Sin(float64(a)*math.Pi/180)
-				u.setPixel(sx+int(11*ca), sy+int(11*sa), ring)
 				u.setPixel(sx+int(12*ca), sy+int(12*sa), ring)
+				u.setPixel(sx+int(13*ca), sy+int(13*sa), ring)
 			}
 			for _, d := range [][2]int{{-1, -1}, {1, -1}, {-1, 1}, {1, 1}} {
-				for k := 5; k <= 9; k++ {
+				for k := 16; k <= 23; k++ {
+					u.blendPx(sx+d[0]*k, sy+d[1]*k, 0, 0, 0, 200)
 					u.setPixel(sx+d[0]*k, sy+d[1]*k, ring)
 				}
 			}
@@ -558,11 +566,13 @@ func (u *UI) blipScreenPos(b RadarBlip, merc *MercView, rangeKm, maxR float64, c
 
 // drawRadarDetail paints the selected target's data panel on half the
 // screen, opposite the target's side.
-func (u *UI) drawRadarDetail(b RadarBlip, leftSide bool, flagDir string, idx, total int) {
+func (u *UI) drawRadarDetail(b RadarBlip, targetLeft bool, flagDir string, idx, total int) {
 	pw := u.W / 2
-	px := u.W - pw - 6
-	if leftSide {
-		px = 6
+	// Panel goes on the OPPOSITE half from the target so it never
+	// covers the thing being inspected.
+	px := 6
+	if targetLeft {
+		px = u.W - pw - 6
 	}
 	py := 64
 	ph := u.H - py - 60
