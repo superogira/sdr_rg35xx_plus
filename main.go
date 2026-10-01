@@ -1853,20 +1853,27 @@ func main() {
 				uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuBands)
 			}
 		case uiHostList:
-			// Rows: saved hosts + "add new" at the bottom.
-			rows := len(hostList) + 1
+			// Rows: a leading "(ปิดใช้งาน)" row (radio off — viewer
+			// only), saved hosts, "add new" at the bottom.
+			rows := len(hostList) + 2
 			switch b {
 			case input.Up:
 				hostSel = (hostSel + rows - 1) % rows
 			case input.Down:
 				hostSel = (hostSel + 1) % rows
 			case input.A:
-				if hostSel == len(hostList) {
+				if hostSel == 0 {
+					// Radio off: no rtl_tcp connection, no IQ/decode.
+					*host = ""
+					cfg["host"] = "off"
+					r.SetHost("")
+					uiMode = uiMenu
+				} else if hostSel == len(hostList)+1 {
 					hostText, hostEditIdx, kbTarget = "", -1, "host"
 					hostKbR, hostKbC = 0, 0
 					uiMode = uiHostEdit
 				} else {
-					h := hostList[hostSel]
+					h := hostList[hostSel-1]
 					*host = h
 					cfg["host"] = h
 					r.SetHost(h)
@@ -1874,19 +1881,20 @@ func main() {
 					uiMode = uiMenu
 				}
 			case input.X:
-				if hostSel < len(hostList) {
-					hostText, hostEditIdx, kbTarget = hostList[hostSel], hostSel, "host"
+				if hostSel >= 1 && hostSel <= len(hostList) {
+					hostText, hostEditIdx, kbTarget = hostList[hostSel-1], hostSel-1, "host"
 					hostKbR, hostKbC = 0, 0
 					uiMode = uiHostEdit
 				}
 			case input.Y:
-				if hostSel < len(hostList) {
-					hostList = append(hostList[:hostSel], hostList[hostSel+1:]...)
-					if len(hostList) == 0 {
+				if hostSel >= 1 && hostSel <= len(hostList) {
+					i := hostSel - 1
+					hostList = append(hostList[:i], hostList[i+1:]...)
+					if len(hostList) == 0 && *host != "" {
 						hostList = []string{*host}
 					}
-					if hostSel >= len(hostList) {
-						hostSel = len(hostList)
+					if hostSel > len(hostList)+1 {
+						hostSel = len(hostList) + 1
 					}
 					saveHosts()
 				}
@@ -2729,13 +2737,18 @@ func main() {
 		} else if uiMode == uiHostEdit {
 			u.DrawKeyboard(kbTitle(), hostText, len(hostText), hostKbR, hostKbC, kbShifted)
 		} else if uiMode == uiHostList {
-			active := 0
-			for i, h := range hostList {
-				if h == *host {
-					active = i
+			rows := append([]string{i18n.T("host_disable")}, hostList...)
+			active := -1
+			if *host == "" {
+				active = 0
+			} else {
+				for i, h := range hostList {
+					if h == *host {
+						active = i + 1
+					}
 				}
 			}
-			u.DrawHostList(hostList, hostSel, active, i18n.T("host_title"))
+			u.DrawHostList(rows, hostSel, active, i18n.T("host_title"))
 		} else if uiMode == uiBeastList {
 			rows := append([]string{i18n.T("host_disable")}, beastList...)
 			active := -1
