@@ -408,19 +408,29 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		}
 	}
 
-	// Header: host + connection + aircraft count.
-	state := i18n.T("radar_noconn")
-	if connected {
-		state = i18n.T("radar_conn")
-	}
-	hf := Face(12, true)
-	hf.DrawString(u.img, bright, 10, 24, fmt.Sprintf("ADS-B  %s", host))
+	// Header: status (connection dot only) + range + counts. Kept on a
+	// dark chip so it stays readable over the map layers, matching the
+	// other badges.
 	sf := Face(11, false)
 	rg := fmt.Sprintf("%.0f km", rangeKm)
 	if rangeKm < 5 {
-		rg = fmt.Sprintf("%.1f km", rangeKm) // 2.5 km step
+		rg = fmt.Sprintf("%.1f km", rangeKm) // 0.5/1/2.5 km steps
 	}
-	sf.DrawString(u.img, green, 10, 42, fmt.Sprintf("%s  %s  RX %.4f %.4f", state, rg, rxLat, rxLon))
+	state := "● " + i18n.T("radar_noconn")
+	if connected {
+		state = "● " + i18n.T("radar_conn")
+	}
+	planesN, shipsN := 0, 0
+	for _, b := range blips {
+		if b.Vessel {
+			shipsN++
+		} else {
+			planesN++
+		}
+	}
+	hdr := fmt.Sprintf("%s  %s  %s %d  %s %d  RX %.4f %.4f", state, rg, i18n.T("hdr_planes"), planesN, i18n.T("hdr_ships"), shipsN, rxLat, rxLon)
+	u.fillBlend(6, 12, sf.TextWidth(hdr)+16, 22, 0, 0, 0, 170)
+	sf.DrawString(u.img, green, 14, 29, hdr)
 	// Deterministic z-order: oldest first so the freshest target paints
 	// LAST, on top. Blips used to arrive in Go map order, which reshuffles
 	// every frame — overlapping labels flickered as they fought for the
