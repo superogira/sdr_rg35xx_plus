@@ -70,6 +70,21 @@ type RadarBlip struct {
 	HasPos       bool
 	Trail        []RadarDot
 	Seen         time.Time // last position update; newest draws on top
+
+	// Detail panel data (accumulated AIS static/voyage + ADS-B state).
+	Lat, Lon float64
+	Reg      string // aircraft registration (hexdb)
+	Imo      uint32
+	Callsign string
+	Dest     string
+	Eta      string
+	NavStat  byte
+	ShipType byte
+	Draught  float64
+	DimLen   uint16 // A+B, metres
+	DimWid   uint16 // C+D
+	Heading  int
+	CogDeg   float64
 }
 
 // Radar label display modes (A cycles them).
@@ -81,7 +96,7 @@ const (
 
 // DrawRadar renders the ADS-B radar. Targets beyond rangeKm are not
 // drawn at all — they appear when the user zooms out to their range.
-func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string, labelMode int, panX, panY int, mapOffX, mapOffY int, battPct int) {
+func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string, labelMode int, panX, panY int, mapOffX, mapOffY int, battPct int, selIdx int) int {
 	// Phosphor palette.
 	bg := color.RGBA{2, 10, 4, 255}
 	dim := color.RGBA{0, 110, 55, 255}
@@ -201,6 +216,7 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 	blips = ordered
 	drawnPlanes, drawnShips := 0, 0
 	hiddenPlanes, hiddenShips := 0, 0
+	var drawnList []RadarBlip
 
 	// Blips.
 	tf := Face(11, true)
@@ -250,6 +266,7 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		} else {
 			drawnPlanes++
 		}
+		drawnList = append(drawnList, b)
 		col := green
 		// Flown track: breadcrumbs every 5 s of flight within a
 		// five-minute window. Every dot is a full 2x2 body — 1-px dots
@@ -495,6 +512,183 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 	cw := sf.TextWidth(cpu)
 	u.fillBlend(u.W-cw-14, u.H-24, cw+10, 20, 2, 14, 7, 200)
 	sf.DrawString(u.img, bright, u.W-cw-9, u.H-9, cpu)
+
+	// Target selector: ring around the selected blip + detail panel on
+	// the opposite half of the screen (FT8-map style).
+	if selIdx >= 0 && len(drawnList) > 0 {
+		if selIdx >= len(drawnList) {
+			selIdx = len(drawnList) - 1
+		}
+		sel := drawnList[selIdx]
+		if sx, sy, ok := u.blipScreenPos(sel, merc, rangeKm, maxR, cx, cy); ok {
+			for a := 0; a < 360; a += 4 {
+				rr := float64(11)
+				x1 := int(float64(sx) + rr*math.Cos(float64(a)*math.Pi/180))
+				y1 := int(float64(sy) + rr*math.Sin(float64(a)*math.Pi/180))
+				u.setPixel(x1, y1, color.RGBA{255, 255, 80, 255})
+			}
+			u.drawRadarDetail(sel, sx < u.W/2, flagDir, selIdx, len(drawnList))
+		}
+	}
+	return len(drawnList)
+}
+
+// blipScreenPos recomputes a blip's screen position for the selector
+// ring (same math as the main loop).
+func (u *UI) blipScreenPos(b RadarBlip, merc *MercView, rangeKm, maxR float64, cx, cy int) (int, int, bool) {
+	if !b.HasPos {
+		return 0, 0, false
+	}
+	if merc != nil {
+		dx, dy := merc.project(b.MercX, b.MercY)
+		return cx + dx, cy + dy, true
+	}
+	r := b.DistKm / rangeKm * maxR
+	ang := b.BrngDeg * math.Pi / 180
+	return cx + int(r*math.Sin(ang)), cy - int(r*math.Cos(ang)), true
+}
+
+// drawRadarDetail paints the selected target's data panel on half the
+// screen, opposite the target's side.
+func (u *UI) drawRadarDetail(b RadarBlip, leftSide bool, flagDir string, idx, total int) {
+	pw := u.W / 2
+	px := u.W - pw - 6
+	if leftSide {
+		px = 6
+	}
+	py := 64
+	ph := u.H - py - 60
+	u.fillBlend(px+4, py+4, pw, ph, 0, 0, 0, 120)
+	u.fillBlend(px, py, pw, ph, 8, 24, 14, 242)
+	u.fillBlend(px, py, pw, 2, 0, 190, 220, 255)
+	u.fillBlend(px, py+ph-2, pw, 2, 0, 190, 220, 255)
+
+	tf := Face(13, false)
+	hf := Face(15, true)
+	white := color.RGBA{235, 235, 235, 255}
+	green := color.RGBA{120, 230, 140, 255}
+	cyan := color.RGBA{0, 220, 220, 255}
+
+	title := b.Call
+	if b.Vessel && b.Callsign != "" && b.Call == b.ICAO {
+		// no stored vessel name — keep the MMSI title
+		_ = title
+	}
+	hf.DrawString(u.img, cyan, px+12, py+24, title)
+	pos := fmt.Sprintf("%d/%d", idx+1, total)
+	hf.DrawString(u.img, green, px+pw-12-hf.TextWidth(pos), py+24, pos)
+
+	var lines []string
+	if b.Vessel {
+		lines = []string{
+			fmt.Sprintf("%s: %s   %s: %s", i18n.T("d_mmsi"), b.ICAO, i18n.T("d_call"), b.Callsign),
+		}
+		if b.Imo > 0 && b.Imo < 1000000000 {
+			lines[0] += fmt.Sprintf("   IMO %d", b.Imo)
+		}
+		lines = append(lines,
+			fmt.Sprintf("%s: %s", i18n.T("d_status"), navStatusText(b.NavStat)),
+			fmt.Sprintf("%s: %s   %s: %s", i18n.T("d_sog"), fmt.Sprintf("%.1f kt", b.SogKt), i18n.T("d_cog"), fmt.Sprintf("%.0f°", b.CogDeg)))
+		if b.Heading > 0 && b.Heading < 360 {
+			lines[len(lines)-1] += fmt.Sprintf("   %s: %d°", i18n.T("d_hdg"), b.Heading)
+		}
+		lines = append(lines,
+			fmt.Sprintf("%s: %.4f, %.4f", i18n.T("d_pos"), b.Lat, b.Lon),
+			fmt.Sprintf("%s: %s   %s: %s", i18n.T("d_type"), shipTypeText(b.ShipType), i18n.T("d_flag"), countryName(b.Country)))
+		if b.Dest != "" {
+			line := fmt.Sprintf("%s: %s", i18n.T("d_dest"), b.Dest)
+			if b.Eta != "" {
+				line += fmt.Sprintf("  %s: %s", i18n.T("d_eta"), b.Eta)
+			}
+			lines = append(lines, line)
+		}
+		if b.DimLen > 0 || b.DimWid > 0 {
+			line := fmt.Sprintf("%s: %d×%d m", i18n.T("d_dim"), b.DimLen, b.DimWid)
+			if b.Draught > 0 {
+				line += fmt.Sprintf("   %s: %.1f m", i18n.T("d_draught"), b.Draught)
+			}
+			lines = append(lines, line)
+		}
+	} else {
+		reg := b.Reg
+		if reg == "" {
+			reg = "—"
+		}
+		lines = []string{
+			fmt.Sprintf("%s: %s   %s: %s", i18n.T("d_reg"), reg, i18n.T("d_icao"), b.ICAO),
+			fmt.Sprintf("%s: %d ft   %s: %d kt   %s: %d°", i18n.T("d_alt"), b.AltFt, i18n.T("d_spd"), b.SpdKt, i18n.T("d_trk"), b.TrackDeg),
+			fmt.Sprintf("%s: %s", i18n.T("d_flag"), countryName(b.Country)),
+			fmt.Sprintf("%s: %.4f, %.4f", i18n.T("d_pos"), b.Lat, b.Lon),
+			fmt.Sprintf("%s: %.1f km   %s: %.0f°", i18n.T("d_dist"), b.DistKm, i18n.T("d_brg"), b.BrngDeg),
+		}
+		if b.VrateFpm > 300 {
+			lines = append(lines, fmt.Sprintf("%s: +%d ft/min", i18n.T("d_vr"), b.VrateFpm))
+		} else if b.VrateFpm < -300 {
+			lines = append(lines, fmt.Sprintf("%s: %d ft/min", i18n.T("d_vr"), b.VrateFpm))
+		}
+	}
+	lines = append(lines, fmt.Sprintf("%s: %ds", i18n.T("d_last"), int(time.Since(b.Seen).Seconds())))
+
+	y := py + 52
+	for _, ln := range lines {
+		tf.DrawString(u.img, white, px+12, y, ln)
+		y += 18
+	}
+	if flag := GetFlag(b.Country, flagDir); flag != nil {
+		drawImage(u.img, flag, px+12, py+ph-26)
+	}
+	Face(10, false).DrawString(u.img, green, px+pw-10-100, py+ph-16, i18n.T("d_selhint"))
+}
+
+// countryName gives a short readable name for the ISO flag code.
+func countryName(iso string) string {
+	m := map[string]string{
+		"TH": "ไทย/Thailand", "VN": "Vietnam", "SG": "Singapore", "MY": "Malaysia",
+		"ID": "Indonesia", "CN": "China", "TW": "Taiwan", "HK": "Hong Kong",
+		"JP": "Japan", "KR": "S.Korea", "KP": "N.Korea", "PH": "Philippines",
+		"IN": "India", "MM": "Myanmar", "KH": "Cambodia", "LA": "Laos",
+		"BN": "Brunei", "AU": "Australia", "NZ": "New Zealand",
+		"US": "USA", "GB": "UK", "PA": "Panama", "LR": "Liberia", "MH": "Marshall Is",
+		"RU": "Russia", "DE": "Germany", "NO": "Norway", "SE": "Sweden",
+		"DK": "Denmark", "NL": "Netherlands", "GR": "Greece", "MT": "Malta",
+		"IT": "Italy", "ES": "Spain", "FR": "France", "TR": "Turkey", "AE": "UAE",
+		"SA": "Saudi Arabia", "QA": "Qatar", "KW": "Kuwait", "OM": "Oman",
+		"BR": "Brazil", "ZA": "South Africa", "CA": "Canada", "CL": "Chile",
+	}
+	if v, ok := m[iso]; ok {
+		return v
+	}
+	return iso
+}
+
+func navStatusText(st byte) string {
+	m := map[byte]string{0: "Under way using engine", 1: "At anchor", 2: "Not under command", 3: "Restricted manoeuvrability", 4: "Constrained by draught", 5: "Moored", 6: "Aground", 7: "Engaged in fishing", 8: "Under way sailing", 9: "Hazardous material", 10: "Hazardous material B", 11: "Towing", 12: "Towing long", 13: "Towing ahead", 14: "Towing astern", 15: "Undefined"}
+	if v, ok := m[st]; ok {
+		return v
+	}
+	return "—"
+}
+
+func shipTypeText(t byte) string {
+	switch {
+	case t == 0:
+		return "—"
+	case t >= 30 && t < 40:
+		return "Fishing"
+	case t >= 40 && t < 50:
+		return "High-speed craft"
+	case t >= 50 && t < 60:
+		return "Tug/Pilot/SAR"
+	case t >= 60 && t < 70:
+		return "Passenger"
+	case t >= 70 && t < 80:
+		return "Cargo"
+	case t >= 80 && t < 90:
+		return "Tanker"
+	case t >= 90:
+		return "Hazardous cargo"
+	}
+	return fmt.Sprintf("%d", t)
 }
 
 // radarLine draws a Bresenham line (radar-local helper; map.go's
