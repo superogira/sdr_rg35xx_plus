@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SDRg35xx Web</title>
+<style>
+:root { --bg:#0b1410; --panel:#12211a; --ink:#c8f0d8; --dim:#6f9c82; --acc:#35e08a; --warn:#ffd166; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, sans-serif; }
+header { display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--panel); border-bottom:2px solid var(--acc); position:sticky; top:0; z-index:2; }
+header h1 { font-size:16px; margin:0; letter-spacing:1px; }
+#conn { font-size:12px; color:var(--dim); }
+#conn.on { color:var(--acc); }
+main { display:grid; grid-template-columns: 340px 1fr; gap:12px; padding:12px; }
+@media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+.card { background:var(--panel); border:1px solid #1e3a2c; border-radius:10px; padding:12px; }
+.card h2 { font-size:12px; text-transform:uppercase; letter-spacing:2px; color:var(--dim); margin:0 0 10px; }
+.freq { font-size:34px; font-variant-numeric:tabular-nums; color:var(--acc); cursor:pointer; }
+.freq small { font-size:14px; color:var(--dim); }
+.row { display:flex; align-items:center; gap:8px; margin:8px 0; }
+.row label { flex:0 0 84px; color:var(--dim); font-size:12px; }
+.row .val { flex:1; font-variant-numeric:tabular-nums; }
+button { background:#173324; color:var(--ink); border:1px solid #2a5a40; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:13px; }
+button:hover { background:#1e4630; }
+button.on { background:var(--acc); color:#062012; border-color:var(--acc); font-weight:700; }
+input[type=range] { flex:1; accent-color:var(--acc); }
+select, input[type=number] { background:#0e1a14; color:var(--ink); border:1px solid #2a5a40; border-radius:6px; padding:5px 8px; font-size:13px; }
+table { width:100%; border-collapse:collapse; font-size:12.5px; }
+th { text-align:left; color:var(--dim); font-weight:600; border-bottom:1px solid #2a5a40; padding:4px 6px; }
+td { padding:4px 6px; border-bottom:1px solid #16281e; font-variant-numeric:tabular-nums; }
+tr:hover td { background:#16281e; }
+.tabs { display:flex; gap:6px; margin-bottom:8px; }
+.sys { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; text-align:center; }
+.sys div { background:#0e1a14; border-radius:8px; padding:8px 4px; }
+.sys b { display:block; font-size:18px; color:var(--acc); }
+.sys span { font-size:11px; color:var(--dim); }
+#err { color:#ff8080; min-height:18px; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SDRg35xx</h1>
+  <span id="conn">…</span>
+  <span style="flex:1"></span>
+  <span id="up" style="color:var(--dim);font-size:12px"></span>
+</header>
+<main>
+  <section>
+    <div class="card">
+      <h2>Receiver</h2>
+      <div class="freq" id="freq" title="click to tune">0.0000 <small>MHz</small></div>
+      <div class="row">
+        <button id="dn1k">−1k</button><button id="dn100">−100</button>
+        <button id="up100">+100</button><button id="up1k">+1k</button>
+        <button id="up10k">+10k</button>
+      </div>
+      <div class="row"><label>Tune</label><input type="number" id="tune" step="1000" style="flex:1"><button id="go">Go</button></div>
+      <div class="row"><label>Mode</label><select id="mode"></select>
+        <label style="flex:0 0 auto">BW</label><select id="bw"></select></div>
+      <div class="row"><label>Gain</label><input type="range" id="gain" min="-10" max="49.6" step="0.1"><span class="val" id="gainv"></span></div>
+      <div class="row"><label>Volume</label><input type="range" id="vol" min="0" max="1.5" step="0.05"><span class="val" id="volv"></span></div>
+      <div class="row"><label>Squelch</label><input type="range" id="sql" min="-100" max="0" step="1"><span class="val" id="sqlv"></span></div>
+      <div class="row"><label>PPM</label><input type="range" id="ppm" min="-120" max="120" step="1"><span class="val" id="ppmv"></span>
+        <button id="ppmoff" title="leave correction to the server">OFF</button></div>
+      <div class="row">
+        <button id="agc">AGC</button>
+        <button id="ft8">FT8</button>
+        <button id="aisrf">AIS RF</button>
+      </div>
+      <div id="err"></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>System</h2>
+      <div class="sys">
+        <div><b id="cpu">–</b><span>CPU %</span></div>
+        <div><b id="mem">–</b><span>MEM %</span></div>
+        <div><b id="bat">–</b><span>BAT %</span></div>
+        <div><b id="tgt">–</b><span>✈/</span></div>
+      </div>
+    </div>
+  </section>
+  <section>
+    <div class="card">
+      <div class="tabs">
+        <button id="tab-ft8" class="on">FT8</button>
+        <button id="tab-ais">AIS</button>
+        <button id="tab-tgt">Targets</button>
+      </div>
+      <div id="pane-ft8"><table><thead><tr><th>เวลา</th><th>SNR</th><th>Hz</th><th>ข้อความ</th><th>ประเทศ/ระยะ</th></tr></thead><tbody id="ft8b"></tbody></table></div>
+      <div id="pane-ais" hidden><table><thead><tr><th>เวลา</th><th>ch</th><th>dB</th><th>ข้อความ</th></tr></thead><tbody id="aisb"></tbody></table></div>
+      <div id="pane-tgt" hidden><table><thead><tr><th>ชนิด</th><th>ชื่อ/ทะเบียน</th><th>พิกัด</th><th>สูง/เร็ว</th><th>ทิศ</th><th>อายุ</th></tr></thead><tbody id="tgtb"></tbody></table></div>
+    </div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let st = null, tab = 'ft8';
+const fmtMHz = hz => (hz/1e6).toFixed(4);
+
+async function api(path, body) {
+  const opt = body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {};
+  const r = await fetch(path, opt);
+  if (!r.ok) throw new Error(path + ' → ' + r.status);
+  return r.json();
+}
+const cmd = c => api('/api/cmd', c).catch(e => { $('err').textContent = e.message; });
+
+function renderState(s) {
+  st = s;
+  $('conn').textContent = s.connected ? '● ' + s.host : '○ ไม่เชื่อมต่อ ' + s.host;
+  $('conn').className = s.connected ? 'on' : '';
+  $('freq').innerHTML = fmtMHz(s.freqHz) + ' <small>MHz</small>';
+  $('up').textContent = 'up ' + Math.floor(s.upSecs/60) + 'm';
+  // selects
+  if ($('mode').options.length !== s.modes.length) {
+    $('mode').innerHTML = s.modes.map(m => `<option>${m}</option>`).join('');
+  }
+  $('mode').value = s.mode;
+  let bws = s.bws;
+  if (!bws.includes(s.bwHz)) bws = [s.bwHz].concat(bws); // mode default off-list
+  $('bw').innerHTML = bws.map(b => `<option value="${b}">${(b/1000).toFixed(1)}k</option>`).join('');
+  $('bw').value = String(s.bwHz);
+  $('gain').value = s.gainDb; $('gainv').textContent = s.gainDb.toFixed(1) + ' dB';
+  $('vol').value = s.vol;    $('volv').textContent = Math.round(s.vol*100) + '%';
+  $('sql').value = s.sqlDb;  $('sqlv').textContent = s.sqlDb + ' dBFS';
+  $('ppm').value = s.ppm;    $('ppmv').textContent = (s.ppm>0?'+':'') + s.ppm;
+  $('ppmoff').className = s.ppmOff ? 'on' : '';
+  $('agc').className = s.agc ? 'on' : '';
+  $('ft8').className = s.ft8 ? 'on' : '';
+  $('aisrf').className = s.aisrf ? 'on' : '';
+  $('cpu').textContent = s.cpu.toFixed(0);
+  $('mem').textContent = s.mem.toFixed(0);
+  $('bat').textContent = s.bat;
+  $('tgt').textContent = s.planes + '/' + s.ships;
+}
+
+async function poll() {
+  try { renderState(await api('/api/state')); $('err').textContent = ''; }
+  catch (e) { $('conn').textContent = '○ เว็บไม่ตอบ'; $('conn').className=''; }
+  try {
+    if (tab === 'ft8') {
+      const rows = await api('/api/ft8');
+      $('ft8b').innerHTML = rows.slice().reverse().map(r =>
+        `<tr><td>${r.time}</td><td>${r.snr.toFixed(0)}</td><td>${r.hz.toFixed(0)}</td><td>${esc(r.text)}</td><td>${esc(r.anno)}</td></tr>`).join('');
+    } else if (tab === 'ais') {
+      const rows = await api('/api/ais');
+      $('aisb').innerHTML = rows.slice().reverse().map(r =>
+        `<tr><td>${r.time}</td><td>${r.ch}</td><td>${r.db.toFixed(0)}</td><td>${esc(r.text)}</td></tr>`).join('');
+    } else {
+      const rows = await api('/api/targets');
+      $('tgtb').innerHTML = rows.map(r =>
+        `<tr><td>${r.kind==='plane'?'✈':''}</td><td>${esc(r.call)}</td><td>${r.hasPos?r.lat.toFixed(4)+', '+r.lon.toFixed(4):'—'}</td><td>${r.kind==='plane'?r.altFt+' ft':r.speed.toFixed(1)+' kt'}</td><td>${r.track}°</td><td>${r.ageSec.toFixed(0)}s</td></tr>`).join('');
+    }
+  } catch (e) {}
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+$('go').onclick = () => cmd({cmd:'freq', hz: parseFloat($('tune').value)*1e6});
+$('dn1k').onclick = () => cmd({cmd:'freq', hz: st.freqHz - 1000});
+$('dn100').onclick = () => cmd({cmd:'freq', hz: st.freqHz - 100});
+$('up100').onclick = () => cmd({cmd:'freq', hz: st.freqHz + 100});
+$('up1k').onclick = () => cmd({cmd:'freq', hz: st.freqHz + 1000});
+$('up10k').onclick = () => cmd({cmd:'freq', hz: st.freqHz + 10000});
+$('mode').onchange = e => cmd({cmd:'mode', name: e.target.value});
+$('bw').onchange = e => cmd({cmd:'bw', hz: parseFloat(e.target.value)});
+$('gain').oninput = e => cmd({cmd:'gain', db: parseFloat(e.target.value)});
+$('vol').oninput = e => cmd({cmd:'vol', v: parseFloat(e.target.value)});
+$('sql').oninput = e => cmd({cmd:'sql', db: parseFloat(e.target.value)});
+$('ppm').oninput = e => cmd({cmd:'ppm', v: parseFloat(e.target.value)});
+$('ppmoff').onclick = () => cmd({cmd:'ppmoff', on: !st.ppmOff});
+$('agc').onclick = () => cmd({cmd:'agc', on: !st.agc});
+$('ft8').onclick = () => cmd({cmd:'ft8', on: !st.ft8});
+$('aisrf').onclick = () => cmd({cmd:'aisrf', on: !st.aisrf});
+for (const t of ['ft8','ais','tgt']) {
+  $('tab-'+t).onclick = () => {
+    tab = t;
+    for (const o of ['ft8','ais','tgt']) {
+      $('tab-'+o).className = o===t ? 'on' : '';
+      $('pane-'+o).hidden = o!==t;
+    }
+    poll();
+  };
+}
+poll(); setInterval(poll, 1500);
+</script>
+</body>
+</html>

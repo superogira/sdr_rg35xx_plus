@@ -1,0 +1,324 @@
+// Package web exposes the receiver as a small LAN web service: a JSON
+// control/state API plus a self-contained page (embedded HTML/JS) that
+// renders and controls the radio from any browser on the network.
+// Everything is stdlib — the handheld has no room for dependencies.
+package web
+
+import (
+	"context"
+	"embed"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+
+	"sdr35/internal/adsb"
+	"sdr35/internal/ais"
+	"sdr35/internal/dsp"
+	"sdr35/internal/radio"
+	"sdr35/internal/sysinfo"
+)
+
+//go:embed index.html
+var page embed.FS
+
+// FT8Line is one decoded FT8 message for the web tables.
+type FT8Line struct {
+	Time string  `json:"time"`
+	SNR  float64 `json:"snr"`
+	Hz   float64 `json:"hz"`
+	Text string  `json:"text"`
+	Anno string  `json:"anno"`
+}
+
+// AISLine is one decoded AIS message (RF or NMEA) for the web tables.
+type AISLine struct {
+	Time string  `json:"time"`
+	Ch   string  `json:"ch"`
+	Text string  `json:"text"`
+	Db   float64 `json:"db"`
+}
+
+// Server owns the HTTP listener and the log mirrors.
+type Server struct {
+	mu      sync.Mutex
+	enabled bool
+	port    int
+	srv     *http.Server
+
+	radio    *radio.Radio
+	adsb     *adsb.Store
+	ais      *ais.Store
+	ft8Log   []FT8Line
+	aisLog   []AISLine
+	logMu    sync.Mutex
+	upSince  time.Time
+}
+
+// New builds a (not yet listening) server.
+func New(r *radio.Radio, adsbStore *adsb.Store, aisStore *ais.Store, port int) *Server {
+	return &Server{radio: r, adsb: adsbStore, ais: aisStore, port: port, upSince: time.Now()}
+}
+
+// AddFT8 mirrors one decode into the web log (called from the DSP
+// callback goroutine; mutex-guarded unlike the on-device window list).
+func (s *Server) AddFT8(l FT8Line) {
+	s.logMu.Lock()
+	s.ft8Log = append(s.ft8Log, l)
+	if len(s.ft8Log) > 200 {
+		s.ft8Log = s.ft8Log[len(s.ft8Log)-200:]
+	}
+	s.logMu.Unlock()
+}
+
+// AddAIS mirrors one AIS decode.
+func (s *Server) AddAIS(l AISLine) {
+	s.logMu.Lock()
+	s.aisLog = append(s.aisLog, l)
+	if len(s.aisLog) > 200 {
+		s.aisLog = s.aisLog[len(s.aisLog)-200:]
+	}
+	s.logMu.Unlock()
+}
+
+// SetEnabled starts or stops the listener.
+func (s *Server) SetEnabled(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if on == s.enabled {
+		return
+	}
+	s.enabled = on
+	if on {
+		s.startLocked()
+	} else {
+		s.stopLocked()
+	}
+}
+
+// SetPort retargets the listener (restarts it when running).
+func (s *Server) SetPort(port int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.port == port {
+		return
+	}
+	s.port = port
+	if s.enabled {
+		s.stopLocked()
+		s.startLocked()
+	}
+}
+
+// Port reports the configured port.
+func (s *Server) Port() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.port
+}
+
+// Enabled reports whether the listener is up.
+func (s *Server) Enabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.enabled
+}
+
+func (s *Server) startLocked() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handlePage)
+	mux.HandleFunc("/api/state", s.handleState)
+	mux.HandleFunc("/api/cmd", s.handleCmd)
+	mux.HandleFunc("/api/ft8", s.handleFT8)
+	mux.HandleFunc("/api/ais", s.handleAIS)
+	mux.HandleFunc("/api/targets", s.handleTargets)
+	s.srv = &http.Server{Addr: fmt.Sprintf(":%d", s.port), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go s.srv.ListenAndServe() //nolint:errcheck // listener errors surface as "unreachable" in the UI
+	fmt.Fprintf(os.Stderr, "web: server listening on :%d\n", s.port)
+}
+
+func (s *Server) stopLocked() {
+	if s.srv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		s.srv.Shutdown(ctx) //nolint:errcheck
+		cancel()
+		s.srv = nil
+	}
+	fmt.Fprintf(os.Stderr, "web: server stopped\n")
+}
+
+func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" && r.URL.Path != "/index.html" {
+		http.NotFound(w, r)
+		return
+	}
+	b, _ := page.ReadFile("index.html")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(b)
+}
+
+// state is the full control surface the page renders.
+type state struct {
+	FreqHz   int64    `json:"freqHz"`
+	LOHz     int64    `json:"loHz"`
+	Mode     string   `json:"mode"`
+	Modes    []string `json:"modes"`
+	GainDb   float64  `json:"gainDb"`
+	AGC      bool     `json:"agc"`
+	Vol      float64  `json:"vol"`
+	SqlDb    float64  `json:"sqlDb"`
+	BwHz     float64  `json:"bwHz"`
+	Bws      []float64 `json:"bws"`
+	Ppm      int      `json:"ppm"`
+	PpmOff   bool     `json:"ppmOff"`
+	FT8      bool     `json:"ft8"`
+	AISRF    bool     `json:"aisrf"`
+	Connected bool    `json:"connected"`
+	Host     string   `json:"host"`
+	CPU      float64  `json:"cpu"`
+	MEM      float64  `json:"mem"`
+	BAT      int      `json:"bat"`
+	Planes   int      `json:"planes"`
+	Ships    int      `json:"ships"`
+	UpSecs   int      `json:"upSecs"`
+}
+
+func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
+	radio := s.radio
+	snap := radio.Snapshot()
+	cpu, mem, _ := sysinfo.Snapshot()
+	st := state{
+		FreqHz: radio.Freq(), LOHz: radio.LO(), Mode: radio.Mode().Name,
+		GainDb: radio.GainDb(), AGC: radio.AGCEnabled(), Vol: radio.Volume(),
+		SqlDb: radio.SquelchDb(), BwHz: radio.Bandwidth(), Bws: radio.Bandwidths(),
+		Ppm: radio.Ppm(), PpmOff: radio.PpmOff(),
+		FT8: radio.FT8Enabled(), AISRF: radio.AISRFEnabled(),
+		Connected: snap.Connected, Host: radio.Hostname(),
+		CPU: cpu, MEM: mem, BAT: sysinfo.SensorSnapshot().BattPct,
+		Planes: s.adsb.CountLive(), Ships: len(s.ais.Ships()),
+		UpSecs: int(time.Since(s.upSince).Seconds()),
+	}
+	for _, m := range dsp.ModeList {
+		st.Modes = append(st.Modes, m.Name)
+	}
+	writeJSON(w, st)
+}
+
+type cmd struct {
+	Cmd  string  `json:"cmd"`
+	Hz   float64 `json:"hz"`
+	Db   float64 `json:"db"`
+	V    float64 `json:"v"`
+	Name string  `json:"name"`
+	On   *bool   `json:"on"`
+}
+
+func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var c cmd
+	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	radio := s.radio
+	switch c.Cmd {
+	case "freq":
+		radio.SetFreq(int64(c.Hz))
+	case "offset":
+		radio.SetFreq(radio.LO() + int64(c.Hz))
+	case "mode":
+		if m := dsp.ModeByName(c.Name); m.Name != "" {
+			radio.SetMode(m)
+		}
+	case "gain":
+		radio.SetGainDb(c.Db)
+	case "agc":
+		if c.On != nil {
+			radio.SetAGCEnabled(*c.On)
+		}
+	case "vol":
+		radio.SetVolume(c.V)
+	case "sql":
+		radio.SetSquelchDb(c.Db)
+	case "bw":
+		radio.SetBandwidth(c.Hz)
+	case "ppm":
+		radio.SetPpm(int(c.V))
+	case "ppmoff":
+		if c.On != nil {
+			radio.SetPpmOff(*c.On)
+		}
+	case "ft8":
+		if c.On != nil {
+			radio.SetFT8Enabled(*c.On)
+		}
+	case "aisrf":
+		if c.On != nil {
+			radio.SetAISRFEnabled(*c.On)
+		}
+	default:
+		http.Error(w, "unknown cmd", http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleFT8(w http.ResponseWriter, r *http.Request) {
+	s.logMu.Lock()
+	out := make([]FT8Line, len(s.ft8Log))
+	copy(out, s.ft8Log)
+	s.logMu.Unlock()
+	writeJSON(w, out)
+}
+
+func (s *Server) handleAIS(w http.ResponseWriter, r *http.Request) {
+	s.logMu.Lock()
+	out := make([]AISLine, len(s.aisLog))
+	copy(out, s.aisLog)
+	s.logMu.Unlock()
+	writeJSON(w, out)
+}
+
+type target struct {
+	Kind   string  `json:"kind"` // "plane" | "ship"
+	ID     string  `json:"id"`
+	Call   string  `json:"call"`
+	Lat    float64 `json:"lat"`
+	Lon    float64 `json:"lon"`
+	HasPos bool    `json:"hasPos"`
+	AltFt  int     `json:"altFt"`
+	Speed  float64 `json:"speed"`
+	Track  int     `json:"track"`
+	AgeSec float64 `json:"ageSec"`
+}
+
+func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
+	var out []target
+	now := time.Now()
+	for _, p := range s.adsb.Planes() {
+		call := p.Callsign
+		if call == "" {
+			call = p.ICAO
+		}
+		out = append(out, target{Kind: "plane", ID: p.ICAO, Call: call, Lat: p.Lat, Lon: p.Lon, HasPos: p.HasPos, AltFt: p.AltFt, Speed: float64(p.SpeedKt), Track: p.TrackDeg, AgeSec: now.Sub(p.LastSeen).Seconds()})
+	}
+	for _, sh := range s.ais.Ships() {
+		call := sh.Name
+		if call == "" {
+			call = sh.MMSI
+		}
+		out = append(out, target{Kind: "ship", ID: sh.MMSI, Call: call, Lat: sh.Lat, Lon: sh.Lon, HasPos: sh.HasPos, Speed: sh.SogKt, Track: int(sh.CogDeg), AgeSec: now.Sub(sh.LastSeen).Seconds()})
+	}
+	writeJSON(w, out)
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(v)
+}

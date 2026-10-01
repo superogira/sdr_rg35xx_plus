@@ -50,6 +50,7 @@ import (
 	"sdr35/internal/radio"
 	"sdr35/internal/sysinfo"
 	"sdr35/internal/ui"
+	"sdr35/internal/web"
 )
 
 const defaultHost = "e25wop.thddns.net:2255"
@@ -376,6 +377,8 @@ const (
 	menuVolume
 	menuShot
 	menuUpdate
+	menuWeb
+	menuWebPort
 	menuCall
 	menuGrid
 	menuPSK
@@ -417,7 +420,7 @@ var pageItems = [][]int{
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
 	{menuBM},
-	{menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
+	{menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate, menuWeb, menuWebPort},
 }
 
 // The flat 16-row menu outgrew the screen, so it is now subpages
@@ -698,6 +701,17 @@ func main() {
 		cfg["aishost"] = aisHost
 	}
 	aisStore := ais.NewStore()
+	// LAN web control (opt-in via System menu; ini web=on/webport=N).
+	webPort := 8080
+	if v, ok := cfg["webport"]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1024 && n <= 65535 {
+			webPort = n
+		}
+	}
+	webSrv := web.New(r, adsbStore, aisStore, webPort)
+	if cfg["web"] == "on" {
+		webSrv.SetEnabled(true)
+	}
 	aisClient := ais.NewClient(aisHost)
 	aisClient.Connected = func(c bool) { aisConnected = c }
 	go aisClient.Run(ctx, aisStore)
@@ -730,6 +744,7 @@ func main() {
 		cc := geo.MMSICountry(mmsi)
 		aisLogMu.Lock()
 		aisLog = append(aisLog, ui.AISEntry{Time: time.Now().Format("15:04:05"), Ch: name, Text: line, FlagCC: cc, Db: levelDb})
+		webSrv.AddAIS(web.AISLine{Time: time.Now().Format("15:04:05"), Ch: name, Text: line, Db: levelDb})
 		if len(aisLog) > 100 {
 			aisLog = aisLog[len(aisLog)-100:]
 		}
@@ -1353,12 +1368,26 @@ func main() {
 		case menuAGC:
 			r.SetAGCEnabled(!r.AGCEnabled())
 		case menuHost:
+		case menuWeb:
+			on := !webSrv.Enabled()
+			webSrv.SetEnabled(on)
+			cfg["web"] = map[bool]string{true: "on", false: "off"}[on]
 		case menuLang:
 			if i18n.Lang() == "th" {
 				i18n.SetLang("en")
 			} else {
 				i18n.SetLang("th")
 			}
+		case menuWebPort:
+			p := webSrv.Port() + dir
+			if p < 1024 {
+				p = 1024
+			}
+			if p > 65535 {
+				p = 65535
+			}
+			webSrv.SetPort(p)
+			cfg["webport"] = fmt.Sprintf("%d", p)
 		case menuSpan:
 			spanStep(dir)
 		case menuStep:
@@ -2522,6 +2551,7 @@ func main() {
 				isoCC = geo.CountryISO(toks[1])
 			}
 			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: m.Text, Anno: anno, FlagCC: isoCC})
+			webSrv.AddFT8(web.FT8Line{Time: now.Format("15:04:05"), SNR: m.SNRDb, Hz: m.FreqHz, Text: m.Text, Anno: anno})
 			if len(ft8Log) > 100 {
 				ft8Log = ft8Log[len(ft8Log)-100:]
 			}
@@ -2754,6 +2784,14 @@ func main() {
 					}())
 			case pageSys:
 				items = append(items,
+					func() ui.MenuItem {
+						v := i18n.T("off")
+						if webSrv.Enabled() {
+							v = ":" + fmt.Sprintf("%d", webSrv.Port())
+						}
+						return ui.MenuItem{Label: i18n.T("m_web"), Value: v}
+					}(),
+					ui.MenuItem{Label: i18n.T("m_webport"), Value: fmt.Sprintf("%d", webSrv.Port())},
 					ui.MenuItem{Label: i18n.T("m_lang"), Value: langLabel()},
 					ui.MenuItem{Label: i18n.T("m_sysmon"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_logs"), Value: i18n.T("press_a")},
@@ -3404,6 +3442,12 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["aishosts"]; ok && v != "" {
 		fmt.Fprintf(f, "aishosts=%s\n", v)
+	}
+	if v, ok := cfg["web"]; ok {
+		fmt.Fprintf(f, "web=%s\n", v)
+	}
+	if v, ok := cfg["webport"]; ok {
+		fmt.Fprintf(f, "webport=%s\n", v)
 	}
 	fmt.Fprintf(f, "call=%s\ngrid=%s\npsk=%s\nantenna=%s\nrig=%s\nwfmin=%g\nwfmax=%g\n", myCall, myGrid, map[bool]string{true: "on", false: "off"}[pskOn], myAnt, myRig, wfMin, wfMax)
 	if v, ok := cfg["bm"]; ok {
