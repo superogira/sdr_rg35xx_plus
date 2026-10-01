@@ -22,6 +22,18 @@ type Ship struct {
 	CogDeg   float64
 	LastSeen time.Time
 	AtoN     bool // static aid-to-navigation / base station, not a vessel
+
+	// Static + voyage data (type 5 / 24B) and nav status (1/2/3) —
+	// accumulated as the vessel's messages arrive.
+	Callsign               string
+	Imo                    uint32
+	Destination            string
+	EtaText                string
+	ShipType               byte
+	NavStat                byte
+	DimA, DimB, DimC, DimD uint16  // bow/stern/port/starboard, metres
+	Draught                float64 // metres
+	Heading                int     // degrees, 511 = n/a
 }
 
 // Store holds ships by MMSI, pruned by TTL (ships are slow — 10 min).
@@ -74,11 +86,16 @@ func latLonAt(p []byte, latOff, lonOff int) (float64, float64, bool) {
 	return lat, lon, true
 }
 
-// u reads an unsigned field from the 6-bit payload values.
+// u reads an unsigned field from the 6-bit payload values. Bits past
+// the payload read as 0 — real-world AIS payloads are padded to
+// variable lengths and the field layout runs past short ones.
 func u(p []byte, off, n int) uint32 {
 	var v uint32
 	for i := 0; i < n; i++ {
 		bit := off + i
+		if bit/6 >= len(p) {
+			return v
+		}
 		c := p[bit/6]
 		b := (c >> (5 - uint(bit%6))) & 1
 		v = v<<1 | uint32(b)
@@ -221,6 +238,10 @@ func (s *Store) decodePayload(p []byte) (typ uint32, mmsi string) {
 	sh.LastSeen = time.Now()
 	switch typ {
 	case 1, 2, 3: // Class A position
+		sh.NavStat = byte(u(p, 38, 4))
+		if hd := u(p, 128, 9); hd != 511 {
+			sh.Heading = int(hd)
+		}
 		sh.SogKt = float64(u(p, 50, 10)) / 10
 		lon := float64(i(p, 61, 28)) / 600000
 		lat := float64(i(p, 89, 27)) / 600000
@@ -229,6 +250,9 @@ func (s *Store) decodePayload(p []byte) (typ uint32, mmsi string) {
 		}
 		sh.CogDeg = float64(u(p, 116, 12)) / 10
 	case 18: // Class B position
+		if hd := u(p, 133, 9); hd != 511 {
+			sh.Heading = int(hd)
+		}
 		sh.SogKt = float64(u(p, 46, 10)) / 10
 		lon := float64(i(p, 57, 28)) / 600000
 		lat := float64(i(p, 85, 27)) / 600000
@@ -236,12 +260,29 @@ func (s *Store) decodePayload(p []byte) (typ uint32, mmsi string) {
 			sh.Lat, sh.Lon, sh.HasPos = lat, lon, true
 		}
 		sh.CogDeg = float64(u(p, 112, 12)) / 10
-	case 24: // Class B static — part A carries the name
+	case 24: // Class B static — part A name, part B ship data
 		if u(p, 38, 2) == 0 {
 			sh.Name = text(p, 40, 120)
+		} else {
+			sh.ShipType = byte(u(p, 40, 8))
+			sh.Callsign = text(p, 66, 42)
+			sh.DimA = uint16(u(p, 132, 9))
+			sh.DimB = uint16(u(p, 141, 9))
+			sh.DimC = uint16(u(p, 150, 6))
+			sh.DimD = uint16(u(p, 156, 6))
 		}
 	case 5: // Class A static + voyage (name + callsign)
 		sh.Name = text(p, 112, 120)
+		sh.Callsign = text(p, 70, 42)
+		sh.Imo = u(p, 40, 30)
+		sh.ShipType = byte(u(p, 232, 8))
+		sh.DimA = uint16(u(p, 240, 9))
+		sh.DimB = uint16(u(p, 249, 9))
+		sh.DimC = uint16(u(p, 258, 6))
+		sh.DimD = uint16(u(p, 264, 6))
+		sh.Draught = float64(u(p, 274, 8)) / 10
+		sh.Destination = text(p, 302, 120)
+		sh.EtaText = etaText(u(p, 422, 4), u(p, 426, 5), u(p, 431, 5), u(p, 436, 6))
 	case 6: // Assigned-mode BASE STATION — a station, not a vessel
 		sh.AtoN = true
 		sh.Lat, sh.Lon, sh.HasPos = latLonAt(p, 72, 100)
@@ -251,6 +292,15 @@ func (s *Store) decodePayload(p []byte) (typ uint32, mmsi string) {
 		sh.Lat, sh.Lon, sh.HasPos = latLonAt(p, 193, 165)
 	}
 	return typ, mmsi
+}
+
+// etaText formats the type-5 ETA fields (0 month / day, 24 hour, 60
+// minute = not available).
+func etaText(mon, day, hour, min uint32) string {
+	if mon == 0 || day == 0 || mon > 12 || day > 31 || hour > 23 || min > 59 {
+		return ""
+	}
+	return fmt.Sprintf("%02d-%02d %02d:%02d", mon, day, hour, min)
 }
 
 // Ship returns a copy of one ship's current state (nil if unknown).

@@ -624,8 +624,9 @@ func main() {
 	adsbMosaicCtr := make([][][2]float64, len(osm.Layers))
 	mapCacheClearedAt := time.Time{} // row shows "cleared" for a beat after
 	// D-pad map panning on the radar screen (screen px; 0,0 = receiver
-	// centred). Reset on entry, layer or range change; SELECT recentres.
+	// centred). Reset on entry, layer or range change; START recentres.
 	panX, panY := 0, 0
+	radarSel := -1 // -1 = off; otherwise index into the DRAWN blips
 	// Radar view toggles: label visibility (A) and which targets show (X).
 	radarLabelMode := 0
 	if v, ok := cfg["radarlabel"]; ok {
@@ -1469,6 +1470,7 @@ func main() {
 			uiMode = uiHostEdit
 		case menuADSBRadar:
 			panX, panY = 0, 0
+			radarSel = -1
 			uiMode = uiADSB
 		case menuAISRF:
 			on := !r.AISRFEnabled()
@@ -1784,13 +1786,29 @@ func main() {
 				cfg["adsblayer"] = fmt.Sprintf("%d", adsbLayerIdx)
 				adsbFreeMosaics()
 			case input.Up:
-				panY -= 80
+				if radarSel >= 0 {
+					radarSel--
+				} else {
+					panY -= 80
+				}
 			case input.Down:
-				panY += 80
+				if radarSel >= 0 {
+					radarSel++
+				} else {
+					panY += 80
+				}
 			case input.Left:
-				panX -= 80
+				if radarSel >= 0 {
+					radarSel--
+				} else {
+					panX -= 80
+				}
 			case input.Right:
-				panX += 80
+				if radarSel >= 0 {
+					radarSel++
+				} else {
+					panX += 80
+				}
 			case input.A:
 				// Flag+text → flag only → bare targets → both.
 				radarLabelMode = (radarLabelMode + 1) % 3
@@ -1804,8 +1822,17 @@ func main() {
 				aisShowName = !aisShowName
 				cfg["aisname"] = fmt.Sprintf("%v", aisShowName)
 			case input.Select:
+				// Toggle the target selector: the d-pad then walks the
+				// drawn blips and a detail panel opens on the opposite
+				// half of the screen.
+				if radarSel < 0 {
+					radarSel = 0
+				} else {
+					radarSel = -1
+				}
+			case input.Start:
 				panX, panY = 0, 0 // recentre on the receiver
-			case input.B, input.Start:
+			case input.B:
 				uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuADSBRadar)
 			}
 		case uiRTTY:
@@ -3086,7 +3113,8 @@ func main() {
 					}
 				}
 				cc := geo.ICAOCountry(pl.ICAO)
-				b := ui.RadarBlip{Call: call, ICAO: pl.ICAO, Country: cc, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, TrackDeg: pl.TrackDeg, VrateFpm: pl.VrateFpm, HasPos: pl.HasPos, Seen: pl.LastSeen}
+				reg := adsbRegs.Lookup(pl.ICAO)
+				b := ui.RadarBlip{Call: call, ICAO: pl.ICAO, Country: cc, AltFt: pl.AltFt, SpdKt: pl.SpeedKt, TrackDeg: pl.TrackDeg, VrateFpm: pl.VrateFpm, HasPos: pl.HasPos, Seen: pl.LastSeen, Lat: pl.Lat, Lon: pl.Lon, Reg: reg}
 				if pl.HasPos {
 					b.DistKm, b.BrngDeg = geo.DistanceBearingKm(adsbLat, adsbLon, pl.Lat, pl.Lon)
 					b.MercX, b.MercY = mercPos(pl.Lat, pl.Lon)
@@ -3109,7 +3137,10 @@ func main() {
 				}
 				mx, my := mercPos(sh.Lat, sh.Lon)
 				cc := geo.MMSICountry(sh.MMSI)
-				blips = append(blips, ui.RadarBlip{Vessel: true, AtoN: sh.AtoN, Call: name, ICAO: sh.MMSI, Country: cc, BrngDeg: br, DistKm: d, SogKt: sh.SogKt, HasPos: true, MercX: mx, MercY: my, Seen: sh.LastSeen})
+				blips = append(blips, ui.RadarBlip{Vessel: true, AtoN: sh.AtoN, Call: name, ICAO: sh.MMSI, Country: cc, BrngDeg: br, DistKm: d, SogKt: sh.SogKt, HasPos: true, MercX: mx, MercY: my, Seen: sh.LastSeen,
+					Lat: sh.Lat, Lon: sh.Lon, Callsign: sh.Callsign, Imo: sh.Imo, Dest: sh.Destination, Eta: sh.EtaText,
+					NavStat: sh.NavStat, ShipType: sh.ShipType, Draught: sh.Draught,
+					DimLen: sh.DimA + sh.DimB, DimWid: sh.DimC + sh.DimD, Heading: sh.Heading, CogDeg: sh.CogDeg})
 				// Demo aids (the live Thai feed carries no types 6/21 right
 				// now) so the rhombus rendering stays verifiable.
 				if os.Getenv("SDR_ADSB_DEMO") != "" {
@@ -3205,7 +3236,11 @@ func main() {
 			if hostLbl == "" {
 				hostLbl = "(" + i18n.T("off") + ")"
 			}
-			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarLabelMode, panX, panY, mapOffX, mapOffY, sysinfo.SensorSnapshot().BattPct)
+			drawn := u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarLabelMode, panX, panY, mapOffX, mapOffY, sysinfo.SensorSnapshot().BattPct, radarSel)
+			if n := drawn; radarSel >= 0 && n > 0 {
+				radarSel %= n
+			}
+			_ = drawn
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
