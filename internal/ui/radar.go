@@ -51,6 +51,20 @@ func (m *MercView) project(mx, my float64) (int, int) {
 // range rings and the Phosphor fallback scale.
 func (m *MercView) pxPerKm() float64 { return 1000 / m.MPerPx }
 
+// RadarSel is the radar target-selector state. The selection is
+// anchored to the target's identity (MMSI/ICAO), not its list index —
+// the drawn list re-sorts by last-signal every frame, so an index
+// anchor would make the selection jump to other targets "by itself".
+type RadarSel struct {
+	On  bool
+	Idx int
+	ID  string // "V<mmsi>" or "A<icao>"; re-anchored every frame
+	// LastIdx lets the draw pass tell user movement (Idx changed since
+	// the last resolve) from a list re-sort (Idx untouched): the ID
+	// anchor follows re-sorts but never overrides a d-pad press.
+	LastIdx int
+}
+
 // RadarBlip is one tracked object (aircraft or vessel) positioned
 // relative to the receiver.
 type RadarBlip struct {
@@ -96,7 +110,7 @@ const (
 
 // DrawRadar renders the ADS-B radar. Targets beyond rangeKm are not
 // drawn at all — they appear when the user zooms out to their range.
-func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string, labelMode int, panX, panY int, mapOffX, mapOffY int, battPct int, selIdx int) int {
+func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string, labelMode int, panX, panY int, mapOffX, mapOffY int, battPct int, sel *RadarSel) int {
 	// Phosphor palette.
 	bg := color.RGBA{2, 10, 4, 255}
 	dim := color.RGBA{0, 110, 55, 255}
@@ -514,12 +528,30 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 	sf.DrawString(u.img, bright, u.W-cw-9, u.H-9, cpu)
 
 	// Target selector: ring around the selected blip + detail panel on
-	// the opposite half of the screen (FT8-map style).
-	if selIdx >= 0 && len(drawnList) > 0 {
-		if selIdx >= len(drawnList) {
-			selIdx = len(drawnList) - 1
+	// the opposite half of the screen (FT8-map style). The ID anchor
+	// keeps the selection on the SAME target while the list re-sorts;
+	// if that target left the screen the index falls to a neighbour
+	// and re-anchors.
+	if sel != nil && sel.On && len(drawnList) > 0 {
+		n := len(drawnList)
+		selIdx := sel.Idx % n
+		if selIdx < 0 {
+			selIdx += n
 		}
-		sel := drawnList[selIdx]
+		// No d-pad press since the last resolve → follow the anchored
+		// target through re-sorts. A press changed Idx, so it wins.
+		if sel.ID != "" && sel.Idx == sel.LastIdx {
+			for i, b := range drawnList {
+				if blipID(b) == sel.ID {
+					selIdx = i
+					break
+				}
+			}
+		}
+		sel.Idx, sel.LastIdx = selIdx, selIdx
+		sel.ID = blipID(drawnList[selIdx])
+		selB := drawnList[selIdx]
+		sel := selB
 		if sx, sy, ok := u.blipScreenPos(sel, merc, rangeKm, maxR, cx, cy); ok {
 			// Selection marker: a dark halo disc gives contrast on the
 			// bright map layers, then a thick bright ring + four long
@@ -547,6 +579,14 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		}
 	}
 	return len(drawnList)
+}
+
+// blipID is the stable selection anchor of a drawn blip.
+func blipID(b RadarBlip) string {
+	if b.Vessel {
+		return "V" + b.ICAO
+	}
+	return "A" + b.ICAO
 }
 
 // blipScreenPos recomputes a blip's screen position for the selector
