@@ -49,17 +49,16 @@ func tfield(s string, chars int) string {
 	s = s + "@@@@@@@@@@@@@@@@@@@@@@@@"
 	for k := 0; k < chars; k++ {
 		c := s[k]
-		// The 6-bit text alphabet: ASCII 48-63 → v-48, 64-95 → v-32
-		// (uppercase letters live at v 33-58, transmitted as the
-		// backtick-lowercase range).
+		// ITU-R M.1371 six-bit text (mirrors the decoder in text()):
+		// '@'-'_' → v-64, ' '-'?' → v itself.
 		var v byte
 		switch {
-		case c >= 48 && c <= 63:
-			v = c - 48
 		case c >= 64 && c <= 95:
-			v = c - 32
+			v = c - 64
+		case c >= 32 && c <= 63:
+			v = c
 		default:
-			v = 32 // space and anything exotic → '@'
+			v = 0 // '@' padding for anything exotic
 		}
 		bits += field(uint32(v), 6)
 	}
