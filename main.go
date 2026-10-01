@@ -3205,7 +3205,7 @@ func main() {
 			if hostLbl == "" {
 				hostLbl = "(" + i18n.T("off") + ")"
 			}
-			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarLabelMode, panX, panY, mapOffX, mapOffY)
+			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarLabelMode, panX, panY, mapOffX, mapOffY, sysinfo.SensorSnapshot().BattPct)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
