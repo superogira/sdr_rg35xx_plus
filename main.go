@@ -582,8 +582,8 @@ func main() {
 			adsbLon = f
 		}
 	}
-	adsbRanges := []float64{5, 10, 25, 50, 100, 200, 400}
-	adsbRangeIdx := 1
+	adsbRanges := []float64{2.5, 5, 10, 25, 50, 100, 200, 400}
+	adsbRangeIdx := 2
 	if v := os.Getenv("SDR_ADSB_RANGE"); v != "" {
 		for i, rg := range adsbRanges {
 			if fmt.Sprintf("%.0f", rg) == v {
@@ -611,7 +611,7 @@ func main() {
 	// every blip sat ~1.7× too far from the receiver.
 	// One zoom level per range step keeps the labelled distance the same
 	// apparent size on screen (≈135-170 px) at every zoom.
-	adsbZooms := []int{12, 11, 10, 9, 8, 7, 6} // for ranges 5/10/25/50/100/200/400 km
+	adsbZooms := []int{13, 12, 11, 10, 9, 8, 7, 6} // for ranges 2.5/5/10/25/50/100/200/400 km
 	osmCache := osm.NewCache(filepath.Join(filepath.Dir(mustExe()), "osmcache"))
 	adsbMosaic := make([][]*image.RGBA, len(osm.Layers))
 	adsbFetching := make([][]bool, len(osm.Layers))

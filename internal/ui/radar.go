@@ -385,7 +385,11 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 	hf := Face(12, true)
 	hf.DrawString(u.img, bright, 10, 24, fmt.Sprintf("ADS-B  %s", host))
 	sf := Face(11, false)
-	sf.DrawString(u.img, green, 10, 42, fmt.Sprintf("%s  %d km  RX %.4f %.4f", state, int(rangeKm), rxLat, rxLon))
+	rg := fmt.Sprintf("%.0f km", rangeKm)
+	if rangeKm < 5 {
+		rg = fmt.Sprintf("%.1f km", rangeKm) // 2.5 km step
+	}
+	sf.DrawString(u.img, green, 10, 42, fmt.Sprintf("%s  %s  RX %.4f %.4f", state, rg, rxLat, rxLon))
 	// Deterministic z-order: oldest first so the freshest target paints
 	// LAST, on top. Blips used to arrive in Go map order, which reshuffles
 	// every frame — overlapping labels flickered as they fought for the
