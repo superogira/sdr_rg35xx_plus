@@ -117,11 +117,15 @@ func text(p []byte, off, n int) string {
 	var sb strings.Builder
 	for k := 0; k+6 <= n; k += 6 {
 		v := u(p, off+k, 6)
+		// ITU-R M.1371 six-bit text: values 0-31 map to '@'-'_'
+		// (uppercase letters live at v 1-26) and 32-63 map to ' '-'?'
+		// (digits at v 48-57). The earlier +48/+32 table produced
+		// plausible-looking mojibake for every real ship name.
 		var c byte
 		if v < 32 {
-			c = byte(v + 48)
+			c = byte(v + 64)
 		} else {
-			c = byte(v + 32)
+			c = byte(v)
 		}
 		sb.WriteByte(c)
 	}
