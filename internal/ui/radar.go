@@ -172,8 +172,15 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			break
 		}
 		label := fmt.Sprintf("%.0f", d)
+		if d < 1 {
+			label = fmt.Sprintf("%.1f", d) // 0.1 km steps at 0.5 km zoom
+		}
 		if d >= rangeKm-0.5 {
-			label = fmt.Sprintf("%.0f km", d)
+			if rangeKm < 5 {
+				label = fmt.Sprintf("%.1f km", d)
+			} else {
+				label = fmt.Sprintf("%.0f km", d)
+			}
 		}
 		lf.DrawString(u.img, dim, cx+4, cy-int(r)+10, label)
 	}
