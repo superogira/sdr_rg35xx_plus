@@ -38,6 +38,14 @@ func MercatorPx(lat, lon float64, zoom int) (float64, float64) {
 	return x, y
 }
 
+// MercatorInv converts world pixels back to lat/lon at a zoom level.
+func MercatorInv(x, y float64, zoom int) (float64, float64) {
+	n := 256.0 * math.Pow(2, float64(zoom))
+	lon := x/n*360 - 180
+	lat := math.Atan(math.Sinh(math.Pi*(1-2*y/n))) * 180 / math.Pi
+	return lat, lon
+}
+
 // Layer is one tile-server style. URL receives (zoom, x, y).
 type Layer struct {
 	Name    string
