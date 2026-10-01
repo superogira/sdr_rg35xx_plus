@@ -72,9 +72,16 @@ type RadarBlip struct {
 	Seen         time.Time // last position update; newest draws on top
 }
 
+// Radar label display modes (A cycles them).
+const (
+	LabelFlagText = 0 // flag + name/reg text (normal)
+	LabelFlagOnly = 1 // flag only, text hidden
+	LabelNone     = 2 // no flag, no text — bare targets
+)
+
 // DrawRadar renders the ADS-B radar. Targets beyond rangeKm are not
 // drawn at all — they appear when the user zooms out to their range.
-func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string) {
+func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string, labelMode int) {
 	// Phosphor palette.
 	bg := color.RGBA{2, 10, 4, 255}
 	dim := color.RGBA{0, 110, 55, 255}
@@ -253,7 +260,7 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			}
 			var flag image.Image
 			fw := 0
-			if b.Country != "" {
+			if b.Country != "" && labelMode != LabelNone {
 				flag = GetFlag(b.Country, flagDir)
 				if flag != nil {
 					fw = flag.Bounds().Dx() + 3
@@ -266,6 +273,9 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			if flag != nil {
 				tx += fw // flag leads the label
 			}
+			if labelMode == LabelNone {
+				continue
+			}
 			ty := y + 4
 			if y < 60 {
 				ty = y + 14
@@ -273,11 +283,13 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			// Unconditional: the chip also dims any older label this one
 			// lands on (labels sort oldest-first, newest on top).
 			u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
-			lcol := color.RGBA{180, 255, 255, 255}
-			if b.AtoN {
-				lcol = color.RGBA{255, 235, 130, 255}
+			if labelMode == LabelFlagText {
+				lcol := color.RGBA{180, 255, 255, 255}
+				if b.AtoN {
+					lcol = color.RGBA{255, 235, 130, 255}
+				}
+				tf.DrawString(u.img, lcol, tx, ty, label)
 			}
-			tf.DrawString(u.img, lcol, tx, ty, label)
 			if flag != nil {
 				drawImage(u.img, flag, tx-fw, ty-10)
 			}
@@ -328,7 +340,7 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		}
 		var flag image.Image
 		fw := 0
-		if b.Country != "" {
+		if b.Country != "" && labelMode != LabelNone {
 			flag = GetFlag(b.Country, flagDir)
 			if flag != nil {
 				fw = flag.Bounds().Dx() + 3
@@ -341,6 +353,9 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		if flag != nil {
 			tx += fw // flag leads the label
 		}
+		if labelMode == LabelNone {
+			continue
+		}
 		ty := y + 4
 		if y < 60 {
 			ty = y + 14
@@ -348,7 +363,9 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		// Unconditional: the chip also dims any older label this one
 		// lands on (labels sort oldest-first, newest on top).
 		u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
-		tf.DrawString(u.img, altitudeColor(b.AltFt), tx, ty, label)
+		if labelMode == LabelFlagText {
+			tf.DrawString(u.img, altitudeColor(b.AltFt), tx, ty, label)
+		}
 		if flag != nil {
 			drawImage(u.img, flag, tx-fw, ty-10)
 		}
