@@ -1795,6 +1795,10 @@ func main() {
 				// Both → planes only → ships only.
 				radarTargets = (radarTargets + 1) % 3
 				cfg["radartargets"] = fmt.Sprintf("%d", radarTargets)
+			case input.Y:
+				// Ship name↔MMSI / aircraft callsign↔registration.
+				aisShowName = !aisShowName
+				cfg["aisname"] = fmt.Sprintf("%v", aisShowName)
 			case input.Select:
 				panX, panY = 0, 0 // recentre on the receiver
 			case input.B, input.Start:
