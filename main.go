@@ -2998,7 +2998,7 @@ func main() {
 				for _, tp := range pl.Trail {
 					d, br := geo.DistanceBearingKm(adsbLat, adsbLon, tp.Lat, tp.Lon)
 					mx, my := mercPos(tp.Lat, tp.Lon)
-					b.Trail = append(b.Trail, ui.RadarDot{DistKm: d, BrngDeg: br, AgeSec: int(time.Since(tp.At).Seconds()), MercX: mx, MercY: my})
+					b.Trail = append(b.Trail, ui.RadarDot{DistKm: d, BrngDeg: br, AgeSec: int(time.Since(tp.At).Seconds()), AltFt: tp.AltFt, MercX: mx, MercY: my})
 				}
 				blips = append(blips, b)
 			}
@@ -3051,7 +3051,7 @@ func main() {
 						if tb < 0 {
 							tb += 360
 						}
-						b.Trail = append(b.Trail, ui.RadarDot{BrngDeg: tb, DistKm: td, AgeSec: k * 10})
+						b.Trail = append(b.Trail, ui.RadarDot{BrngDeg: tb, DistKm: td, AgeSec: k * 10, AltFt: d.alt})
 					}
 					blips = append(blips, b)
 				}

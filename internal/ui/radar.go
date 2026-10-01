@@ -20,6 +20,7 @@ type RadarDot struct {
 	BrngDeg      float64
 	DistKm       float64
 	AgeSec       int
+	AltFt        int     // per-point altitude; -1 = unknown (age-tinted green)
 	MercX, MercY float64 // Web-Mercator world pixels of the breadcrumb
 }
 
@@ -201,11 +202,20 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			}
 			sx2 := cx + dx
 			sy2 := cy + dy
-			tc := color.RGBA{0, 255, 130, 255} // recent (< 1 min)
-			if d.AgeSec > 150 {
-				tc = color.RGBA{0, 150, 75, 255} // old
-			} else if d.AgeSec > 60 {
-				tc = color.RGBA{0, 200, 100, 255}
+			// Aircraft breadcrumbs paint in the same altitude colours
+			// as the labels (tar1090 convention); points without
+			// altitude (or vessel history) fall back to age-tinted
+			// green.
+			var tc color.RGBA
+			if !b.Vessel && d.AltFt >= 0 {
+				tc = altitudeColor(d.AltFt)
+			} else {
+				tc = color.RGBA{0, 255, 130, 255} // recent (< 1 min)
+				if d.AgeSec > 150 {
+					tc = color.RGBA{0, 150, 75, 255} // old
+				} else if d.AgeSec > 60 {
+					tc = color.RGBA{0, 200, 100, 255}
+				}
 			}
 			u.setPixel(sx2, sy2, tc)
 			if rangeKm < 100 {
