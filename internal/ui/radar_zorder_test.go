@@ -14,9 +14,12 @@ func TestRadarNewestLabelOnTop(t *testing.T) {
 	u := New(640, 480)
 	img := u.Frame(FrameStats{FreqHz: 1090000000, Mode: "AM"})
 	newer, older := altitudeColor(40000), altitudeColor(0)
+	// NEW deliberately FIRST in the slice: with the sort running before
+	// the draw loop it must still paint last (on top). This catches the
+	// sort being dead code, which is exactly what happened before.
 	blips := []RadarBlip{
-		{Call: "OLD1", ICAO: "880001", AltFt: 0, HasPos: true, MercX: -50, MercY: -50, Seen: time.Now().Add(-30 * time.Second)},
 		{Call: "NEW9", ICAO: "880002", AltFt: 40000, SpdKt: 400, HasPos: true, MercX: -50, MercY: -50, Seen: time.Now()},
+		{Call: "OLD1", ICAO: "880001", AltFt: 0, HasPos: true, MercX: -50, MercY: -50, Seen: time.Now().Add(-30 * time.Second)},
 	}
 	u.DrawRadar(blips, 100, "x:1", true, 13.5, 100.5, 12, nil, "", "", nil, t.TempDir(), LabelFlagText, 0, 0, 0, 0)
 	nNew, nOld := 0, 0

@@ -185,6 +185,22 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		lf.DrawString(u.img, dim, cx+4, cy-int(r)+10, label)
 	}
 
+	// Deterministic z-order: oldest first so the freshest target paints
+	// LAST, on top. Blips arrive in Go map order, which reshuffles every
+	// frame — overlapping labels flicker as they fight for the top spot.
+	// (This sort sat AFTER the draw loop for several builds — dead code;
+	// moved here so it actually runs.)
+	ordered := make([]RadarBlip, len(blips))
+	copy(ordered, blips)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if !ordered[i].Seen.Equal(ordered[j].Seen) {
+			return ordered[i].Seen.Before(ordered[j].Seen)
+		}
+		return ordered[i].Call < ordered[j].Call
+	})
+	blips = ordered
+	drawnPlanes, drawnShips := 0, 0
+
 	// Blips.
 	tf := Face(11, true)
 	for _, b := range blips {
@@ -217,6 +233,11 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			} else if x < -140 || x > u.W+140 || y < -20 || y > u.H+20 {
 				continue
 			}
+		}
+		if b.Vessel {
+			drawnShips++
+		} else {
+			drawnPlanes++
 		}
 		col := green
 		// Flown track: breadcrumbs every 5 s of flight within a
@@ -420,40 +441,23 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 	if connected {
 		state = "● " + i18n.T("radar_conn")
 	}
-	planesN, shipsN := 0, 0
-	for _, b := range blips {
-		if b.Vessel {
-			shipsN++
-		} else {
-			planesN++
-		}
-	}
-	hdr := fmt.Sprintf("%s  %s  %s %d  %s %d  RX %.4f %.4f", state, rg, i18n.T("hdr_planes"), planesN, i18n.T("hdr_ships"), shipsN, rxLat, rxLon)
+	hdr := fmt.Sprintf("%s  %s  RX %.4f %.4f", state, rg, rxLat, rxLon)
 	u.fillBlend(6, 12, sf.TextWidth(hdr)+16, 22, 0, 0, 0, 170)
 	sf.DrawString(u.img, green, 14, 29, hdr)
-	// Deterministic z-order: oldest first so the freshest target paints
-	// LAST, on top. Blips used to arrive in Go map order, which reshuffles
-	// every frame — overlapping labels flickered as they fought for the
-	// top spot. Callsign breaks ties so the order never wobbles.
-	ordered := make([]RadarBlip, len(blips))
-	copy(ordered, blips)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		if !ordered[i].Seen.Equal(ordered[j].Seen) {
-			return ordered[i].Seen.Before(ordered[j].Seen)
-		}
-		return ordered[i].Call < ordered[j].Call
-	})
-	blips = ordered
-	n := 0
-	for _, b := range blips {
-		if b.HasPos {
-			n++
-		}
-	}
-	sf.DrawString(u.img, green, 10, 58, fmt.Sprintf(i18n.T("radar_count"), n))
 	if mapName != "" {
-		sf.DrawString(u.img, green, 10, 74, "MAP "+mapName)
+		c2 := "MAP " + mapName
+		u.fillBlend(6, 44, sf.TextWidth(c2)+12, 18, 0, 0, 0, 170)
+		sf.DrawString(u.img, green, 12, 58, c2)
 	}
+	// Target counts: only what is actually DRAWN on screen — the old
+	// line counted every positioned blip, so ships were reported as
+	// aircraft and beyond-range (hidden) targets inflated the number.
+	cnt := fmt.Sprintf(i18n.T("radar_count"), drawnPlanes)
+	if drawnShips > 0 {
+		cnt += fmt.Sprintf(i18n.T("radar_count_ships"), drawnShips)
+	}
+	u.fillBlend(6, 64, sf.TextWidth(cnt)+12, 18, 0, 0, 0, 170)
+	sf.DrawString(u.img, green, 12, 78, cnt)
 
 	// Button hints: top-right (clear of the aircraft labels).
 	hint := i18n.T("radar_hint")
