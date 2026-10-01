@@ -414,8 +414,8 @@ var pageItems = [][]int{
 	{0, 0, 0, 0, 0, 0, menuExit}, // rows 0-5 open subpages by position; the last row is Exit
 	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 	{menuAF, menuNR, menuHP, menuLP},
-	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
+	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
 	{menuBM},
 	{menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 }
@@ -429,8 +429,8 @@ const (
 	pageRoot = iota
 	pageRx
 	pageAudio
-	pageFT8
 	pageADSB
+	pageFT8
 	pageBM
 	pageSys
 )
@@ -2611,8 +2611,8 @@ func main() {
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_rxpage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_audiopage"), Value: ">"},
-					ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_adsbpage"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_exit"), Value: i18n.T("press_a")})

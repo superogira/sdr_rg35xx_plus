@@ -200,6 +200,7 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 	})
 	blips = ordered
 	drawnPlanes, drawnShips := 0, 0
+	hiddenPlanes, hiddenShips := 0, 0
 
 	// Blips.
 	tf := Face(11, true)
@@ -216,6 +217,11 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			x, y = cx+dx, cy+dy
 			if panX == 0 && panY == 0 {
 				if math.Hypot(float64(dx), float64(dy)) > maxR {
+					if b.Vessel {
+						hiddenShips++
+					} else {
+						hiddenPlanes++
+					}
 					continue // centred view: beyond the selected range stays hidden
 				}
 			} else if x < -140 || x > u.W+140 || y < -20 || y > u.H+20 {
@@ -228,6 +234,11 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			y = cy - int(r*math.Cos(ang))
 			if panX == 0 && panY == 0 {
 				if r > maxR {
+					if b.Vessel {
+						hiddenShips++
+					} else {
+						hiddenPlanes++
+					}
 					continue
 				}
 			} else if x < -140 || x > u.W+140 || y < -20 || y > u.H+20 {
@@ -455,6 +466,9 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 	cnt := fmt.Sprintf(i18n.T("radar_count"), drawnPlanes)
 	if drawnShips > 0 {
 		cnt += fmt.Sprintf(i18n.T("radar_count_ships"), drawnShips)
+	}
+	if hidden := hiddenPlanes + hiddenShips; hidden > 0 {
+		cnt += fmt.Sprintf(i18n.T("radar_count_hidden"), hidden)
 	}
 	u.fillBlend(6, 64, sf.TextWidth(cnt)+12, 18, 0, 0, 0, 170)
 	sf.DrawString(u.img, green, 12, 78, cnt)
