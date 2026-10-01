@@ -1757,7 +1757,7 @@ func main() {
 				// fixed: the pan (screen px at the old zoom) is
 				// re-expressed at the new zoom around that anchor.
 				oldZ := adsbZooms[adsbRangeIdx]
-				if b == input.L1 {
+				if b == input.R1 {
 					adsbRangeIdx = (adsbRangeIdx + len(adsbRanges) - 1) % len(adsbRanges)
 				} else {
 					adsbRangeIdx = (adsbRangeIdx + 1) % len(adsbRanges)
