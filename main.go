@@ -454,7 +454,11 @@ func main() {
 	// Config file next to the binary remembers the last session.
 	cfg := loadConfig()
 	if v, ok := cfg["host"]; ok && *host == defaultHost {
-		*host = v
+		if v == "off" {
+			*host = "" // radio disabled — viewer-only session
+		} else if v != "" {
+			*host = v
+		}
 	}
 	if v, ok := cfg["freq"]; ok && *freq == 145_500_000 {
 		if f, err := strconv.ParseInt(v, 10, 64); err == nil {
@@ -2613,7 +2617,13 @@ func main() {
 					freqDec = 4
 				}
 				items = append(items,
-					ui.MenuItem{Label: i18n.T("m_host"), Value: r.Hostname()},
+					func() ui.MenuItem {
+						v := r.Hostname()
+						if *host == "" {
+							v = "(" + i18n.T("off") + ")"
+						}
+						return ui.MenuItem{Label: i18n.T("m_host"), Value: v}
+					}(),
 					ui.MenuItem{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
 					ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.*f MHz >", freqDec, float64(r.Freq())/1e6)},
 					func() ui.MenuItem {
@@ -3320,7 +3330,12 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\nagc=%s\nlang=%s\nstep=%d\n", host, freq, mode, vol, gainDb, rate, spanKHz, dsPref, agcPref, langPref, stepHz)
+	// Radio host: an empty host (radio disabled) persists as "off".
+	hostOut := host
+	if hostOut == "" {
+		hostOut = "off"
+	}
+	fmt.Fprintf(f, "host=%s\nfreq=%d\nmode=%s\nvol=%.2f\ngain=%.1f\nrate=%d\nspan=%d\nds=%s\nagc=%s\nlang=%s\nstep=%d\n", hostOut, freq, mode, vol, gainDb, rate, spanKHz, dsPref, agcPref, langPref, stepHz)
 	// Squelch level from the live config map.
 	if v, ok := cfg["sql"]; ok {
 		fmt.Fprintf(f, "sql=%s\n", v)
