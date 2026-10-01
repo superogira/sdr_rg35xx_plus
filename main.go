@@ -616,6 +616,19 @@ func main() {
 	adsbMosaic := make([][]*image.RGBA, len(osm.Layers))
 	adsbFetching := make([][]bool, len(osm.Layers))
 	mapCacheClearedAt := time.Time{} // row shows "cleared" for a beat after
+	// Radar view toggles: label visibility (A) and which targets show (X).
+	radarLabelMode := 0
+	if v, ok := cfg["radarlabel"]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 2 {
+			radarLabelMode = n
+		}
+	}
+	radarTargets := 0 // 0 = planes+ships, 1 = planes, 2 = ships
+	if v, ok := cfg["radartargets"]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 2 {
+			radarTargets = n
+		}
+	}
 	for i := range adsbMosaic {
 		adsbMosaic[i] = make([]*image.RGBA, len(adsbRanges))
 		adsbFetching[i] = make([]bool, len(adsbRanges))
@@ -1732,8 +1745,13 @@ func main() {
 				adsbLayerIdx = (adsbLayerIdx + 1) % len(osm.Layers)
 				cfg["adsblayer"] = fmt.Sprintf("%d", adsbLayerIdx)
 			case input.A:
-				aisShowName = !aisShowName
-				cfg["aisname"] = fmt.Sprintf("%v", aisShowName)
+				// Flag+text → flag only → bare targets → both.
+				radarLabelMode = (radarLabelMode + 1) % 3
+				cfg["radarlabel"] = fmt.Sprintf("%d", radarLabelMode)
+			case input.X:
+				// Both → planes only → ships only.
+				radarTargets = (radarTargets + 1) % 3
+				cfg["radartargets"] = fmt.Sprintf("%d", radarTargets)
 			case input.B, input.Start, input.Select:
 				uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuADSBRadar)
 			}
@@ -3075,11 +3093,28 @@ func main() {
 			if adsbMosaic[L][z] != nil {
 				mercArg = merc
 			}
+			if radarTargets == 1 { // planes only
+				keep := blips[:0]
+				for _, b := range blips {
+					if !b.Vessel {
+						keep = append(keep, b)
+					}
+				}
+				blips = keep
+			} else if radarTargets == 2 { // ships only
+				keep := blips[:0]
+				for _, b := range blips {
+					if b.Vessel {
+						keep = append(keep, b)
+					}
+				}
+				blips = keep
+			}
 			hostLbl := adsbHost
 			if hostLbl == "" {
 				hostLbl = "(" + i18n.T("off") + ")"
 			}
-			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir)
+			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarLabelMode)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
