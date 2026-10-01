@@ -521,11 +521,19 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		}
 		sel := drawnList[selIdx]
 		if sx, sy, ok := u.blipScreenPos(sel, merc, rangeKm, maxR, cx, cy); ok {
-			for a := 0; a < 360; a += 4 {
-				rr := float64(11)
-				x1 := int(float64(sx) + rr*math.Cos(float64(a)*math.Pi/180))
-				y1 := int(float64(sy) + rr*math.Sin(float64(a)*math.Pi/180))
-				u.setPixel(x1, y1, color.RGBA{255, 255, 80, 255})
+			// Selection marker: a thick yellow ring plus four corner
+			// ticks pointing at the target — 1-px dots proved too faint
+			// on the handheld screen over map layers.
+			ring := color.RGBA{255, 255, 60, 255}
+			for a := 0; a < 360; a += 3 {
+				ca, sa := math.Cos(float64(a)*math.Pi/180), math.Sin(float64(a)*math.Pi/180)
+				u.setPixel(sx+int(11*ca), sy+int(11*sa), ring)
+				u.setPixel(sx+int(12*ca), sy+int(12*sa), ring)
+			}
+			for _, d := range [][2]int{{-1, -1}, {1, -1}, {-1, 1}, {1, 1}} {
+				for k := 5; k <= 9; k++ {
+					u.setPixel(sx+d[0]*k, sy+d[1]*k, ring)
+				}
 			}
 			u.drawRadarDetail(sel, sx < u.W/2, flagDir, selIdx, len(drawnList))
 		}
