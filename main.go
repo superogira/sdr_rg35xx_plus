@@ -1752,24 +1752,33 @@ func main() {
 			// (swapped per user request — zoom on the shoulder the
 			// thumb rests on), the d-pad pans the map, B/Start back.
 			switch b {
-			case input.L1:
-				adsbRangeIdx = (adsbRangeIdx + len(adsbRanges) - 1) % len(adsbRanges)
+			case input.L1, input.R1:
+				// Zoom keeps the geographic point at screen centre
+				// fixed: the pan (screen px at the old zoom) is
+				// re-expressed at the new zoom around that anchor.
+				oldZ := adsbZooms[adsbRangeIdx]
+				if b == input.L1 {
+					adsbRangeIdx = (adsbRangeIdx + len(adsbRanges) - 1) % len(adsbRanges)
+				} else {
+					adsbRangeIdx = (adsbRangeIdx + 1) % len(adsbRanges)
+				}
+				newZ := adsbZooms[adsbRangeIdx]
+				if oldZ != newZ {
+					rxo, ryo := osm.MercatorPx(adsbLat, adsbLon, oldZ)
+					latC, lonC := osm.MercatorInv(rxo+float64(panX), ryo+float64(panY), oldZ)
+					rxn, ryn := osm.MercatorPx(adsbLat, adsbLon, newZ)
+					vxn, vyn := osm.MercatorPx(latC, lonC, newZ)
+					panX, panY = int(math.Round(vxn-rxn)), int(math.Round(vyn-ryn))
+				}
 				adsbFreeMosaics()
-				panX, panY = 0, 0
-			case input.R1:
-				adsbRangeIdx = (adsbRangeIdx + 1) % len(adsbRanges)
-				adsbFreeMosaics()
-				panX, panY = 0, 0
 			case input.L2:
 				adsbLayerIdx = (adsbLayerIdx + len(osm.Layers) - 1) % len(osm.Layers)
 				cfg["adsblayer"] = fmt.Sprintf("%d", adsbLayerIdx)
 				adsbFreeMosaics()
-				panX, panY = 0, 0
 			case input.R2:
 				adsbLayerIdx = (adsbLayerIdx + 1) % len(osm.Layers)
 				cfg["adsblayer"] = fmt.Sprintf("%d", adsbLayerIdx)
 				adsbFreeMosaics()
-				panX, panY = 0, 0
 			case input.Up:
 				panY -= 80
 			case input.Down:
@@ -2363,9 +2372,15 @@ func main() {
 				ft8SlotMark = true
 			}
 		}
-		if newRow := u.NewSpectrumRow(r.Tap(), r.RawTap()); newRow && ft8SlotMark {
-			u.MarkFT8Slot(time.Now().Format("2006-01-02 15:04:05"))
-			ft8SlotMark = false
+		// Full-screen views (radar, FT8 world map) paint over the
+		// waterfall entirely — skipping the spectrum FFT + waterfall
+		// scroll there saves the biggest UI-side cost while every
+		// decoder (FT8/RTTY/AIS) keeps feeding from the DSP chain.
+		if uiMode != uiADSB && uiMode != uiMap {
+			if newRow := u.NewSpectrumRow(r.Tap(), r.RawTap()); newRow && ft8SlotMark {
+				u.MarkFT8Slot(time.Now().Format("2006-01-02 15:04:05"))
+				ft8SlotMark = false
+			}
 		}
 		snap := r.Snapshot()
 		status := snap.StatusText
