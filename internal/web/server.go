@@ -9,6 +9,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"sync"
@@ -48,13 +49,13 @@ type Server struct {
 	port    int
 	srv     *http.Server
 
-	radio    *radio.Radio
-	adsb     *adsb.Store
-	ais      *ais.Store
-	ft8Log   []FT8Line
-	aisLog   []AISLine
-	logMu    sync.Mutex
-	upSince  time.Time
+	radio   *radio.Radio
+	adsb    *adsb.Store
+	ais     *ais.Store
+	ft8Log  []FT8Line
+	aisLog  []AISLine
+	logMu   sync.Mutex
+	upSince time.Time
 }
 
 // New builds a (not yet listening) server.
@@ -134,6 +135,7 @@ func (s *Server) startLocked() {
 	mux.HandleFunc("/api/ft8", s.handleFT8)
 	mux.HandleFunc("/api/ais", s.handleAIS)
 	mux.HandleFunc("/api/targets", s.handleTargets)
+	mux.HandleFunc("/api/spec", s.handleSpec)
 	s.srv = &http.Server{Addr: fmt.Sprintf(":%d", s.port), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go s.srv.ListenAndServe() //nolint:errcheck // listener errors surface as "unreachable" in the UI
 	fmt.Fprintf(os.Stderr, "web: server listening on :%d\n", s.port)
@@ -161,28 +163,28 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 
 // state is the full control surface the page renders.
 type state struct {
-	FreqHz   int64    `json:"freqHz"`
-	LOHz     int64    `json:"loHz"`
-	Mode     string   `json:"mode"`
-	Modes    []string `json:"modes"`
-	GainDb   float64  `json:"gainDb"`
-	AGC      bool     `json:"agc"`
-	Vol      float64  `json:"vol"`
-	SqlDb    float64  `json:"sqlDb"`
-	BwHz     float64  `json:"bwHz"`
-	Bws      []float64 `json:"bws"`
-	Ppm      int      `json:"ppm"`
-	PpmOff   bool     `json:"ppmOff"`
-	FT8      bool     `json:"ft8"`
-	AISRF    bool     `json:"aisrf"`
-	Connected bool    `json:"connected"`
-	Host     string   `json:"host"`
-	CPU      float64  `json:"cpu"`
-	MEM      float64  `json:"mem"`
-	BAT      int      `json:"bat"`
-	Planes   int      `json:"planes"`
-	Ships    int      `json:"ships"`
-	UpSecs   int      `json:"upSecs"`
+	FreqHz    int64     `json:"freqHz"`
+	LOHz      int64     `json:"loHz"`
+	Mode      string    `json:"mode"`
+	Modes     []string  `json:"modes"`
+	GainDb    float64   `json:"gainDb"`
+	AGC       bool      `json:"agc"`
+	Vol       float64   `json:"vol"`
+	SqlDb     float64   `json:"sqlDb"`
+	BwHz      float64   `json:"bwHz"`
+	Bws       []float64 `json:"bws"`
+	Ppm       int       `json:"ppm"`
+	PpmOff    bool      `json:"ppmOff"`
+	FT8       bool      `json:"ft8"`
+	AISRF     bool      `json:"aisrf"`
+	Connected bool      `json:"connected"`
+	Host      string    `json:"host"`
+	CPU       float64   `json:"cpu"`
+	MEM       float64   `json:"mem"`
+	BAT       int       `json:"bat"`
+	Planes    int       `json:"planes"`
+	Ships     int       `json:"ships"`
+	UpSecs    int       `json:"upSecs"`
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
@@ -315,6 +317,69 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 		out = append(out, target{Kind: "ship", ID: sh.MMSI, Call: call, Lat: sh.Lat, Lon: sh.Lon, HasPos: sh.HasPos, Speed: sh.SogKt, Track: int(sh.CogDeg), AgeSec: now.Sub(sh.LastSeen).Seconds()})
 	}
 	writeJSON(w, out)
+}
+
+// spec is one FFT frame of the full IF2 window (centred on the LO),
+// downsampled to NBins dB values for the browser waterfall.
+type spec struct {
+	CentreHz int64   `json:"centreHz"`
+	SpanHz   float64 `json:"spanHz"`
+	Bins     []int16 `json:"bins"` // dB*10, clamped
+	ListenHz int64   `json:"listenHz"`
+}
+
+const specFFT = 4096
+const specBins = 512
+
+func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
+	tap := s.radio.Tap()
+	if tap == nil {
+		http.Error(w, "no tap", http.StatusServiceUnavailable)
+		return
+	}
+	buf := make([]complex128, specFFT)
+	gen := tap.SnapshotN(buf)
+	if gen == 0 {
+		writeJSON(w, spec{})
+		return
+	}
+	re := make([]float64, specFFT)
+	im := make([]float64, specFFT)
+	for i, z := range buf {
+		re[i], im[i] = real(z), imag(z)
+	}
+	dsp.FFT(re, im)
+	// Power per bin, fftshifted so index 0 = lowest frequency.
+	pow := make([]float64, specFFT)
+	for i := 0; i < specFFT; i++ {
+		k := (i + specFFT/2) % specFFT
+		pow[i] = re[k]*re[k] + im[k]*im[k]
+	}
+	bins := make([]int16, specBins)
+	per := specFFT / specBins
+	for b := 0; b < specBins; b++ {
+		mx := 0.0
+		for k := 0; k < per; k++ {
+			if pow[b*per+k] > mx {
+				mx = pow[b*per+k]
+			}
+		}
+		db := 10 * math.Log10(mx/float64(specFFT*specFFT)+1e-12)
+		v := int(db * 10)
+		if v < -1200 {
+			v = -1200
+		}
+		if v > 0 {
+			v = 0
+		}
+		bins[b] = int16(v)
+	}
+	writeJSON(w, spec{
+		CentreHz: s.radio.LO(),
+		SpanHz:   float64(dsp.IF2Rate),
+		Bins:     bins,
+		ListenHz: s.radio.Freq(),
+	})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

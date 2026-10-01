@@ -82,6 +82,12 @@ tr:hover td { background:#16281e; }
   </section>
   <section>
     <div class="card">
+      <h2>Spectrum <span id="specinfo" style="color:var(--dim);text-transform:none;letter-spacing:0"></span></h2>
+      <canvas id="spc" width="512" height="110" style="width:100%;height:110px;cursor:crosshair"></canvas>
+      <canvas id="wf" width="512" height="240" style="width:100%;height:240px;cursor:crosshair;margin-top:4px"></canvas>
+      <div class="row" style="margin-top:6px"><label>คลิกกราฟ/น้ำตก = จูน</label><span class="val" id="clickhz" style="color:var(--dim)"></span></div>
+    </div>
+    <div class="card" style="margin-top:12px">
       <div class="tabs">
         <button id="tab-ft8" class="on">FT8</button>
         <button id="tab-ais">AIS</button>
@@ -182,6 +188,64 @@ for (const t of ['ft8','ais','tgt']) {
     poll();
   };
 }
+// ---- spectrum + waterfall (phase 2) ----
+const spc = $('spc'), wf = $('wf');
+const sctx = spc.getContext('2d'), wctx = wf.getContext('2d');
+wctx.fillStyle = '#000'; wctx.fillRect(0, 0, wf.width, wf.height);
+let specState = null;
+function dbColor(db) { // -120..0 dB → phosphor-ish ramp
+  const t = Math.max(0, Math.min(1, (db + 120) / 120));
+  if (t < 0.25) return `rgb(0,0,${Math.round(t*4*140)})`;
+  if (t < 0.5)  return `rgb(0,${Math.round((t-0.25)*4*200)},${Math.round(140-(t-0.25)*4*60)})`;
+  if (t < 0.75) return `rgb(${Math.round((t-0.5)*4*255)},200,${Math.round(80-(t-0.5)*4*80)})`;
+  return `rgb(255,${Math.round(200+(t-0.75)*4*55)},0)`;
+}
+async function specPoll() {
+  try {
+    const d = await api('/api/spec');
+    if (!d.bins || !d.bins.length) return;
+    specState = d;
+    const n = d.bins.length;
+    // waterfall: scroll down one row, paint newest at top
+    wctx.drawImage(wf, 0, 1);
+    for (let x = 0; x < wf.width; x++) {
+      const b = d.bins[Math.floor(x / wf.width * n)];
+      wctx.fillStyle = dbColor(b / 10);
+      wctx.fillRect(x, 0, 1, 1);
+    }
+    // spectrum line
+    sctx.fillStyle = '#0b1410'; sctx.fillRect(0, 0, spc.width, spc.height);
+    sctx.beginPath();
+    for (let x = 0; x < spc.width; x++) {
+      const db = d.bins[Math.floor(x / spc.width * n)] / 10;
+      const y = spc.height - Math.max(0, Math.min(1, (db + 120) / 120)) * (spc.height - 4) - 2;
+      x === 0 ? sctx.moveTo(x, y) : sctx.lineTo(x, y);
+    }
+    sctx.strokeStyle = '#35e08a'; sctx.stroke();
+    // listening marker on both canvases
+    const lx = (d.listenHz - (d.centreHz - d.spanHz / 2)) / d.spanHz * spc.width;
+    sctx.strokeStyle = '#ffd166'; sctx.beginPath(); sctx.moveTo(lx, 0); sctx.lineTo(lx, spc.height); sctx.stroke();
+    wctx.strokeStyle = '#ffd166'; wctx.beginPath(); wctx.moveTo(lx, 0); wctx.lineTo(lx, 6); wctx.stroke();
+    $('specinfo').textContent = (d.centreHz/1e6).toFixed(4) + ' MHz ±' + (d.spanHz/2000).toFixed(0) + ' kHz';
+  } catch (e) {}
+}
+function canvasFreq(ev, cv) {
+  if (!specState) return null;
+  const r = cv.getBoundingClientRect();
+  const x = (ev.clientX - r.left) / r.width;
+  return specState.centreHz - specState.spanHz / 2 + x * specState.spanHz;
+}
+for (const cv of [spc, wf]) {
+  cv.onclick = ev => {
+    const hz = canvasFreq(ev, cv);
+    if (hz) { cmd({cmd:'freq', hz: Math.round(hz)}); $('clickhz').textContent = 'จูน → ' + (hz/1e6).toFixed(4) + ' MHz'; }
+  };
+  cv.onmousemove = ev => {
+    const hz = canvasFreq(ev, cv);
+    if (hz) $('clickhz').textContent = (hz/1e6).toFixed(4) + ' MHz';
+  };
+}
+specPoll(); setInterval(specPoll, 120);
 poll(); setInterval(poll, 1500);
 </script>
 </body>
