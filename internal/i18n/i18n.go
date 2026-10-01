@@ -88,7 +88,7 @@ var strings = map[string][2]string{
 	"map_title":          {"แผนที่โลก FT8 - 10 นาที", "FT8 World Map - 10min"},
 	"map_hint":           {"ซ้าย/ขวา เลือกสถานี · A ข้อมูล · B ปิด", "L/R station  A info  B close"},
 	"map_style_hint":     {"L1/R1 แผนที่ · L2/R2 สี", "L1/R1 map style  L2/R2 colour"},
-	"radar_hint":         {"L1/R1 ระยะ · L2/R2 แผนที่ · A/X ป้าย/เป้า · B ปิด", "L1/R1 range  L2/R2 map  A/X labels/targets  B close"},
+	"radar_hint":         {"L1/R1 ระยะ · L2/R2 แผนที่ · A/X/Y ป้าย/เป้า/ชื่อ · B ปิด", "L1/R1 range  L2/R2 map  A/X/Y labels/targets/name  B close"},
 	"radar_count":        {"%d เครื่องบิน", "%d aircraft"},
 	"radar_count_ships":  {"  %d เรือ", "  %d ships"},
 	"radar_count_hidden": {"  (+%d นอกระยะ)", "  (+%d beyond range)"},
