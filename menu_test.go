@@ -37,7 +37,7 @@ func TestRootRowsOpenMatchingPages(t *testing.T) {
 		{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
 		{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
 		{menuBM},
-		{menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate, menuWeb, menuWebPort},
+		{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 	}
 	for i, w := range want {
 		got := pageItems[pageRoot+1+i]
