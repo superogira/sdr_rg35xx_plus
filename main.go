@@ -626,7 +626,7 @@ func main() {
 	// D-pad map panning on the radar screen (screen px; 0,0 = receiver
 	// centred). Reset on entry, layer or range change; START recentres.
 	panX, panY := 0, 0
-	radarSel := -1 // -1 = off; otherwise index into the DRAWN blips
+	radarSel := &ui.RadarSel{} // target selector, anchored by ID
 	// Radar view toggles: label visibility (A) and which targets show (X).
 	radarLabelMode := 0
 	if v, ok := cfg["radarlabel"]; ok {
@@ -1470,7 +1470,8 @@ func main() {
 			uiMode = uiHostEdit
 		case menuADSBRadar:
 			panX, panY = 0, 0
-			radarSel = -1
+			radarSel.On = false
+			radarSel.ID = ""
 			uiMode = uiADSB
 		case menuAISRF:
 			on := !r.AISRFEnabled()
@@ -1786,26 +1787,26 @@ func main() {
 				cfg["adsblayer"] = fmt.Sprintf("%d", adsbLayerIdx)
 				adsbFreeMosaics()
 			case input.Up:
-				if radarSel >= 0 {
-					radarSel--
+				if radarSel.On {
+					radarSel.Idx--
 				} else {
 					panY -= 80
 				}
 			case input.Down:
-				if radarSel >= 0 {
-					radarSel++
+				if radarSel.On {
+					radarSel.Idx++
 				} else {
 					panY += 80
 				}
 			case input.Left:
-				if radarSel >= 0 {
-					radarSel--
+				if radarSel.On {
+					radarSel.Idx--
 				} else {
 					panX -= 80
 				}
 			case input.Right:
-				if radarSel >= 0 {
-					radarSel++
+				if radarSel.On {
+					radarSel.Idx++
 				} else {
 					panX += 80
 				}
@@ -1825,10 +1826,12 @@ func main() {
 				// Toggle the target selector: the d-pad then walks the
 				// drawn blips and a detail panel opens on the opposite
 				// half of the screen.
-				if radarSel < 0 {
-					radarSel = 0
+				if radarSel.On {
+					radarSel.On = false
 				} else {
-					radarSel = -1
+					radarSel.On = true
+					radarSel.Idx = 0
+					radarSel.ID = "" // anchor at draw time
 				}
 			case input.Start:
 				panX, panY = 0, 0 // recentre on the receiver
@@ -3236,11 +3239,7 @@ func main() {
 			if hostLbl == "" {
 				hostLbl = "(" + i18n.T("off") + ")"
 			}
-			drawn := u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarLabelMode, panX, panY, mapOffX, mapOffY, sysinfo.SensorSnapshot().BattPct, radarSel)
-			if n := drawn; radarSel >= 0 && n > 0 {
-				radarSel %= n
-			}
-			_ = drawn
+			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarLabelMode, panX, panY, mapOffX, mapOffY, sysinfo.SensorSnapshot().BattPct, radarSel)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
