@@ -280,9 +280,12 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			if y < 60 {
 				ty = y + 14
 			}
-			// Unconditional: the chip also dims any older label this one
-			// lands on (labels sort oldest-first, newest on top).
-			u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
+			// In full mode the chip keeps the text readable over the map
+			// (and dims older labels this one lands on); flag-only mode
+			// leaves the bare flag with no box.
+			if labelMode == LabelFlagText {
+				u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
+			}
 			if labelMode == LabelFlagText {
 				lcol := color.RGBA{180, 255, 255, 255}
 				if b.AtoN {
@@ -360,9 +363,12 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		if y < 60 {
 			ty = y + 14
 		}
-		// Unconditional: the chip also dims any older label this one
-		// lands on (labels sort oldest-first, newest on top).
-		u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
+		// In full mode the chip keeps the text readable over the map
+		// (and dims older labels this one lands on); flag-only mode
+		// leaves the bare flag with no box.
+		if labelMode == LabelFlagText {
+			u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
+		}
 		if labelMode == LabelFlagText {
 			tf.DrawString(u.img, altitudeColor(b.AltFt), tx, ty, label)
 		}
