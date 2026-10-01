@@ -18,7 +18,7 @@ func TestRadarNewestLabelOnTop(t *testing.T) {
 		{Call: "OLD1", ICAO: "880001", AltFt: 0, HasPos: true, MercX: -50, MercY: -50, Seen: time.Now().Add(-30 * time.Second)},
 		{Call: "NEW9", ICAO: "880002", AltFt: 40000, SpdKt: 400, HasPos: true, MercX: -50, MercY: -50, Seen: time.Now()},
 	}
-	u.DrawRadar(blips, 100, "x:1", true, 13.5, 100.5, 12, nil, "", "", nil, t.TempDir(), LabelFlagText)
+	u.DrawRadar(blips, 100, "x:1", true, 13.5, 100.5, 12, nil, "", "", nil, t.TempDir(), LabelFlagText, 0, 0, 0, 0)
 	nNew, nOld := 0, 0
 	for y := 0; y < u.H; y++ {
 		for x := 0; x < u.W; x++ {
@@ -56,7 +56,7 @@ func TestRadarOutOfRangeHidden(t *testing.T) {
 	u := New(640, 480)
 	mk := func(blips []RadarBlip) *image.RGBA {
 		img := u.Frame(FrameStats{FreqHz: 1090000000, Mode: "AM"})
-		u.DrawRadar(blips, 100, "x:1", true, 13.5, 100.5, 12, nil, "", "", nil, t.TempDir(), LabelFlagText)
+		u.DrawRadar(blips, 100, "x:1", true, 13.5, 100.5, 12, nil, "", "", nil, t.TempDir(), LabelFlagText, 0, 0, 0, 0)
 		return img
 	}
 	far := []RadarBlip{

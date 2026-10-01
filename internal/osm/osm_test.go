@@ -100,3 +100,13 @@ func TestMosaicFromDiskOnlySimulatesOfflineRestart(t *testing.T) {
 		t.Fatalf("%d px not served from disk (gaps or network miss)", nonRed)
 	}
 }
+
+func TestMercatorRoundTrip(t *testing.T) {
+	for _, c := range [][2]float64{{13.5955, 100.56178}, {0, 0}, {-45.2, 172.9}, {51.5, -0.12}} {
+		x, y := MercatorPx(c[0], c[1], 10)
+		lat, lon := MercatorInv(x, y, 10)
+		if math.Abs(lat-c[0]) > 1e-6 || math.Abs(lon-c[1]) > 1e-6 {
+			t.Fatalf("round trip (%v,%v) -> (%v,%v)", c[0], c[1], lat, lon)
+		}
+	}
+}

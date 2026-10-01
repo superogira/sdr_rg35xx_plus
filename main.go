@@ -615,7 +615,13 @@ func main() {
 	osmCache := osm.NewCache(filepath.Join(filepath.Dir(mustExe()), "osmcache"))
 	adsbMosaic := make([][]*image.RGBA, len(osm.Layers))
 	adsbFetching := make([][]bool, len(osm.Layers))
+	// World-px centre each mosaic was stitched at — panning refetches
+	// once the view drifts more than ~150 px from it.
+	adsbMosaicCtr := make([][][2]float64, len(osm.Layers))
 	mapCacheClearedAt := time.Time{} // row shows "cleared" for a beat after
+	// D-pad map panning on the radar screen (screen px; 0,0 = receiver
+	// centred). Reset on entry, layer or range change; SELECT recentres.
+	panX, panY := 0, 0
 	// Radar view toggles: label visibility (A) and which targets show (X).
 	radarLabelMode := 0
 	if v, ok := cfg["radarlabel"]; ok {
@@ -632,6 +638,17 @@ func main() {
 	for i := range adsbMosaic {
 		adsbMosaic[i] = make([]*image.RGBA, len(adsbRanges))
 		adsbFetching[i] = make([]bool, len(adsbRanges))
+		adsbMosaicCtr[i] = make([][2]float64, len(adsbRanges))
+	}
+	// The 1024×768 stitched mosaics are far too big to keep for every
+	// layer×range combination (~120 MB) — switching frees all but the
+	// one in flight (tiles stay disk-cached, so a return visit is fast).
+	adsbFreeMosaics := func() {
+		for i := range adsbMosaic {
+			for j := range adsbMosaic[i] {
+				adsbMosaic[i][j] = nil
+			}
+		}
 	}
 	// AIS: NMEA ship feed from aiscatcher ("off" = feed disabled, RF
 	// decode only).
@@ -1447,6 +1464,7 @@ func main() {
 			hostKbR, hostKbC = 0, 0
 			uiMode = uiHostEdit
 		case menuADSBRadar:
+			panX, panY = 0, 0
 			uiMode = uiADSB
 		case menuAISRF:
 			on := !r.AISRFEnabled()
@@ -1732,18 +1750,34 @@ func main() {
 		case uiADSB:
 			// Radar: L2/R2 cycle the map layer, L1/R1 the range
 			// (swapped per user request — zoom on the shoulder the
-			// thumb rests on), B/Start back.
+			// thumb rests on), the d-pad pans the map, B/Start back.
 			switch b {
 			case input.L1:
 				adsbRangeIdx = (adsbRangeIdx + len(adsbRanges) - 1) % len(adsbRanges)
+				adsbFreeMosaics()
+				panX, panY = 0, 0
 			case input.R1:
 				adsbRangeIdx = (adsbRangeIdx + 1) % len(adsbRanges)
+				adsbFreeMosaics()
+				panX, panY = 0, 0
 			case input.L2:
 				adsbLayerIdx = (adsbLayerIdx + len(osm.Layers) - 1) % len(osm.Layers)
 				cfg["adsblayer"] = fmt.Sprintf("%d", adsbLayerIdx)
+				adsbFreeMosaics()
+				panX, panY = 0, 0
 			case input.R2:
 				adsbLayerIdx = (adsbLayerIdx + 1) % len(osm.Layers)
 				cfg["adsblayer"] = fmt.Sprintf("%d", adsbLayerIdx)
+				adsbFreeMosaics()
+				panX, panY = 0, 0
+			case input.Up:
+				panY -= 80
+			case input.Down:
+				panY += 80
+			case input.Left:
+				panX -= 80
+			case input.Right:
+				panX += 80
 			case input.A:
 				// Flag+text → flag only → bare targets → both.
 				radarLabelMode = (radarLabelMode + 1) % 3
@@ -1752,7 +1786,9 @@ func main() {
 				// Both → planes only → ships only.
 				radarTargets = (radarTargets + 1) % 3
 				cfg["radartargets"] = fmt.Sprintf("%d", radarTargets)
-			case input.B, input.Start, input.Select:
+			case input.Select:
+				panX, panY = 0, 0 // recentre on the receiver
+			case input.B, input.Start:
 				uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuADSBRadar)
 			}
 		case uiRTTY:
@@ -3076,15 +3112,28 @@ func main() {
 			}
 			_ = aisConnected // TODO: status line
 			z, L := adsbRangeIdx, adsbLayerIdx
-			if !osm.Layers[L].NoFetch && adsbMosaic[L][z] == nil && !adsbFetching[L][z] {
+			zoomCur := adsbZooms[z]
+			// View centre = receiver offset by the pan (screen px at
+			// this zoom are world px).
+			rxW, ryW := osm.MercatorPx(adsbLat, adsbLon, zoomCur)
+			vx, vy := rxW+float64(panX), ryW+float64(panY)
+			ctr := adsbMosaicCtr[L][z]
+			drift := adsbMosaic[L][z] == nil || math.Hypot(vx-ctr[0], vy-ctr[1]) > 120
+			if !osm.Layers[L].NoFetch && drift && !adsbFetching[L][z] {
 				adsbFetching[L][z] = true
-				latC, lonC, zoom, layer := adsbLat, adsbLon, adsbZooms[z], L
+				latC, lonC := osm.MercatorInv(vx, vy, zoomCur)
+				layer := L
 				go func() {
-					m := osmCache.Mosaic(layer, latC, lonC, zoom, 640, 480)
+					// Larger than the screen so small pans stay covered
+					// until the refetched mosaic lands.
+					m := osmCache.Mosaic(layer, latC, lonC, zoomCur, 1024, 768)
 					adsbMosaic[layer][z] = m
+					adsbMosaicCtr[layer][z] = [2]float64{vx, vy}
 					adsbFetching[layer][z] = false
 				}()
 			}
+			// Offset of the screen inside the (larger) mosaic.
+			mapOffX, mapOffY := int(vx-ctr[0])+192, int(vy-ctr[1])+144
 			mapName, mapAttr := "", ""
 			if !osm.Layers[L].NoFetch && adsbMosaic[L][z] != nil {
 				mapName, mapAttr = osm.Layers[L].Name, osm.Layers[L].Attr+" · flags © country-flag-icons (MIT)"
@@ -3114,7 +3163,7 @@ func main() {
 			if hostLbl == "" {
 				hostLbl = "(" + i18n.T("off") + ")"
 			}
-			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarLabelMode)
+			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarLabelMode, panX, panY, mapOffX, mapOffY)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)

@@ -81,23 +81,39 @@ const (
 
 // DrawRadar renders the ADS-B radar. Targets beyond rangeKm are not
 // drawn at all — they appear when the user zooms out to their range.
-func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string, labelMode int) {
+func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string, labelMode int, panX, panY int, mapOffX, mapOffY int) {
 	// Phosphor palette.
 	bg := color.RGBA{2, 10, 4, 255}
 	dim := color.RGBA{0, 110, 55, 255}
 	green := color.RGBA{0, 230, 120, 255}
 	bright := color.RGBA{140, 255, 180, 255}
 	if basemap != nil {
+		b := basemap.Bounds()
+		bw, bh := b.Dx(), b.Dy()
 		for y := 0; y < u.H; y++ {
-			src := y * basemap.Stride
+			sy := y + mapOffY
 			dst := y * u.img.Stride
-			copy(u.img.Pix[dst:dst+u.W*4], basemap.Pix[src:src+u.W*4])
+			if sy < 0 || sy >= bh {
+				continue
+			}
+			row := basemap.Pix[sy*basemap.Stride:]
+			for x := 0; x < u.W; x++ {
+				sx := x + mapOffX
+				if sx < 0 || sx >= bw {
+					continue
+				}
+				copy(u.img.Pix[dst+x*4:dst+x*4+4], row[sx*4:sx*4+4])
+			}
 		}
 	} else {
 		u.fillBlend(0, 0, u.W, u.H, bg.R, bg.G, bg.B, 255)
 	}
 
 	cx, cy := u.W/2, u.H/2+6
+	// D-pad panning: the whole scene (rings, receiver, targets) shifts
+	// so the receiver leaves centre and the panned-to area shows.
+	cx -= panX
+	cy -= panY
 	maxR := float64(u.H)/2 - 46
 	if float64(u.W)/2-16 < maxR {
 		maxR = float64(u.W)/2 - 16
@@ -174,18 +190,26 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		var x, y int
 		if merc != nil {
 			dx, dy := merc.project(b.MercX, b.MercY)
-			if math.Hypot(float64(dx), float64(dy)) > maxR {
-				continue // beyond the selected range: wait for zoom-out
-			}
 			x, y = cx+dx, cy+dy
+			if panX == 0 && panY == 0 {
+				if math.Hypot(float64(dx), float64(dy)) > maxR {
+					continue // centred view: beyond the selected range stays hidden
+				}
+			} else if x < -140 || x > u.W+140 || y < -20 || y > u.H+20 {
+				continue // panned: keep only what the screen can show
+			}
 		} else {
 			r := b.DistKm / rangeKm * maxR
-			if r > maxR {
-				continue // beyond the selected range: wait for zoom-out
-			}
 			ang := b.BrngDeg * 3.14159265 / 180
 			x = cx + int(r*math.Sin(ang))
 			y = cy - int(r*math.Cos(ang))
+			if panX == 0 && panY == 0 {
+				if r > maxR {
+					continue
+				}
+			} else if x < -140 || x > u.W+140 || y < -20 || y > u.H+20 {
+				continue
+			}
 		}
 		col := green
 		// Flown track: breadcrumbs every 5 s of flight within a
