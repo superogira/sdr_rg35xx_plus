@@ -16,7 +16,7 @@ func TestConfigKeysRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	ini := filepath.Join(dir, "sdrg35xx.ini")
 	body := strings.Join([]string{
-		"host=127.0.0.1:1",
+		"host=off",
 		"adsbhost=off",
 		"adsblat=13.70000",
 		"adsblon=100.70000",

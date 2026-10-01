@@ -249,6 +249,24 @@ func (r *Radio) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		r.mu.Lock()
+		disabled := r.Host == ""
+		r.mu.Unlock()
+		if disabled {
+			// Radio feed off (host list "(ปิดใช้งาน)"): no dialing, no
+			// error state — just idle until a host is picked again.
+			r.mu.Lock()
+			r.state = stateDisconnected
+			r.lastErr = ""
+			r.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+			backoff = 5 * time.Second
+			continue
+		}
 		if err := r.session(ctx); err != nil {
 			wait := backoff + time.Duration(rand.Int63n(int64(backoff)/5))
 			r.mu.Lock()
@@ -829,6 +847,9 @@ func (r *Radio) SetPpm(v int) {
 	}
 }
 
+// SetHost retargets the rtl_tcp connection. An empty host disables the
+// radio entirely (no IQ, no decoding) — used by the host list's
+// "(ปิดใช้งาน)" row when the app is only wanted as an ADS-B/AIS viewer.
 func (r *Radio) SetHost(host string) {
 	r.mu.Lock()
 	if r.Host == host {
