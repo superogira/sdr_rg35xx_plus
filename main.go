@@ -24,6 +24,7 @@ import (
 	"image"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -420,7 +421,7 @@ var pageItems = [][]int{
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
 	{menuBM},
-	{menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate, menuWeb, menuWebPort},
+	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 }
 
 // The flat 16-row menu outgrew the screen, so it is now subpages
@@ -2787,7 +2788,7 @@ func main() {
 					func() ui.MenuItem {
 						v := i18n.T("off")
 						if webSrv.Enabled() {
-							v = ":" + fmt.Sprintf("%d", webSrv.Port())
+							v = fmt.Sprintf("http://%s:%d", localIP(), webSrv.Port())
 						}
 						return ui.MenuItem{Label: i18n.T("m_web"), Value: v}
 					}(),
@@ -3371,6 +3372,21 @@ func mustExe() string {
 		return "."
 	}
 	return exe
+}
+
+// localIP returns the first non-loopback IPv4 address so the System
+// menu can show the exact URL to open on a phone/laptop.
+func localIP() string {
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, a := range addrs {
+			if ipn, ok := a.(*net.IPNet); ok && !ipn.IP.IsLoopback() {
+				if v4 := ipn.IP.To4(); v4 != nil {
+					return v4.String()
+				}
+			}
+		}
+	}
+	return "0.0.0.0"
 }
 
 func configFile(name string) string {
