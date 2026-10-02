@@ -440,16 +440,9 @@ function drawChanBw(ctx, w, h) {
 }
 function drawOverlays() {
   if (!specState) return;
-  const warn = themeCol('--warn', '#ffd166'), dimc = themeCol('--dim', '#6f9c82');
-  const lx = viewXofHz(specState.listenHz);
+  const dimc = themeCol('--dim', '#6f9c82');
   soctx.clearRect(0, 0, sov.width, sov.height);
   drawChanBw(soctx, sov.width, sov.height);
-  if (lx >= 0 && lx <= sov.width) {
-    soctx.strokeStyle = warn; soctx.lineWidth = 1.5; soctx.setLineDash([10, 5]);
-    soctx.beginPath(); soctx.moveTo(lx, 0); soctx.lineTo(lx, sov.height); soctx.stroke();
-    soctx.setLineDash([]); soctx.lineWidth = 2;
-    soctx.beginPath(); soctx.moveTo(lx - 8, 0); soctx.lineTo(lx, 7); soctx.lineTo(lx + 8, 0); soctx.stroke();
-  }
   const step = niceStep(viewBw() / 8);
   soctx.font = '10px system-ui';
   for (let hz = Math.ceil(viewLow() / step) * step; hz <= viewLow() + viewBw(); hz += step) {
@@ -462,11 +455,6 @@ function drawOverlays() {
   soctx.globalAlpha = 1;
   woctx.clearRect(0, 0, wov.width, wov.height);
   drawChanBw(woctx, wov.width, wov.height);
-  if (lx >= 0 && lx <= wov.width) {
-    woctx.strokeStyle = warn; woctx.lineWidth = 1.5; woctx.setLineDash([10, 5]);
-    woctx.beginPath(); woctx.moveTo(lx, 0); woctx.lineTo(lx, 14); woctx.stroke();
-    woctx.setLineDash([]);
-  }
   zoomBadge();
 }
 function niceStep(raw) {
