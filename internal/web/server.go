@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -52,18 +53,20 @@ type Server struct {
 	port    int
 	srv     *http.Server
 
-	radio   *radio.Radio
-	adsb    *adsb.Store
-	ais     *ais.Store
-	tiles   *osm.Cache
-	rx      [2]float64
-	audio   *audioHub
-	updMsg  func() string
-	updRun  func()
-	ft8Log  []FT8Line
-	aisLog  []AISLine
-	logMu   sync.Mutex
-	upSince time.Time
+	radio    *radio.Radio
+	adsb     *adsb.Store
+	ais      *ais.Store
+	tiles    *osm.Cache
+	rx       [2]float64
+	audio    *audioHub
+	noise    float64
+	rebootAt time.Time
+	updMsg   func() string
+	updRun   func()
+	ft8Log   []FT8Line
+	aisLog   []AISLine
+	logMu    sync.Mutex
+	upSince  time.Time
 }
 
 // New builds a (not yet listening) server.
@@ -205,6 +208,7 @@ type state struct {
 	FT8       bool      `json:"ft8"`
 	AISRF     bool      `json:"aisrf"`
 	LocalMute bool      `json:"localmute"`
+	Reboot    bool      `json:"reboot"`
 	IQRate    int       `json:"iqRate"`
 	Rates     []int     `json:"rates"`
 	Connected bool      `json:"connected"`
@@ -229,6 +233,14 @@ func (s *Server) updateMsg() string {
 	return s.updMsg()
 }
 
+// rebooting reports the window right after a web-triggered update in
+// which the process re-execs — the page reloads once it ends.
+func (s *Server) rebooting() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Since(s.rebootAt) < 90*time.Second
+}
+
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	radio := s.radio
 	snap := radio.Snapshot()
@@ -241,6 +253,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Ppm: radio.Ppm(), PpmOff: radio.PpmOff(),
 		FT8: radio.FT8Enabled(), AISRF: radio.AISRFEnabled(), LocalMute: radio.LocalMuted(),
 		IQRate: radio.IQRate(), Rates: dsp.SampleRates,
+		Reboot:    s.rebooting(),
 		Connected: snap.Connected, Host: radio.Hostname(),
 		CPU: cpu, MEM: mem, BAT: sens.BattPct,
 		Planes: s.adsb.CountLive(), Ships: len(s.ais.Ships()),
@@ -319,6 +332,7 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 	case "update":
 		s.mu.Lock()
 		run := s.updRun
+		s.rebootAt = time.Now()
 		s.mu.Unlock()
 		if run != nil {
 			go run()
@@ -388,6 +402,7 @@ type spec struct {
 	ListenHz int64   `json:"listenHz"`
 	BwHz     float64 `json:"bwHz"`
 	Mode     string  `json:"mode"`
+	Reboot   bool    `json:"reboot"`
 }
 
 const specFFT = 4096
@@ -419,6 +434,15 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 		k := (i + specFFT/2) % specFFT
 		pow[i] = re[k]*re[k] + im[k]*im[k]
 	}
+	// Device-style mapping: dB relative to a tracked noise floor (25th
+	// percentile, EMA 0.05 — same recipe as ui.NewSpectrumRow), so the
+	// palette matches the handheld waterfall exactly. Bin value is
+	// t*620 (0..620) instead of absolute dB*10.
+	sortedPow := append([]float64(nil), pow...)
+	slices.Sort(sortedPow)
+	noise := sortedPow[len(sortedPow)/4]
+	s.noise += 0.05 * (noise - s.noise)
+	const wfMinDb, wfMaxDb = 6.0, 62.0
 	bins := make([]int16, specBins)
 	per := specFFT / specBins
 	for b := 0; b < specBins; b++ {
@@ -428,15 +452,15 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 				mx = pow[b*per+k]
 			}
 		}
-		db := 10 * math.Log10(mx/float64(specFFT*specFFT)+1e-12)
-		v := int(db * 10)
-		if v < -1200 {
-			v = -1200
+		db := 20*math.Log10(mx+1e-12) - s.noise - wfMinDb
+		t := db / wfMaxDb
+		if t < 0 {
+			t = 0
 		}
-		if v > 0 {
-			v = 0
+		if t > 1 {
+			t = 1
 		}
-		bins[b] = int16(v)
+		bins[b] = int16(t * 620)
 	}
 	writeJSON(w, spec{
 		CentreHz: s.radio.LO(),
@@ -445,6 +469,7 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 		ListenHz: s.radio.Freq(),
 		BwHz:     s.radio.Bandwidth(),
 		Mode:     s.radio.Mode().Name,
+		Reboot:   s.rebooting(),
 	})
 }
 
