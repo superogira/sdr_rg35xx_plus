@@ -245,6 +245,43 @@ func clampq(v float64) float64 {
 	return v
 }
 
+func TestSpectrumTapRingWrap(t *testing.T) {
+	tap := NewSpectrumTapN(8)
+	push := func(vals ...float64) {
+		b := make([]complex128, len(vals))
+		for i, v := range vals {
+			b[i] = complex(v, 0)
+		}
+		tap.Push(b)
+	}
+	// Partial fill: 3 of 5 requested — front zero-padded, newest last.
+	var d [5]complex128
+	tap.SnapshotN(d[:])
+	push(1, 2, 3)
+	tap.SnapshotN(d[:])
+	for i, want := range []float64{0, 0, 1, 2, 3} {
+		if real(d[i]) != want {
+			t.Fatalf("partial snap[%d]=%v, want %v (d=%v)", i, real(d[i]), want, d)
+		}
+	}
+	// Push past capacity: ring wraps, snapshot stays chronological.
+	push(4, 5, 6, 7, 8, 9) // total 9 > cap 8 → keeps 2..9
+	tap.SnapshotN(d[:])
+	for i, want := range []float64{5, 6, 7, 8, 9} {
+		if real(d[i]) != want {
+			t.Fatalf("wrap snap[%d]=%v, want %v (d=%v)", i, real(d[i]), want, d)
+		}
+	}
+	// Full-capacity snapshot of the same ring.
+	var full [8]complex128
+	tap.SnapshotN(full[:])
+	for i, want := range []float64{2, 3, 4, 5, 6, 7, 8, 9} {
+		if real(full[i]) != want {
+			t.Fatalf("full snap[%d]=%v, want %v", i, real(full[i]), want)
+		}
+	}
+}
+
 func TestSpectrumTap(t *testing.T) {
 	tap := NewSpectrumTap()
 	var snap [TapLen]complex128
