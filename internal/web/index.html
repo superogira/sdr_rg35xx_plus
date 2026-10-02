@@ -178,7 +178,8 @@ const $ = id => document.getElementById(id);
 // Theme: 'phosphor' (default) or 'light', remembered per browser.
 const THEMES = { phosphor: null, light: 'light', radio: 'radio' };
 function themeLabel(name) {
-  return name === 'phosphor' ? '☀️ ขาว' : name === 'light' ? '📻 วิทยุ' : '💡 สีเขียว';
+  // Show the NEXT theme the button will switch to.
+  return name === 'phosphor' ? '☀️ ขาว' : name === 'light' ? '📻 วิทยุ' : '💡 เขียว';
 }
 function applyTheme(name) {
   document.documentElement.dataset.theme = THEMES[name] || '';
@@ -191,8 +192,11 @@ function applyTheme(name) {
   applyTheme(t);
 }
 $('theme').onclick = () => {
-  const cur = document.documentElement.dataset.theme || 'phosphor';
-  const next = cur === '' ? 'light' : cur === 'light' ? 'radio' : 'phosphor';
+  // The phosphor theme stores dataset.theme as '' — read the label as
+  // the current theme instead of guessing from the empty string.
+  const cur = document.documentElement.dataset.theme === '' ? 'phosphor'
+    : document.documentElement.dataset.theme === 'light' ? 'light' : 'radio';
+  const next = cur === 'phosphor' ? 'light' : cur === 'light' ? 'radio' : 'phosphor';
   applyTheme(next);
   if (typeof wf !== 'undefined' && wctx) { wctx.fillStyle = wfBg(); wctx.fillRect(0, 0, wf.width, wf.height); }
 };
