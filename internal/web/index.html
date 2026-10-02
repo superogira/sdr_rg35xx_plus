@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SDRg35xx Web</title>
+<link rel="stylesheet" href="/static/leaflet.css">
+<script src="/static/leaflet.js"></script>
 <style>
 :root { --bg:#0b1410; --panel:#12211a; --ink:#c8f0d8; --dim:#6f9c82; --acc:#35e08a; --warn:#ffd166; }
 * { box-sizing:border-box; }
@@ -92,6 +94,11 @@ tr:hover td { background:#16281e; }
         <button id="tab-ft8" class="on">FT8</button>
         <button id="tab-ais">AIS</button>
         <button id="tab-tgt">Targets</button>
+        <button id="tab-map">Map</button>
+      </div>
+      <div id="pane-map" hidden><div id="map" style="height:420px;border-radius:8px;background:#0b1410"></div>
+        <div class="row" style="margin-top:6px"><label>ชั้นแผนที่</label><select id="mlayer"></select>
+          <span class="val" id="mattr" style="color:var(--dim);font-size:11px"></span></div>
       </div>
       <div id="pane-ft8"><table><thead><tr><th>เวลา</th><th>SNR</th><th>Hz</th><th>ข้อความ</th><th>ประเทศ/ระยะ</th></tr></thead><tbody id="ft8b"></tbody></table></div>
       <div id="pane-ais" hidden><table><thead><tr><th>เวลา</th><th>ch</th><th>dB</th><th>ข้อความ</th></tr></thead><tbody id="aisb"></tbody></table></div>
@@ -178,13 +185,15 @@ $('ppmoff').onclick = () => cmd({cmd:'ppmoff', on: !st.ppmOff});
 $('agc').onclick = () => cmd({cmd:'agc', on: !st.agc});
 $('ft8').onclick = () => cmd({cmd:'ft8', on: !st.ft8});
 $('aisrf').onclick = () => cmd({cmd:'aisrf', on: !st.aisrf});
-for (const t of ['ft8','ais','tgt']) {
+for (const t of ['ft8','ais','tgt','map']) {
   $('tab-'+t).onclick = () => {
     tab = t;
-    for (const o of ['ft8','ais','tgt']) {
+    for (const o of ['ft8','ais','tgt','map']) {
       $('tab-'+o).className = o===t ? 'on' : '';
       $('pane-'+o).hidden = o!==t;
     }
+    if (t === 'map' && st) initMap(st);
+    if (t === 'map' && map) setTimeout(() => map.invalidateSize(), 60);
     poll();
   };
 }
@@ -244,6 +253,45 @@ for (const cv of [spc, wf]) {
     const hz = canvasFreq(ev, cv);
     if (hz) $('clickhz').textContent = (hz/1e6).toFixed(4) + ' MHz';
   };
+}
+// ---- Leaflet map (phase 3) ----
+let map = null, mLayer = null, markers = {}, rxMark = null, layerIdx = 0, layers = [];
+async function initMap(st) {
+  if (map) return;
+  layers = await api('/api/layers');
+  $('mlayer').innerHTML = layers.map((l, i) => `<option value="${i}">${l.name}</option>`).join('');
+  $('mlayer').onchange = e => { layerIdx = +e.target.value; setTiles(); };
+  map = L.map('map', { zoomControl: true }).setView([st.rxLat, st.rxLon], 10);
+  setTiles();
+  rxMark = L.circleMarker([st.rxLat, st.rxLon], { radius: 6, color: '#35e08a', weight: 2, fill: false }).addTo(map).bindTooltip('RX');
+  setInterval(mapPoll, 2000);
+}
+function setTiles() {
+  if (mLayer) map.removeLayer(mLayer);
+  // Tiles come from the handheld itself: its disk cache serves first,
+  // the upstream tile server only when a tile was never seen.
+  mLayer = L.tileLayer(`/tiles/${layerIdx}/{z}/{x}/{y}`, { maxZoom: 18, attribution: layers[layerIdx].attr }).addTo(map);
+  $('mattr').textContent = layers[layerIdx].attr;
+}
+async function mapPoll() {
+  if (!map) return;
+  const rows = await api('/api/targets');
+  const seen = {};
+  for (const t of rows) {
+    seen[t.kind + t.id] = true;
+    const ll = [t.lat, t.lon];
+    let m = markers[t.kind + t.id];
+    const col = t.kind === 'plane' ? '#ffd166' : '#35e08a';
+    if (!t.hasPos) { if (m) { map.removeLayer(m); delete markers[t.kind + t.id]; } continue; }
+    if (!m) {
+      m = markers[t.kind + t.id] = L.circleMarker(ll, { radius: 5, color: col, weight: 2, fillColor: col, fillOpacity: 0.5 }).addTo(map);
+      m.bindTooltip(t.call, { direction: 'top' });
+    } else {
+      m.setLatLng(ll);
+    }
+    m.setStyle({ color: col });
+  }
+  for (const k in markers) if (!seen[k]) { map.removeLayer(markers[k]); delete markers[k]; }
 }
 specPoll(); setInterval(specPoll, 120);
 poll(); setInterval(poll, 1500);

@@ -709,7 +709,7 @@ func main() {
 			webPort = n
 		}
 	}
-	webSrv := web.New(r, adsbStore, aisStore, webPort)
+	webSrv := web.New(r, adsbStore, aisStore, webPort, osmCache, adsbLat, adsbLon)
 	if cfg["web"] == "on" {
 		webSrv.SetEnabled(true)
 	}
