@@ -726,17 +726,20 @@ func (r *Radio) AudioFilter() (hpHz, lpHz int) {
 // a mode that fights the monitor branch (and the listener gets the
 // conventional audio). A re-set of the SAME mode is allowed (internal
 // chain rebuilds depend on it).
-func (r *Radio) SetMode(mode dsp.Mode) {
+// SetMode switches the demod mode. It returns an i18n key
+// ("ft8_modelock"/"aisrf_modelock") when the change was rejected
+// because FT8/AIS RF holds the mode; callers may ignore the return.
+func (r *Radio) SetMode(mode dsp.Mode) string {
 	r.mu.Lock()
 	if r.ft8On && mode.Name != dsp.ModeUSB.Name && mode.Name != r.mode.Name {
 		r.mu.Unlock()
 		fmt.Fprintf(os.Stderr, "radio: mode change to %s ignored — FT8 locks USB\n", mode.Name)
-		return
+		return "ft8_modelock"
 	}
 	if r.aisRFOn && mode.Name != dsp.ModeNFM.Name && mode.Name != r.mode.Name {
 		r.mu.Unlock()
 		fmt.Fprintf(os.Stderr, "radio: mode change to %s ignored (AIS RF locks NFM)"+string(rune(10)), mode.Name)
-		return
+		return "aisrf_modelock"
 	}
 	r.mode = mode
 	r.chain = dsp.NewChain(mode, r.tap, r.rawTap)
@@ -764,6 +767,7 @@ func (r *Radio) SetMode(mode dsp.Mode) {
 	if out != nil {
 		out.SetInputRate(audioRate)
 	}
+	return ""
 }
 
 // CycleSquelch steps the NFM squelch threshold through useful dBFS

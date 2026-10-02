@@ -211,6 +211,8 @@ const STRINGS = {
     kind: 'ชนิด', name: 'ชื่อ/ทะเบียน', pos: 'พิกัด', altspd: 'สูง/เร็ว', dir: 'ทิศ', age: 'อายุ',
     clicktune: 'คลิกกราฟ/น้ำตก = จูน', mlayer: 'ชั้นแผนที่', webvol: 'เสียงเว็บ',
     rate: 'Rate', wfmin: 'น้ำตก ต่ำสุด', wfmax: 'น้ำตก สูงสุด',
+    ft8_modelock: 'FT8 ล็อกโหมด USB — ปิด FT8 ก่อนจึงเปลี่ยนโหมดได้',
+    aisrf_modelock: 'AIS RF ล็อกโหมด NFM — ปิด AIS RF ก่อนจึงเปลี่ยนโหมดได้',
     tune: 'จูน', mode: 'โหมด', gain: 'กำลังสัญญาณ', volume: 'ระดับเสียง', squelch: 'สเกลช', ppm: 'PPM',
     listenOn: '🔊 ฟัง', listenOff: '🔇 ฟัง', compat: ' (compat)',
     devOn: '🔈 เครื่อง', devOff: '🔇 เครื่อง',
@@ -227,6 +229,8 @@ const STRINGS = {
     kind: 'Kind', name: 'Name/reg', pos: 'Position', altspd: 'Alt/Spd', dir: 'Dir', age: 'Age',
     clicktune: 'Click graph/waterfall = tune', mlayer: 'Map layer', webvol: 'Web volume',
     rate: 'Rate', wfmin: 'WF min', wfmax: 'WF max',
+    ft8_modelock: 'FT8 locks USB — turn FT8 off to change mode',
+    aisrf_modelock: 'AIS RF locks NFM — turn AIS RF off to change mode',
     tune: 'Tune', mode: 'Mode', gain: 'Gain', volume: 'Volume', squelch: 'Squelch', ppm: 'PPM',
     listenOn: '🔊 Listen', listenOff: '🔇 Listen', compat: ' (compat)',
     devOn: '🔈 Device', devOff: '🔇 Device',
@@ -291,9 +295,17 @@ async function api(path, body) {
   const opt = body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {};
   const r = await fetch(path, opt);
   if (!r.ok) throw new Error(path + ' → ' + r.status);
-  return r.json();
+  const d = await r.json();
+  if (d && d.ok === false && d.err) throw new Error(d.err);
+  return d;
 }
-const cmd = c => api('/api/cmd', c).catch(e => { $('err').textContent = e.message; });
+let errTok = 0;
+function showErr(msg) {
+  const tok = ++errTok;
+  $('err').textContent = msg;
+  setTimeout(() => { if (tok === errTok) $('err').textContent = ''; }, 5000);
+}
+const cmd = c => api('/api/cmd', c).catch(e => showErr(STRINGS[lang][e.message] || e.message));
 
 function renderState(s) {
   st = s;
@@ -349,7 +361,7 @@ function renderState(s) {
 }
 
 async function poll() {
-  try { renderState(await api('/api/state')); $('err').textContent = ''; }
+  try { renderState(await api('/api/state')); }
   catch (e) { $('conn').textContent = STRINGS[lang].connFail; $('conn').className=''; }
   try {
     if (tab === 'ft8') {
@@ -845,7 +857,7 @@ function stopAudio() {
   $('listen').className = ''; $('listen').textContent = STRINGS[lang].listenOff;
   $('abuf').textContent = '';
 }
-$('listen').onclick = () => (audioOn ? stopAudio() : startAudio().catch(e => { $('err').textContent = 'audio: ' + e.message; stopAudio(); }));
+$('listen').onclick = () => (audioOn ? stopAudio() : startAudio().catch(e => { showErr('audio: ' + e.message); stopAudio(); }));
 $('lmute').onclick = () => cmd({cmd:'localmute', on: !st.localmute});
 $('upd').onclick = () => cmd({cmd:'update'});
 $('wgain').oninput = e => {
