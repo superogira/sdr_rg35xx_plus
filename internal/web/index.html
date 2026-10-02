@@ -107,60 +107,61 @@ tr:hover td { background:var(--row-hover); }
   <h1>SDRg35xx</h1>
   <span id="conn">…</span>
   <span style="flex:1"></span>
-  <button id="theme" title="สลับธีม" style="font-size:12px;padding:5px 10px">☀️/🌙</button>
+  <button id="theme" data-i18n-title="ttTheme" style="font-size:12px;padding:5px 10px">☀️/🌙</button>
+  <button id="lang" data-i18n-title="ttLang" style="font-size:12px;padding:5px 10px">EN</button>
   <span id="up" style="color:var(--dim);font-size:12px"></span>
 </header>
 <main>
   <section>
     <div class="card">
-      <h2>Receiver</h2>
+      <h2 data-i18n="receiver">Receiver</h2>
       <div class="freq" id="freq" title="click to tune">0.0000 <small>MHz</small></div>
       <div class="row">
         <button id="dn1k">−1k</button><button id="dn100">−100</button>
         <button id="up100">+100</button><button id="up1k">+1k</button>
         <button id="up10k">+10k</button>
       </div>
-      <div class="row"><label>Tune</label><input type="number" id="tune" step="1000" style="flex:1"><button id="go">Go</button></div>
-      <div class="row"><label>Mode</label><select id="mode"></select>
+      <div class="row"><label data-i18n="tune">Tune</label><input type="number" id="tune" step="1000" style="flex:1"><button id="go">Go</button></div>
+      <div class="row"><label data-i18n="mode">Mode</label><select id="mode"></select>
         <label style="flex:0 0 auto">BW</label><select id="bw"></select>
         <label style="flex:0 0 auto">Rate</label><select id="rate"></select></div>
-      <div class="row"><label>Gain</label><input type="range" id="gain" min="-10" max="49.6" step="0.1"><span class="val" id="gainv"></span></div>
-      <div class="row"><label>Volume</label><input type="range" id="vol" min="0" max="1.5" step="0.05"><span class="val" id="volv"></span></div>
-      <div class="row"><label>Squelch</label><input type="range" id="sql" min="-100" max="0" step="1"><span class="val" id="sqlv"></span></div>
-      <div class="row"><label>PPM</label><input type="range" id="ppm" min="-120" max="120" step="1"><span class="val" id="ppmv"></span>
+      <div class="row"><label data-i18n="gain">Gain</label><input type="range" id="gain" min="-10" max="49.6" step="0.1"><span class="val" id="gainv"></span></div>
+      <div class="row"><label data-i18n="volume">Volume</label><input type="range" id="vol" min="0" max="1.5" step="0.05"><span class="val" id="volv"></span></div>
+      <div class="row"><label data-i18n="squelch">Squelch</label><input type="range" id="sql" min="-100" max="0" step="1"><span class="val" id="sqlv"></span></div>
+      <div class="row"><label data-i18n="ppm">PPM</label><input type="range" id="ppm" min="-120" max="120" step="1"><span class="val" id="ppmv"></span>
         <button id="ppmoff" title="leave correction to the server">OFF</button></div>
       <div class="row">
         <button id="agc">AGC</button>
         <button id="ft8">FT8</button>
         <button id="aisrf">AIS RF</button>
-        <button id="listen" title="สตรีมเสียงจากเครื่องเกม">🔇 ฟัง</button>
-        <button id="lmute" title="ปิดลำโพงเครื่องเกม (เว็บยังได้ยิน)">🔈 เครื่อง</button>
+        <button id="listen" data-i18n-title="ttListen">🔇 ฟัง</button>
+        <button id="lmute" data-i18n-title="ttMute">🔈 เครื่อง</button>
       </div>
-      <div class="row"><label>เสียงเว็บ</label><input type="range" id="wgain" min="0" max="3" step="0.1" value="1"><span class="val" id="wgainv">100%</span>
+      <div class="row"><label data-i18n="webvol">เสียงเว็บ</label><input type="range" id="wgain" min="0" max="3" step="0.1" value="1"><span class="val" id="wgainv">100%</span>
         <span class="val" id="abuf" style="color:var(--dim)"></span></div>
       <div id="err"></div>
     </div>
     <div class="card" style="margin-top:12px">
-      <h2>System</h2>
+      <h2 data-i18n="system">System</h2>
       <div class="sys">
-        <div><b id="cpu">–</b><span>CPU %</span></div>
-        <div><b id="mem">–</b><span>MEM %</span></div>
-        <div><b id="bat">–</b><span>BAT %</span></div>
-        <div><b id="tcpu">–</b><span>CPU °C</span></div>
-        <div><b id="tgpu">–</b><span>GPU °C</span></div>
-        <div><b id="tddr">–</b><span>DDR °C</span></div>
+        <div><b id="cpu">–</b><span data-i18n="cpupct">CPU %</span></div>
+        <div><b id="mem">–</b><span data-i18n="mempct">MEM %</span></div>
+        <div><b id="bat">–</b><span data-i18n="batpct">BAT %</span></div>
+        <div><b id="tcpu">–</b><span data-i18n="cputemp">CPU °C</span></div>
+        <div><b id="tgpu">–</b><span data-i18n="gputemp">GPU °C</span></div>
+        <div><b id="tddr">–</b><span data-i18n="ddrtemp">DDR °C</span></div>
         <div><b id="tgt">–</b><span>✈ / ⛵</span></div>
-        <div><b id="upb">–</b><span>UP</span></div>
+        <div><b id="upb">–</b><span data-i18n="uptime">UP</span></div>
       </div>
       <div class="row" style="margin-top:10px">
-        <button id="upd">⬆ อัปเดตระบบ</button>
+        <button id="upd">⬆ <span data-i18n="update">อัปเดตระบบ</span></button>
         <span class="val" id="updst" style="color:var(--dim);font-size:12px"></span>
       </div>
     </div>
   </section>
   <section>
     <div class="card">
-      <h2>Spectrum <span id="specinfo" style="color:var(--dim);text-transform:none;letter-spacing:0"></span></h2>
+      <h2><span data-i18n="spectrum">Spectrum</span> <span id="specinfo" style="color:var(--dim);text-transform:none;letter-spacing:0"></span></h2>
       <div style="position:relative">
         <canvas id="spc" width="512" height="110" style="width:100%;height:110px;cursor:crosshair;background:var(--bg)"></canvas>
         <canvas id="spcOv" width="512" height="110" style="position:absolute;inset:0;width:100%;height:110px;pointer-events:none"></canvas>
@@ -169,32 +170,88 @@ tr:hover td { background:var(--row-hover); }
         <canvas id="wf" width="512" height="240" style="width:100%;height:240px;cursor:crosshair"></canvas>
         <canvas id="wfOv" width="512" height="240" style="position:absolute;inset:0;width:100%;height:240px;pointer-events:none"></canvas>
       </div>
-      <div class="row" style="margin-top:6px"><label>คลิกกราฟ/น้ำตก = จูน</label><span class="val" id="clickhz" style="color:var(--dim)"></span></div>
+      <div class="row" style="margin-top:6px"><label data-i18n="clicktune">คลิกกราฟ/น้ำตก = จูน</label><span class="val" id="clickhz" style="color:var(--dim)"></span></div>
     </div>
     <div class="card" style="margin-top:12px">
       <div class="tabs">
         <button id="tab-ft8" class="on">FT8</button>
         <button id="tab-ais">AIS</button>
-        <button id="tab-tgt">Targets</button>
-        <button id="tab-map">Map</button>
+        <button id="tab-tgt" data-i18n="targets">Targets</button>
+        <button id="tab-map" data-i18n="map">Map</button>
       </div>
       <div id="pane-map" hidden><div id="map" style="height:420px;border-radius:8px;background:#0b1410"></div>
-        <div class="row" style="margin-top:6px"><label>ชั้นแผนที่</label><select id="mlayer"></select>
+        <div class="row" style="margin-top:6px"><label data-i18n="mlayer">ชั้นแผนที่</label><select id="mlayer"></select>
           <span class="val" id="mattr" style="color:var(--dim);font-size:11px"></span></div>
       </div>
-      <div id="pane-ft8"><table><thead><tr><th>เวลา</th><th>SNR</th><th>Hz</th><th>ข้อความ</th><th>ประเทศ/ระยะ</th></tr></thead><tbody id="ft8b"></tbody></table></div>
-      <div id="pane-ais" hidden><table><thead><tr><th>เวลา</th><th>ch</th><th>dB</th><th>ข้อความ</th></tr></thead><tbody id="aisb"></tbody></table></div>
-      <div id="pane-tgt" hidden><table><thead><tr><th>ชนิด</th><th>ชื่อ/ทะเบียน</th><th>พิกัด</th><th>สูง/เร็ว</th><th>ทิศ</th><th>อายุ</th></tr></thead><tbody id="tgtb"></tbody></table></div>
+      <div id="pane-ft8"><table><thead><tr><th data-i18n="time">เวลา</th><th>SNR</th><th>Hz</th><th data-i18n="msg">ข้อความ</th><th data-i18n="ctry">ประเทศ/ระยะ</th></tr></thead><tbody id="ft8b"></tbody></table></div>
+      <div id="pane-ais" hidden><table><thead><tr><th data-i18n="time">เวลา</th><th>ch</th><th>dB</th><th data-i18n="msg">ข้อความ</th></tr></thead><tbody id="aisb"></tbody></table></div>
+      <div id="pane-tgt" hidden><table><thead><tr><th data-i18n="kind">ชนิด</th><th data-i18n="name">ชื่อ/ทะเบียน</th><th data-i18n="pos">พิกัด</th><th data-i18n="altspd">สูง/เร็ว</th><th data-i18n="dir">ทิศ</th><th data-i18n="age">อายุ</th></tr></thead><tbody id="tgtb"></tbody></table></div>
     </div>
   </section>
 </main>
 <script>
 const $ = id => document.getElementById(id);
+// ---- i18n: TH (default) / EN, remembered per browser ----
+const STRINGS = {
+  th: {
+    receiver: 'ตัวรับสัญญาณ', system: 'ระบบ', spectrum: 'สเปกตรัม',
+    cpupct: 'CPU %', mempct: 'MEM %', batpct: 'BAT %',
+    cputemp: 'CPU °C', gputemp: 'GPU °C', ddrtemp: 'DDR °C', uptime: 'อัปไทม์',
+    update: 'อัปเดตระบบ', targets: 'เป้าหมาย', map: 'แผนที่',
+    time: 'เวลา', msg: 'ข้อความ', ctry: 'ประเทศ/ระยะ',
+    kind: 'ชนิด', name: 'ชื่อ/ทะเบียน', pos: 'พิกัด', altspd: 'สูง/เร็ว', dir: 'ทิศ', age: 'อายุ',
+    clicktune: 'คลิกกราฟ/น้ำตก = จูน', mlayer: 'ชั้นแผนที่', webvol: 'เสียงเว็บ',
+    tune: 'จูน', mode: 'โหมด', gain: 'กำลังสัญญาณ', volume: 'ระดับเสียง', squelch: 'สเกลช', ppm: 'PPM',
+    listenOn: '🔊 ฟัง', listenOff: '🔇 ฟัง', compat: ' (compat)',
+    devOn: '🔈 เครื่อง', devOff: '🔇 เครื่อง',
+    connFail: '○ เว็บไม่ตอบ', connOff: '○ ไม่เชื่อมต่อ ', tuned: 'จูน → ', reset: ' · ดับเบิลคลิกรีเซ็ต',
+    ttTheme: 'สลับธีม', ttListen: 'สตรีมเสียงจากเครื่องเกม', ttMute: 'ปิดลำโพงเครื่องเกม (เว็บยังได้ยิน)', ttLang: 'Switch to English',
+    nextTheme: { phosphor: '☀️ ขาว', light: '📻 วิทยุ', radio: '💡 เขียว' },
+  },
+  en: {
+    receiver: 'Receiver', system: 'System', spectrum: 'Spectrum',
+    cpupct: 'CPU %', mempct: 'MEM %', batpct: 'BAT %',
+    cputemp: 'CPU °C', gputemp: 'GPU °C', ddrtemp: 'DDR °C', uptime: 'UP',
+    update: 'Update system', targets: 'Targets', map: 'Map',
+    time: 'Time', msg: 'Message', ctry: 'Country/dist',
+    kind: 'Kind', name: 'Name/reg', pos: 'Position', altspd: 'Alt/Spd', dir: 'Dir', age: 'Age',
+    clicktune: 'Click graph/waterfall = tune', mlayer: 'Map layer', webvol: 'Web volume',
+    tune: 'Tune', mode: 'Mode', gain: 'Gain', volume: 'Volume', squelch: 'Squelch', ppm: 'PPM',
+    listenOn: '🔊 Listen', listenOff: '🔇 Listen', compat: ' (compat)',
+    devOn: '🔈 Device', devOff: '🔇 Device',
+    connFail: '○ no response', connOff: '○ offline ', tuned: 'Tuned → ', reset: ' · dbl-click reset',
+    ttTheme: 'Switch theme', ttListen: 'Stream audio from device', ttMute: 'Mute device speaker (web still hears)', ttLang: 'เปลี่ยนเป็นภาษาไทย',
+    nextTheme: { phosphor: '☀️ Light', light: '📻 Radio', radio: '💡 Green' },
+  },
+};
+let lang = 'th', langPinned = false;
+function applyLang(l, pin) {
+  lang = l;
+  if (pin !== false) { try { localStorage.setItem('sdr-lang', l); } catch (e) {} }
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const k = el.dataset.i18n;
+    if (STRINGS[l][k]) el.textContent = STRINGS[l][k];
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => {
+    const k = el.dataset.i18nTitle;
+    if (STRINGS[l][k]) el.title = STRINGS[l][k];
+  });
+  $('lang').textContent = l === 'th' ? 'EN' : 'ไทย';
+  $('lang').title = STRINGS[l].ttLang;
+  try { if (st) renderState(st); } catch (e) {}
+  try { if (specState) drawOverlays(); } catch (e) {}
+}
+{
+  let l = 'th';
+  try { l = localStorage.getItem('sdr-lang') || ''; } catch (e) {}
+  if (l === 'en' || l === 'th') { langPinned = true; applyLang(l); }
+}
+$('lang').onclick = () => { langPinned = true; applyLang(lang === 'th' ? 'en' : 'th'); };
 // Theme: 'phosphor' (default) or 'light', remembered per browser.
 const THEMES = { phosphor: null, light: 'light', radio: 'radio' };
 function themeLabel(name) {
   // Show the NEXT theme the button will switch to.
-  return name === 'phosphor' ? '☀️ ขาว' : name === 'light' ? '📻 วิทยุ' : '💡 เขียว';
+  return STRINGS[lang].nextTheme[name] || '';
 }
 function applyTheme(name) {
   document.documentElement.dataset.theme = THEMES[name] || '';
@@ -229,7 +286,8 @@ const cmd = c => api('/api/cmd', c).catch(e => { $('err').textContent = e.messag
 
 function renderState(s) {
   st = s;
-  $('conn').textContent = s.connected ? '● ' + s.host : '○ ไม่เชื่อมต่อ ' + s.host;
+  if (!langPinned && s.lang && s.lang !== lang) applyLang(s.lang, false);
+  $('conn').textContent = s.connected ? '● ' + s.host : STRINGS[lang].connOff + s.host;
   $('conn').className = s.connected ? 'on' : '';
   $('freq').innerHTML = fmtMHz(s.freqHz) + ' <small>MHz</small>';
   $('up').textContent = 'up ' + Math.floor(s.upSecs/60) + 'm';
@@ -257,7 +315,7 @@ function renderState(s) {
   $('aisrf').className = s.aisrf ? 'on' : '';
   // inverted: 'on' style = speaker active
   $('lmute').className = s.localmute ? '' : 'on';
-  $('lmute').textContent = s.localmute ? '🔇 เครื่อง' : '🔈 เครื่อง';
+  $('lmute').textContent = s.localmute ? STRINGS[lang].devOff : STRINGS[lang].devOn;
   $('cpu').textContent = s.cpu.toFixed(0);
   $('mem').textContent = s.mem.toFixed(0);
   $('bat').textContent = s.bat;
@@ -277,7 +335,7 @@ function renderState(s) {
 
 async function poll() {
   try { renderState(await api('/api/state')); $('err').textContent = ''; }
-  catch (e) { $('conn').textContent = '○ เว็บไม่ตอบ'; $('conn').className=''; }
+  catch (e) { $('conn').textContent = STRINGS[lang].connFail; $('conn').className=''; }
   try {
     if (tab === 'ft8') {
       const rows = await api('/api/ft8');
@@ -365,7 +423,7 @@ function zoomBadge() {
     el.style.cssText = 'position:absolute;top:6px;right:8px;background:rgba(0,0,0,.55);color:#ffd166;font:11px system-ui;padding:2px 8px;border-radius:999px;pointer-events:none';
     $('wfwrap').appendChild(el);
   }
-  el.textContent = wfZoom > 1.01 ? '\u00d7' + wfZoom.toFixed(1) + ' \u00b7 dbl-click \u0e23\u0e35\u0e40\u0e0b\u0e47\u0e15' : '';
+  el.textContent = wfZoom > 1.01 ? '×' + wfZoom.toFixed(1) + STRINGS[lang].reset : '';
 }
 function ensureHist(bins) {
   if (wfHistBins === bins && wfHist) return;
@@ -548,7 +606,7 @@ for (const cv of [spc, wf]) {
   cv.onclick = (ev) => {
     if (dragMoved) return;
     const hz = canvasFreq(ev, cv);
-    if (hz) { cmd({cmd:'freq', hz: Math.round(hz)}); $('clickhz').textContent = '\u0e08\u0e39\u0e19 \u2192 ' + (hz/1e6).toFixed(4) + ' MHz'; }
+    if (hz) { cmd({cmd:'freq', hz: Math.round(hz)}); $('clickhz').textContent = STRINGS[lang].tuned + (hz/1e6).toFixed(4) + ' MHz'; }
   };
 }
 
@@ -662,7 +720,7 @@ async function startAudio() {
   audioReader = resp.body.getReader();
   audioOn = true;
   $('listen').className = 'on';
-  $('listen').textContent = '🔊 ฟัง' + (player.kind === 'script' ? ' (compat)' : '');
+  $('listen').textContent = STRINGS[lang].listenOn + (player.kind === 'script' ? STRINGS[lang].compat : '');
   (async () => {
     let head = false;
     for (;;) {
@@ -688,7 +746,7 @@ function stopAudio() {
     try { player.node.disconnect(); } catch (e) {}
     player = null;
   }
-  $('listen').className = ''; $('listen').textContent = '🔇 ฟัง';
+  $('listen').className = ''; $('listen').textContent = STRINGS[lang].listenOff;
   $('abuf').textContent = '';
 }
 $('listen').onclick = () => (audioOn ? stopAudio() : startAudio().catch(e => { $('err').textContent = 'audio: ' + e.message; stopAudio(); }));

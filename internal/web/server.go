@@ -20,6 +20,7 @@ import (
 	"sdr35/internal/adsb"
 	"sdr35/internal/ais"
 	"sdr35/internal/dsp"
+	"sdr35/internal/i18n"
 	"sdr35/internal/osm"
 	"sdr35/internal/radio"
 	"sdr35/internal/sysinfo"
@@ -225,6 +226,7 @@ type state struct {
 	GPUTemp   float64   `json:"gpuTemp"`
 	DDRTemp   float64   `json:"ddrTemp"`
 	Updating  string    `json:"updating"`
+	Lang      string    `json:"lang"`
 }
 
 func (s *Server) updateMsg() string {
@@ -257,7 +259,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Connected: snap.Connected, Host: radio.Hostname(),
 		CPU: cpu, MEM: mem, BAT: sens.BattPct,
 		Planes: s.adsb.CountLive(), Ships: len(s.ais.Ships()),
-		UpSecs: int(time.Since(s.upSince).Seconds()),
+		UpSecs: int(time.Since(s.upSince).Seconds()), Lang: i18n.Lang(),
 		RxLat:  s.rx[0], RxLon: s.rx[1],
 		CPUTemp: sens.CPUTemp, GPUTemp: sens.GPUTemp, DDRTemp: sens.DDRTemp,
 		Updating: s.updateMsg(),
