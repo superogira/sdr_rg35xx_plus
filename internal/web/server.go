@@ -332,7 +332,12 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 		radio.SetFreq(radio.LO() + int64(c.Hz))
 	case "mode":
 		if m := dsp.ModeByName(c.Name); m.Name != "" {
-			radio.SetMode(m)
+			if key := radio.SetMode(m); key != "" {
+				// FT8/AIS RF hold the mode — tell the page WHY instead
+				// of letting the dropdown silently snap back.
+				writeJSON(w, map[string]interface{}{"ok": false, "err": key})
+				return
+			}
 		}
 	case "gain":
 		radio.SetGainDb(c.Db)
