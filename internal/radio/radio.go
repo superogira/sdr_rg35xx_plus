@@ -86,6 +86,7 @@ type Radio struct {
 	ft8        *dsp.FT8Detector
 	aisRFOn    bool
 	audioTap   func(mono []float32, rate int) // web audio stream tap
+	localMute  bool                           // speaker off; web tap still live
 	aisA, aisB *ais.ChannelDemod
 	aisPay     func(payload []byte, ch int, levelDb float64)
 	hfApplied  int  // direct-sampling mode currently set on the server
@@ -234,13 +235,14 @@ func (r *Radio) Run(ctx context.Context) {
 			defer r.mu.Unlock()
 			return r.chain
 		}, func(audio []float32) {
-			if r.out != nil {
-				r.out.WriteAudio(audio)
-			}
 			r.mu.Lock()
 			tap := r.audioTap
 			rate := r.mode.AudioOutRate()
+			muted := r.localMute
 			r.mu.Unlock()
+			if r.out != nil && !muted {
+				r.out.WriteAudio(audio)
+			}
 			if tap != nil && len(audio) > 0 {
 				tap(audio, rate)
 			}
@@ -457,13 +459,14 @@ func (r *Radio) session(ctx context.Context) error {
 			r.mu.Unlock()
 			audioBuf = audioBuf[:0]
 			chain.Process(buf[:n], &audioBuf)
-			if r.out != nil {
-				r.out.WriteAudio(audioBuf)
-			}
 			r.mu.Lock()
 			tap := r.audioTap
 			rate := r.mode.AudioOutRate()
+			muted := r.localMute
 			r.mu.Unlock()
+			if r.out != nil && !muted {
+				r.out.WriteAudio(audioBuf)
+			}
 			if tap != nil && len(audioBuf) > 0 {
 				tap(audioBuf, rate)
 			}
@@ -990,6 +993,21 @@ func (r *Radio) SetAISRFEnabled(on bool) {
 		r.SetFreq(162_000_000)
 	}
 	fmt.Fprintf(os.Stderr, "radio: AIS RF %v"+string(rune(10)), on)
+}
+
+// SetLocalMute silences the handheld's own speaker while the web audio
+// tap keeps streaming the full demodulated signal.
+func (r *Radio) SetLocalMute(m bool) {
+	r.mu.Lock()
+	r.localMute = m
+	r.mu.Unlock()
+}
+
+// LocalMuted reports the speaker-mute state.
+func (r *Radio) LocalMuted() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.localMute
 }
 
 // SetAudioTap installs a callback receiving the demodulated mono audio

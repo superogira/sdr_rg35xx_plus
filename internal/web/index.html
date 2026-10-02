@@ -70,6 +70,7 @@ tr:hover td { background:#16281e; }
         <button id="ft8">FT8</button>
         <button id="aisrf">AIS RF</button>
         <button id="listen" title="สตรีมเสียงจากเครื่องเกม">🔇 ฟัง</button>
+        <button id="lmute" title="ปิดลำโพงเครื่องเกม (เว็บยังได้ยิน)">🔈 เครื่อง</button>
       </div>
       <div class="row"><label>เสียงเว็บ</label><input type="range" id="wgain" min="0" max="3" step="0.1" value="1"><span class="val" id="wgainv">100%</span>
         <span class="val" id="abuf" style="color:var(--dim)"></span></div>
@@ -145,6 +146,9 @@ function renderState(s) {
   $('agc').className = s.agc ? 'on' : '';
   $('ft8').className = s.ft8 ? 'on' : '';
   $('aisrf').className = s.aisrf ? 'on' : '';
+  // inverted: 'on' style = speaker active
+  $('lmute').className = s.localmute ? '' : 'on';
+  $('lmute').textContent = s.localmute ? '🔇 เครื่อง' : '🔈 เครื่อง';
   $('cpu').textContent = s.cpu.toFixed(0);
   $('mem').textContent = s.mem.toFixed(0);
   $('bat').textContent = s.bat;
@@ -397,6 +401,7 @@ function stopAudio() {
   $('abuf').textContent = '';
 }
 $('listen').onclick = () => (audioOn ? stopAudio() : startAudio().catch(e => { $('err').textContent = 'audio: ' + e.message; stopAudio(); }));
+$('lmute').onclick = () => cmd({cmd:'localmute', on: !st.localmute});
 $('wgain').oninput = e => {
   wgain = parseFloat(e.target.value);
   $('wgainv').textContent = Math.round(wgain * 100) + '%';
