@@ -343,7 +343,7 @@ let specState = null;
 let wfZoom = 1, wfPanHz = 0;
 let wfHist = null, wfHistCtx = null, wfHistBins = 0;
 let dragOn = false, dragX0 = 0, dragPan0 = 0, dragMoved = false;
-const ZOOM_MAX = 32;
+const ZOOM_MAX = 64;
 function viewLow() {
   if (!specState) return 0;
   const span = specState.spanHz / wfZoom;
@@ -415,8 +415,12 @@ function drawView() {
   sctx.beginPath();
   const m = Math.max(1, b1 - b0);
   for (let px = 0; px < spc.width; px++) {
-    const bi = b0 + Math.floor(px / spc.width * m);
-    const t = specState.bins[Math.min(n - 1, bi)] / 620;
+    const c0 = b0 + Math.floor(px / spc.width * m);
+    let c1 = b0 + Math.ceil((px + 1) / spc.width * m);
+    if (c1 <= c0) c1 = c0 + 1;
+    let mx = 0;
+    for (let b = c0; b < c1 && b < n; b++) if (specState.bins[b] > mx) mx = specState.bins[b];
+    const t = mx / 620;
     const y = spc.height - Math.max(0, Math.min(1, t)) * (spc.height - 4) - 2;
     px === 0 ? sctx.moveTo(px, y) : sctx.lineTo(px, y);
   }
