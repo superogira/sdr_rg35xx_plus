@@ -216,7 +216,7 @@ $('theme').onclick = () => {
   if (typeof wf !== 'undefined' && wctx) { wctx.fillStyle = wfBg(); wctx.fillRect(0, 0, wf.width, wf.height); }
   if (typeof drawOverlays === 'function') drawOverlays();
 };
-let st = null, tab = 'ft8';
+let st = null, tab = 'ft8', rebootPending = false;
 const fmtMHz = hz => (hz/1e6).toFixed(4);
 
 async function api(path, body) {
@@ -267,6 +267,12 @@ function renderState(s) {
   $('tddr').textContent = s.ddrTemp ? s.ddrTemp.toFixed(0) : '–';
   $('upb').textContent = Math.floor(s.upSecs/60) + 'm';
   $('updst').textContent = s.updating || '';
+  if (s.reboot) rebootPending = true;
+  if (rebootPending && !s.reboot && !s.updating) {
+    // the app came back from the OTA re-exec — pick up the new page
+    rebootPending = false;
+    location.reload();
+  }
 }
 
 async function poll() {
@@ -371,20 +377,26 @@ function ensureHist(bins) {
   if (old && wfHistBins) wfHistCtx.drawImage(old, 0, 0);
   wfHistBins = bins;
 }
-function dbColor(db) {
-  const t = Math.max(0, Math.min(1, (db + 120) / 120));
-  const th = document.documentElement.dataset.theme;
-  if (th === 'light') {
-    if (t < 0.25) return `rgb(${Math.round(t*4*30)},${Math.round(t*4*30)},${Math.round(90+t*4*160)})`;
-    if (t < 0.5)  return `rgb(${Math.round(30+(t-0.25)*4*120)},${Math.round(30+(t-0.25)*4*150)},250)`;
-    if (t < 0.75) return `rgb(${Math.round(150+(t-0.5)*4*105)},${Math.round(180+(t-0.5)*4*30)},${Math.round(250-(t-0.5)*4*200)})`;
-    return `rgb(220,${Math.round(210-(t-0.75)*4*140)},40)`;
+// Device-identical waterfall palette (ui.initLUT stops):
+// black→deep blue→blue→red→yellow→white. Input v is 0..620.
+const LUT = (() => {
+  const stops = [
+    [0.00, [0, 0, 8]], [0.20, [24, 12, 80]], [0.45, [64, 80, 200]],
+    [0.65, [210, 72, 60]], [0.82, [250, 200, 70]], [1.00, [255, 255, 255]],
+  ];
+  const lut = new Array(621);
+  for (let i = 0; i <= 620; i++) {
+    const t = i / 620;
+    let j = 0;
+    while (j + 1 < stops.length && stops[j + 1][0] < t) j++;
+    const a = stops[j], b = stops[j + 1];
+    let f = (t - a[0]) / (b[0] - a[0]);
+    if (f < 0) f = 0;
+    lut[i] = `rgb(${Math.round(a[1][0]+f*(b[1][0]-a[1][0]))},${Math.round(a[1][1]+f*(b[1][1]-a[1][1]))},${Math.round(a[1][2]+f*(b[1][2]-a[1][2]))})`;
   }
-  if (t < 0.25) return `rgb(0,0,${Math.round(t*4*140)})`;
-  if (t < 0.5)  return `rgb(0,${Math.round((t-0.25)*4*200)},${Math.round(140-(t-0.25)*4*60)})`;
-  if (t < 0.75) return `rgb(${Math.round((t-0.5)*4*255)},200,${Math.round(80-(t-0.5)*4*80)})`;
-  return `rgb(255,${Math.round(200+(t-0.75)*4*55)},0)`;
-}
+  return lut;
+})();
+function dbColor(v) { return LUT[Math.max(0, Math.min(620, v | 0))]; }
 function themeCol(name, fallback) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
@@ -404,8 +416,8 @@ function drawView() {
   const m = Math.max(1, b1 - b0);
   for (let px = 0; px < spc.width; px++) {
     const bi = b0 + Math.floor(px / spc.width * m);
-    const db = specState.bins[Math.min(n - 1, bi)] / 10;
-    const y = spc.height - Math.max(0, Math.min(1, (db + 120) / 120)) * (spc.height - 4) - 2;
+    const t = specState.bins[Math.min(n - 1, bi)] / 620;
+    const y = spc.height - Math.max(0, Math.min(1, t)) * (spc.height - 4) - 2;
     px === 0 ? sctx.moveTo(px, y) : sctx.lineTo(px, y);
   }
   sctx.strokeStyle = themeCol('--acc', '#35e08a'); sctx.stroke();
@@ -484,7 +496,7 @@ async function specPoll() {
     wfHistCtx.drawImage(wfHist, 0, 1);
     const n = d.bins.length;
     for (let x = 0; x < n; x++) {
-      wfHistCtx.fillStyle = dbColor(d.bins[x] / 10);
+      wfHistCtx.fillStyle = dbColor(d.bins[x]);
       wfHistCtx.fillRect(x, 0, 1, 1);
     }
     drawView();
