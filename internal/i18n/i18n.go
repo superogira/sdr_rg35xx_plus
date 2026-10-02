@@ -149,6 +149,7 @@ var strings = map[string][2]string{
 	"sm_swap_use":        {"Swap", "Swap"},
 	"m_agc":              {"AGC (SSB/CW)", "AGC (SSB/CW)"},
 	"m_span":             {"Span จอ (zoom)", "Span (zoom)"},
+	"span_fmt":           {"Span %d kHz", "Span %d kHz"},
 	"m_step":             {"สเต็ปจูน", "Tune step"},
 	"m_vol":              {"วอลุ่ม", "Volume"},
 	"m_shot":             {"ถ่ายภาพหน้าจอ", "Screenshot"},

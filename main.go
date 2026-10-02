@@ -1651,6 +1651,15 @@ func main() {
 		case input.X:
 			r.CycleSquelch()
 			cfg["sql"] = fmt.Sprintf("%g", r.SquelchDb())
+		case input.L1:
+			// Zoom out: next wider waterfall span (same list + live
+			// anchoring as the menu row; persisted with the live value).
+			spanStep(1)
+			capturedMsg, capturedAt = fmt.Sprintf(i18n.T("span_fmt"), u.SpanFull/1000), time.Now()
+		case input.R1:
+			// Zoom in: next narrower span.
+			spanStep(-1)
+			capturedMsg, capturedAt = fmt.Sprintf(i18n.T("span_fmt"), u.SpanFull/1000), time.Now()
 		}
 	}
 	handlePress := func(b input.Button) {
