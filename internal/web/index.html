@@ -145,9 +145,11 @@ tr:hover td { background:var(--row-hover); }
         <div><b id="cpu">–</b><span>CPU %</span></div>
         <div><b id="mem">–</b><span>MEM %</span></div>
         <div><b id="bat">–</b><span>BAT %</span></div>
-        <div><b id="tgt">–</b><span>✈ / ⛵</span></div>
         <div><b id="tcpu">–</b><span>CPU °C</span></div>
         <div><b id="tgpu">–</b><span>GPU °C</span></div>
+        <div><b id="tddr">–</b><span>DDR °C</span></div>
+        <div><b id="tgt">–</b><span>✈ / ⛵</span></div>
+        <div><b id="upb">–</b><span>UP</span></div>
       </div>
       <div class="row" style="margin-top:10px">
         <button id="upd">⬆ อัปเดตระบบ</button>
@@ -162,7 +164,7 @@ tr:hover td { background:var(--row-hover); }
         <canvas id="spc" width="512" height="110" style="width:100%;height:110px;cursor:crosshair;background:var(--bg)"></canvas>
         <canvas id="spcOv" width="512" height="110" style="position:absolute;inset:0;width:100%;height:110px;pointer-events:none"></canvas>
       </div>
-      <div style="position:relative;margin-top:4px">
+      <div style="position:relative;margin-top:4px" id="wfwrap">
         <canvas id="wf" width="512" height="240" style="width:100%;height:240px;cursor:crosshair"></canvas>
         <canvas id="wfOv" width="512" height="240" style="position:absolute;inset:0;width:100%;height:240px;pointer-events:none"></canvas>
       </div>
@@ -256,6 +258,8 @@ function renderState(s) {
   $('tgt').textContent = s.planes + '/' + s.ships;
   $('tcpu').textContent = s.cpuTemp ? s.cpuTemp.toFixed(0) : '–';
   $('tgpu').textContent = s.gpuTemp ? s.gpuTemp.toFixed(0) : '–';
+  $('tddr').textContent = s.ddrTemp ? s.ddrTemp.toFixed(0) : '–';
+  $('upb').textContent = Math.floor(s.upSecs/60) + 'm';
   $('updst').textContent = s.updating || '';
 }
 
@@ -319,9 +323,48 @@ function wfBg() {
   if (th === 'radio') return '#0d0f12';
   return '#000';
 }
-wctx.fillStyle = wfBg(); wctx.fillRect(0, 0, wf.width, wf.height);
 let specState = null;
-function dbColor(db) { // -120..0 dB → theme ramp
+// Zoom view (rtl-sdr-web-monitor style): a native-resolution history
+// back buffer, with the visible slice stretched to the canvas. Wheel
+// zooms around the cursor, drag pans, double-click resets.
+let wfZoom = 1, wfPanHz = 0;
+let wfHist = null, wfHistCtx = null, wfHistBins = 0;
+let dragOn = false, dragX0 = 0, dragPan0 = 0, dragMoved = false;
+const ZOOM_MAX = 32;
+function viewLow() {
+  if (!specState) return 0;
+  const span = specState.spanHz / wfZoom;
+  return specState.centreHz + wfPanHz - span / 2;
+}
+function viewBw() { return specState ? specState.spanHz / wfZoom : 1; }
+function clampPan() {
+  if (!specState) return;
+  const maxOff = Math.max(0, (specState.spanHz - specState.spanHz / wfZoom) / 2);
+  wfPanHz = Math.max(-maxOff, Math.min(maxOff, wfPanHz));
+}
+function viewXofHz(hz) { return (hz - viewLow()) / viewBw() * wf.width; }
+function viewHzofX(x) { return viewLow() + (x / wf.width) * viewBw(); }
+function zoomBadge() {
+  let el = document.getElementById('zoombadge');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'zoombadge';
+    el.style.cssText = 'position:absolute;top:6px;right:8px;background:rgba(0,0,0,.55);color:#ffd166;font:11px system-ui;padding:2px 8px;border-radius:999px;pointer-events:none';
+    $('wfwrap').appendChild(el);
+  }
+  el.textContent = wfZoom > 1.01 ? '\u00d7' + wfZoom.toFixed(1) + ' \u00b7 dbl-click \u0e23\u0e35\u0e40\u0e0b\u0e47\u0e15' : '';
+}
+function ensureHist(bins) {
+  if (wfHistBins === bins && wfHist) return;
+  const old = wfHist;
+  wfHist = document.createElement('canvas');
+  wfHist.width = bins; wfHist.height = wf.height;
+  wfHistCtx = wfHist.getContext('2d');
+  wfHistCtx.fillStyle = wfBg(); wfHistCtx.fillRect(0, 0, bins, wf.height);
+  if (old && wfHistBins) wfHistCtx.drawImage(old, 0, 0);
+  wfHistBins = bins;
+}
+function dbColor(db) {
   const t = Math.max(0, Math.min(1, (db + 120) / 120));
   const th = document.documentElement.dataset.theme;
   if (th === 'light') {
@@ -338,49 +381,57 @@ function dbColor(db) { // -120..0 dB → theme ramp
 function themeCol(name, fallback) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
-function specHz(x) {
-  if (!specState) return null;
-  return specState.centreHz - specState.spanHz/2 + (x / wf.width) * specState.spanHz;
-}
-function xOfHz(hz) {
-  if (!specState) return null;
-  return (hz - (specState.centreHz - specState.spanHz/2)) / specState.spanHz * wf.width;
+function drawView() {
+  if (!specState || !wfHist) return;
+  const lo = viewLow(), bw = viewBw();
+  const fullLo = specState.centreHz - specState.spanHz / 2;
+  const srcX = (lo - fullLo) / specState.spanHz * wfHistBins;
+  const srcW = bw / specState.spanHz * wfHistBins;
+  wctx.imageSmoothingEnabled = true;
+  wctx.drawImage(wfHist, Math.max(0, srcX), 0, Math.max(1, srcW), wf.height, 0, 0, wf.width, wf.height);
+  const n = specState.bins.length;
+  const b0 = Math.max(0, Math.floor((lo - fullLo) / specState.spanHz * n));
+  const b1 = Math.min(n - 1, Math.ceil((lo + bw - fullLo) / specState.spanHz * n));
+  sctx.fillStyle = wfBg(); sctx.fillRect(0, 0, spc.width, spc.height);
+  sctx.beginPath();
+  const m = Math.max(1, b1 - b0);
+  for (let px = 0; px < spc.width; px++) {
+    const bi = b0 + Math.floor(px / spc.width * m);
+    const db = specState.bins[Math.min(n - 1, bi)] / 10;
+    const y = spc.height - Math.max(0, Math.min(1, (db + 120) / 120)) * (spc.height - 4) - 2;
+    px === 0 ? sctx.moveTo(px, y) : sctx.lineTo(px, y);
+  }
+  sctx.strokeStyle = themeCol('--acc', '#35e08a'); sctx.stroke();
+  drawOverlays();
 }
 function drawOverlays() {
   if (!specState) return;
-  const acc = themeCol('--acc', '#35e08a'), warn = themeCol('--warn', '#ffd166');
-  const dimc = themeCol('--dim', '#6f9c82');
-  // spectrum overlay: listening line + freq ruler ticks
+  const warn = themeCol('--warn', '#ffd166'), dimc = themeCol('--dim', '#6f9c82');
+  const lx = viewXofHz(specState.listenHz);
   soctx.clearRect(0, 0, sov.width, sov.height);
-  const lx = xOfHz(specState.listenHz);
-  if (lx !== null && lx >= 0 && lx <= sov.width) {
+  if (lx >= 0 && lx <= sov.width) {
     soctx.strokeStyle = warn; soctx.lineWidth = 1.5; soctx.setLineDash([10, 5]);
     soctx.beginPath(); soctx.moveTo(lx, 0); soctx.lineTo(lx, sov.height); soctx.stroke();
-    soctx.setLineDash([]);
-    soctx.strokeStyle = warn; soctx.lineWidth = 2;
+    soctx.setLineDash([]); soctx.lineWidth = 2;
     soctx.beginPath(); soctx.moveTo(lx - 8, 0); soctx.lineTo(lx, 7); soctx.lineTo(lx + 8, 0); soctx.stroke();
   }
-  // freq grid: nice steps across the span
-  const lo = specState.centreHz - specState.spanHz/2;
-  const step = niceStep(specState.spanHz / 8);
-  soctx.strokeStyle = dimc; soctx.globalAlpha = 0.35; soctx.lineWidth = 1;
-  soctx.font = '10px system-ui'; soctx.fillStyle = dimc; soctx.globalAlpha = 0.8;
-  for (let hz = Math.ceil(lo / step) * step; hz <= lo + specState.spanHz; hz += step) {
-    const x = xOfHz(hz);
-    soctx.globalAlpha = 0.35;
+  const step = niceStep(viewBw() / 8);
+  soctx.font = '10px system-ui';
+  for (let hz = Math.ceil(viewLow() / step) * step; hz <= viewLow() + viewBw(); hz += step) {
+    const x = viewXofHz(hz);
+    soctx.strokeStyle = dimc; soctx.globalAlpha = 0.35; soctx.lineWidth = 1;
     soctx.beginPath(); soctx.moveTo(x, 0); soctx.lineTo(x, sov.height); soctx.stroke();
-    soctx.globalAlpha = 0.9;
+    soctx.globalAlpha = 0.9; soctx.fillStyle = dimc;
     soctx.fillText(fmtTick(hz, step), x + 3, sov.height - 4);
   }
   soctx.globalAlpha = 1;
-  // waterfall overlay: listening marker at the top edge only (fades with age)
   woctx.clearRect(0, 0, wov.width, wov.height);
-  if (lx !== null && lx >= 0 && lx <= wov.width) {
+  if (lx >= 0 && lx <= wov.width) {
     woctx.strokeStyle = warn; woctx.lineWidth = 1.5; woctx.setLineDash([10, 5]);
-    woctx.globalAlpha = 0.9;
     woctx.beginPath(); woctx.moveTo(lx, 0); woctx.lineTo(lx, 14); woctx.stroke();
-    woctx.setLineDash([]); woctx.globalAlpha = 1;
+    woctx.setLineDash([]);
   }
+  zoomBadge();
 }
 function niceStep(raw) {
   const pow = Math.pow(10, Math.floor(Math.log10(raw)));
@@ -397,44 +448,63 @@ async function specPoll() {
     const d = await api('/api/spec');
     if (!d.bins || !d.bins.length) return;
     specState = d;
+    clampPan();
+    ensureHist(d.bins.length);
+    wfHistCtx.drawImage(wfHist, 0, 1);
     const n = d.bins.length;
-    // waterfall: scroll down one row, paint newest at top
-    wctx.drawImage(wf, 0, 1);
-    for (let x = 0; x < wf.width; x++) {
-      const b = d.bins[Math.floor(x / wf.width * n)];
-      wctx.fillStyle = dbColor(b / 10);
-      wctx.fillRect(x, 0, 1, 1);
+    for (let x = 0; x < n; x++) {
+      wfHistCtx.fillStyle = dbColor(d.bins[x] / 10);
+      wfHistCtx.fillRect(x, 0, 1, 1);
     }
-    // spectrum line
-    sctx.fillStyle = wfBg(); sctx.fillRect(0, 0, spc.width, spc.height);
-    sctx.beginPath();
-    for (let x = 0; x < spc.width; x++) {
-      const db = d.bins[Math.floor(x / spc.width * n)] / 10;
-      const y = spc.height - Math.max(0, Math.min(1, (db + 120) / 120)) * (spc.height - 4) - 2;
-      x === 0 ? sctx.moveTo(x, y) : sctx.lineTo(x, y);
-    }
-    sctx.strokeStyle = themeCol('--acc', '#35e08a'); sctx.stroke();
-    drawOverlays();
-    $('specinfo').textContent = (d.centreHz/1e6).toFixed(4) + ' MHz ±' + (d.spanHz/2000).toFixed(0) + ' kHz';
+    drawView();
+    $('specinfo').textContent = (d.centreHz/1e6).toFixed(4) + ' MHz \u00b1' + (d.spanHz/2000).toFixed(0) + ' kHz';
   } catch (e) {}
 }
 function canvasFreq(ev, cv) {
   if (!specState) return null;
   const r = cv.getBoundingClientRect();
-  const x = (ev.clientX - r.left) / r.width;
-  return specState.centreHz - specState.spanHz / 2 + x * specState.spanHz;
+  return viewHzofX((ev.clientX - r.left) / r.width * wf.width);
+}
+// wheel zoom anchored at the cursor; drag pans; double-click resets
+for (const cv of [spc, wf]) {
+  cv.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (!specState) return;
+    const r = cv.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width * wf.width;
+    const anchor = viewHzofX(x);
+    const f = e.deltaY < 0 ? 1.25 : 1 / 1.25;
+    wfZoom = Math.max(1, Math.min(ZOOM_MAX, wfZoom * f));
+    const newSpan = specState.spanHz / wfZoom;
+    wfPanHz = anchor - (x / wf.width - 0.5) * newSpan - specState.centreHz;
+    clampPan();
+    drawView();
+  }, { passive: false });
+  cv.addEventListener('dblclick', () => { wfZoom = 1; wfPanHz = 0; drawView(); });
+  cv.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    dragOn = true; dragMoved = false; dragX0 = e.clientX; dragPan0 = wfPanHz;
+  });
+  cv.addEventListener('mousemove', (e) => {
+    if (dragOn && specState) {
+      const dxPx = (e.clientX - dragX0) / cv.getBoundingClientRect().width;
+      wfPanHz = dragPan0 - dxPx * viewBw();
+      clampPan();
+      if (Math.abs(e.clientX - dragX0) > 4) dragMoved = true;
+      drawView();
+    }
+    const hz = canvasFreq(e, cv);
+    if (hz) $('clickhz').textContent = (hz/1e6).toFixed(4) + ' MHz';
+  });
+  cv.addEventListener('mouseup', () => { dragOn = false; });
+  cv.addEventListener('mouseleave', () => { dragOn = false; });
+  cv.onclick = (ev) => {
+    if (dragMoved) return;
+    const hz = canvasFreq(ev, cv);
+    if (hz) { cmd({cmd:'freq', hz: Math.round(hz)}); $('clickhz').textContent = '\u0e08\u0e39\u0e19 \u2192 ' + (hz/1e6).toFixed(4) + ' MHz'; }
+  };
 }
 
-for (const cv of [spc, wf]) {
-  cv.onclick = ev => {
-    const hz = canvasFreq(ev, cv);
-    if (hz) { cmd({cmd:'freq', hz: Math.round(hz)}); $('clickhz').textContent = 'จูน → ' + (hz/1e6).toFixed(4) + ' MHz'; }
-  };
-  cv.onmousemove = ev => {
-    const hz = canvasFreq(ev, cv);
-    if (hz) $('clickhz').textContent = (hz/1e6).toFixed(4) + ' MHz';
-  };
-}
 // ---- web audio (phase 4): µ-law 24 kHz chunked stream ----
 // AudioWorklet needs a secure context (https or localhost); on plain
 // http over a LAN IP the browser has no audioWorklet at all, so a
