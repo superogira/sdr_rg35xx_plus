@@ -57,6 +57,7 @@ type Server struct {
 	ais     *ais.Store
 	tiles   *osm.Cache
 	rx      [2]float64
+	audio   *audioHub
 	ft8Log  []FT8Line
 	aisLog  []AISLine
 	logMu   sync.Mutex
@@ -65,7 +66,10 @@ type Server struct {
 
 // New builds a (not yet listening) server.
 func New(r *radio.Radio, adsbStore *adsb.Store, aisStore *ais.Store, port int, tiles *osm.Cache, rxLat, rxLon float64) *Server {
-	return &Server{radio: r, adsb: adsbStore, ais: aisStore, port: port, tiles: tiles, rx: [2]float64{rxLat, rxLon}, upSince: time.Now()}
+	srv := &Server{radio: r, adsb: adsbStore, ais: aisStore, port: port, tiles: tiles, rx: [2]float64{rxLat, rxLon}, upSince: time.Now()}
+	srv.audio = newAudioHub()
+	r.SetAudioTap(srv.audio.push)
+	return srv
 }
 
 // AddFT8 mirrors one decode into the web log (called from the DSP
@@ -142,6 +146,7 @@ func (s *Server) startLocked() {
 	mux.HandleFunc("/api/targets", s.handleTargets)
 	mux.HandleFunc("/api/spec", s.handleSpec)
 	mux.HandleFunc("/api/layers", s.handleLayers)
+	mux.HandleFunc("/api/audio", s.handleAudio)
 	mux.HandleFunc("/tiles/", s.handleTile)
 	staticSub, err := fs.Sub(page, "static")
 	if err == nil {

@@ -69,7 +69,10 @@ tr:hover td { background:#16281e; }
         <button id="agc">AGC</button>
         <button id="ft8">FT8</button>
         <button id="aisrf">AIS RF</button>
+        <button id="listen" title="สตรีมเสียงจากเครื่องเกม">🔇 ฟัง</button>
       </div>
+      <div class="row"><label>เสียงเว็บ</label><input type="range" id="wgain" min="0" max="3" step="0.1" value="1"><span class="val" id="wgainv">100%</span>
+        <span class="val" id="abuf" style="color:var(--dim)"></span></div>
       <div id="err"></div>
     </div>
     <div class="card" style="margin-top:12px">
@@ -254,6 +257,101 @@ for (const cv of [spc, wf]) {
     if (hz) $('clickhz').textContent = (hz/1e6).toFixed(4) + ' MHz';
   };
 }
+// ---- web audio (phase 4): µ-law 24 kHz chunked stream ----
+let actx = null, awNode = null, audioOn = false, audioReader = null;
+const ULAW_DEC = (() => {
+  const t = new Float32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let b = ~i & 0xFF;
+    const sign = b & 0x80, exp = (b >> 4) & 7, mant = b & 0xF;
+    let v = ((mant << 3) + 0x84) << exp;
+    v -= 0x84;
+    t[i] = (sign ? -v : v) / 32768;
+  }
+  return t;
+})();
+const workletSrc = `
+class SDRPlay extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.ring = new Float32Array(24000 * 2); // 2 s
+    this.wr = 0; this.rd = 0; this.fill = 0;
+    this.gain = 1;
+    this.port.onmessage = e => {
+      if (e.data.kind === 'pcm') {
+        const d = e.data.buf;
+        for (let i = 0; i < d.length; i++) {
+          this.ring[this.wr] = d[i];
+          this.wr = (this.wr + 1) % this.ring.length;
+          if (this.fill < this.ring.length) this.fill++;
+          else this.rd = (this.rd + 1) % this.ring.length;
+        }
+      } else if (e.data.kind === 'gain') this.gain = e.data.v;
+      else if (e.data.kind === 'flush') { this.wr = 0; this.rd = 0; this.fill = 0; }
+    };
+  }
+  process(inputs, outputs) {
+    const out = outputs[0][0];
+    const target = 24000 * 0.35; // start playing once 350 ms buffered
+    if (this.fill < target) {
+      out.fill(0);
+      return true;
+    }
+    for (let i = 0; i < out.length; i++) {
+      if (this.fill > 0) {
+        out[i] = this.ring[this.rd] * this.gain;
+        this.rd = (this.rd + 1) % this.ring.length;
+        this.fill--;
+      } else out[i] = 0;
+    }
+    if ((this.currentFrame & 8191) === 0)
+      this.port.postMessage({ kind: 'fill', v: this.fill });
+    return true;
+  }
+}
+registerProcessor('sdr-play', SDRPlay);
+`;
+async function startAudio() {
+  actx = actx || new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+  await actx.resume();
+  const blob = new Blob([workletSrc], { type: 'application/javascript' });
+  await actx.audioWorklet.addModule(URL.createObjectURL(blob));
+  awNode = new AudioWorkletNode(actx, 'sdr-play');
+  awNode.connect(actx.destination);
+  awNode.port.onmessage = e => {
+    if (e.data.kind === 'fill') $('abuf').textContent = (e.data.v / 24000).toFixed(2) + 's';
+  };
+  const resp = await fetch('/api/audio');
+  audioReader = resp.body.getReader();
+  audioOn = true;
+  $('listen').className = 'on'; $('listen').textContent = '🔊 ฟัง';
+  (async () => {
+    let head = null;
+    for (;;) {
+      const { value, done } = await audioReader.read();
+      if (done || !audioOn) break;
+      let buf = value;
+      if (!head) { head = buf.slice(0, 6); buf = buf.slice(6); }
+      const pcm = new Float32Array(buf.length);
+      for (let i = 0; i < buf.length; i++) pcm[i] = ULAW_DEC[buf[i]];
+      awNode.port.postMessage({ kind: 'pcm', buf: pcm }, [pcm.buffer]);
+    }
+  })();
+}
+function stopAudio() {
+  audioOn = false;
+  if (audioReader) audioReader.cancel();
+  if (awNode) { awNode.disconnect(); awNode = null; }
+  $('listen').className = ''; $('listen').textContent = '🔇 ฟัง';
+  $('abuf').textContent = '';
+}
+$('listen').onclick = () => (audioOn ? stopAudio() : startAudio());
+$('wgain').oninput = e => {
+  const v = parseFloat(e.target.value);
+  $('wgainv').textContent = Math.round(v * 100) + '%';
+  if (awNode) awNode.port.postMessage({ kind: 'gain', v });
+};
+
 // ---- Leaflet map (phase 3) ----
 let map = null, mLayer = null, markers = {}, rxMark = null, layerIdx = 0, layers = [];
 async function initMap(st) {

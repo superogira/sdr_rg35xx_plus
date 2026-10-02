@@ -85,6 +85,7 @@ type Radio struct {
 	ft8On      bool
 	ft8        *dsp.FT8Detector
 	aisRFOn    bool
+	audioTap   func(mono []float32, rate int) // web audio stream tap
 	aisA, aisB *ais.ChannelDemod
 	aisPay     func(payload []byte, ch int, levelDb float64)
 	hfApplied  int  // direct-sampling mode currently set on the server
@@ -235,6 +236,13 @@ func (r *Radio) Run(ctx context.Context) {
 		}, func(audio []float32) {
 			if r.out != nil {
 				r.out.WriteAudio(audio)
+			}
+			r.mu.Lock()
+			tap := r.audioTap
+			rate := r.mode.AudioOutRate()
+			r.mu.Unlock()
+			if tap != nil && len(audio) > 0 {
+				tap(audio, rate)
 			}
 		})
 		return
@@ -451,6 +459,13 @@ func (r *Radio) session(ctx context.Context) error {
 			chain.Process(buf[:n], &audioBuf)
 			if r.out != nil {
 				r.out.WriteAudio(audioBuf)
+			}
+			r.mu.Lock()
+			tap := r.audioTap
+			rate := r.mode.AudioOutRate()
+			r.mu.Unlock()
+			if tap != nil && len(audioBuf) > 0 {
+				tap(audioBuf, rate)
 			}
 			r.mu.Lock()
 			r.bytesRx += uint64(n)
@@ -975,6 +990,15 @@ func (r *Radio) SetAISRFEnabled(on bool) {
 		r.SetFreq(162_000_000)
 	}
 	fmt.Fprintf(os.Stderr, "radio: AIS RF %v"+string(rune(10)), on)
+}
+
+// SetAudioTap installs a callback receiving the demodulated mono audio
+// (post squelch/NR/filters) at the mode's output rate — the web audio
+// stream. nil detaches. Called from the DSP goroutine.
+func (r *Radio) SetAudioTap(f func(mono []float32, rate int)) {
+	r.mu.Lock()
+	r.audioTap = f
+	r.mu.Unlock()
 }
 
 // SetAISPayloadFunc installs the receiver for demodulated AIS payloads
