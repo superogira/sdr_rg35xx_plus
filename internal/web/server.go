@@ -70,6 +70,12 @@ type Server struct {
 	logMu    sync.Mutex
 	upSince  time.Time
 
+	// Waterfall display range shared with the device menu (wfmin/
+	// wfmax ini): get returns the live values, set applies a change
+	// (device UI + cfg + saveNow). Nil until main wires them.
+	wfGet func() (float64, float64)
+	wfSet func(min, max float64)
+
 	// Spec scratch reused across /api/spec calls (FFT work arrays at
 	// specMaxFFT; per-call allocation would churn ~3 MB at 8 Hz).
 	specMu   sync.Mutex
@@ -86,6 +92,14 @@ type Server struct {
 func (s *Server) SetUpdater(msg func() string, run func()) {
 	s.mu.Lock()
 	s.updMsg, s.updRun = msg, run
+	s.mu.Unlock()
+}
+
+// SetWaterfallRange wires the shared waterfall display range. The
+// web sliders and the device menu stay in sync through these hooks.
+func (s *Server) SetWaterfallRange(get func() (float64, float64), set func(min, max float64)) {
+	s.mu.Lock()
+	s.wfGet, s.wfSet = get, set
 	s.mu.Unlock()
 }
 
@@ -237,6 +251,8 @@ type state struct {
 	DDRTemp   float64   `json:"ddrTemp"`
 	Updating  string    `json:"updating"`
 	Lang      string    `json:"lang"`
+	WfMin     float64   `json:"wfMin"`
+	WfMax     float64   `json:"wfMax"`
 }
 
 func (s *Server) updateMsg() string {
@@ -270,12 +286,21 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		CPU: cpu, MEM: mem, BAT: sens.BattPct,
 		Planes: s.adsb.CountLive(), Ships: len(s.ais.Ships()),
 		UpSecs: int(time.Since(s.upSince).Seconds()), Lang: i18n.Lang(),
+		WfMin: 6, WfMax: 62,
 		RxLat:  s.rx[0], RxLon: s.rx[1],
 		CPUTemp: sens.CPUTemp, GPUTemp: sens.GPUTemp, DDRTemp: sens.DDRTemp,
 		Updating: s.updateMsg(),
 	}
 	for _, m := range dsp.ModeList {
 		st.Modes = append(st.Modes, m.Name)
+	}
+	s.mu.Lock()
+	wfGet := s.wfGet
+	s.mu.Unlock()
+	if wfGet != nil {
+		if mn, mx := wfGet(); mn > 0 || mx > 0 {
+			st.WfMin, st.WfMax = mn, mx
+		}
 	}
 	writeJSON(w, st)
 }
@@ -349,6 +374,20 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 		if run != nil {
 			go run()
 		}
+	case "wfmin", "wfmax":
+		s.mu.Lock()
+		get, set := s.wfGet, s.wfSet
+		s.mu.Unlock()
+		if set == nil || get == nil {
+			return
+		}
+		mn, mx := get()
+		if c.Cmd == "wfmin" {
+			mn = math.Max(0, math.Min(40, c.V))
+		} else {
+			mx = math.Max(10, math.Min(120, c.V))
+		}
+		set(mn, mx)
 	default:
 		http.Error(w, "unknown cmd", http.StatusBadRequest)
 		return
@@ -481,7 +520,15 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 	slices.Sort(sub)
 	noise := sub[len(sub)/4]
 	s.noise += 0.05 * (noise - s.noise)
-	const wfMinDb, wfMaxDb = 6.0, 62.0
+	wfMinDb, wfMaxDb := 6.0, 62.0 // defaults until main wires the hooks
+	s.mu.Lock()
+	if s.wfGet != nil {
+		wfMinDb, wfMaxDb = s.wfGet()
+	}
+	s.mu.Unlock()
+	if wfMaxDb < wfMinDb+4 {
+		wfMaxDb = wfMinDb + 4 // keep the colour range usable
+	}
 	bins := make([]int16, specBins)
 	per := n / specBins
 	for b := 0; b < specBins; b++ {
