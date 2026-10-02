@@ -205,6 +205,8 @@ type state struct {
 	FT8       bool      `json:"ft8"`
 	AISRF     bool      `json:"aisrf"`
 	LocalMute bool      `json:"localmute"`
+	IQRate    int       `json:"iqRate"`
+	Rates     []int     `json:"rates"`
 	Connected bool      `json:"connected"`
 	Host      string    `json:"host"`
 	CPU       float64   `json:"cpu"`
@@ -238,6 +240,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		SqlDb: radio.SquelchDb(), BwHz: radio.Bandwidth(), Bws: radio.Bandwidths(),
 		Ppm: radio.Ppm(), PpmOff: radio.PpmOff(),
 		FT8: radio.FT8Enabled(), AISRF: radio.AISRFEnabled(), LocalMute: radio.LocalMuted(),
+		IQRate: radio.IQRate(), Rates: dsp.SampleRates,
 		Connected: snap.Connected, Host: radio.Hostname(),
 		CPU: cpu, MEM: mem, BAT: sens.BattPct,
 		Planes: s.adsb.CountLive(), Ships: len(s.ais.Ships()),
@@ -307,6 +310,8 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 		if c.On != nil {
 			radio.SetAISRFEnabled(*c.On)
 		}
+	case "rate":
+		radio.SetCaptureRate(int(c.V))
 	case "localmute":
 		if c.On != nil {
 			radio.SetLocalMute(*c.On)
@@ -389,7 +394,9 @@ const specFFT = 4096
 const specBins = 1024
 
 func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
-	tap := s.radio.Tap()
+	// Full-rate tap: the web view shows the ENTIRE capture span (like
+	// the device's wide waterfall), not just the IF2 slice.
+	tap := s.radio.RawTap()
 	if tap == nil {
 		http.Error(w, "no tap", http.StatusServiceUnavailable)
 		return
@@ -433,7 +440,7 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, spec{
 		CentreHz: s.radio.LO(),
-		SpanHz:   float64(dsp.IF2Rate),
+		SpanHz:   float64(dsp.IQRate),
 		Bins:     bins,
 		ListenHz: s.radio.Freq(),
 		BwHz:     s.radio.Bandwidth(),
