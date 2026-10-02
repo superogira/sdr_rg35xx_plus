@@ -217,6 +217,7 @@ type state struct {
 	RxLon     float64   `json:"rxLon"`
 	CPUTemp   float64   `json:"cpuTemp"`
 	GPUTemp   float64   `json:"gpuTemp"`
+	DDRTemp   float64   `json:"ddrTemp"`
 	Updating  string    `json:"updating"`
 }
 
@@ -242,7 +243,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Planes: s.adsb.CountLive(), Ships: len(s.ais.Ships()),
 		UpSecs: int(time.Since(s.upSince).Seconds()),
 		RxLat:  s.rx[0], RxLon: s.rx[1],
-		CPUTemp: sens.CPUTemp, GPUTemp: sens.GPUTemp,
+		CPUTemp: sens.CPUTemp, GPUTemp: sens.GPUTemp, DDRTemp: sens.DDRTemp,
 		Updating: s.updateMsg(),
 	}
 	for _, m := range dsp.ModeList {
@@ -383,7 +384,7 @@ type spec struct {
 }
 
 const specFFT = 4096
-const specBins = 512
+const specBins = 1024
 
 func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 	tap := s.radio.Tap()
