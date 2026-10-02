@@ -380,6 +380,7 @@ const (
 	menuUpdate
 	menuWeb
 	menuWebPort
+	menuLocalMute
 	menuCall
 	menuGrid
 	menuPSK
@@ -417,7 +418,7 @@ const (
 var pageItems = [][]int{
 	{0, 0, 0, 0, 0, 0, menuExit}, // rows 0-5 open subpages by position; the last row is Exit
 	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
-	{menuAF, menuNR, menuHP, menuLP},
+	{menuAF, menuNR, menuHP, menuLP, menuLocalMute},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
 	{menuBM},
@@ -805,6 +806,9 @@ func main() {
 	}
 	if cfg["ppm"] == "" {
 		cfg["ppm"] = "0"
+	}
+	if cfg["lmute"] == "on" {
+		r.SetLocalMute(true)
 	}
 	u.SetWaterfallRange(wfMin, wfMax)
 	if span > 0 {
@@ -1270,6 +1274,9 @@ func main() {
 				cfg["hp"] = fmt.Sprintf("%d", p.hpHz)
 				cfg["lp"] = fmt.Sprintf("%d", p.lpHz)
 			}
+		case menuLocalMute:
+			r.SetLocalMute(!r.LocalMuted())
+			cfg["lmute"] = map[bool]string{true: "on", false: "off"}[r.LocalMuted()]
 		case menuNR:
 			r.SetNoiseReduction(r.NoiseReduction() + dir)
 			cfg["nr"] = fmt.Sprintf("%d", r.NoiseReduction())
@@ -2772,7 +2779,8 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_af"), Value: afVal},
 					ui.MenuItem{Label: i18n.T("m_nr"), Value: nrVal},
 					ui.MenuItem{Label: i18n.T("m_hp"), Value: hpVal},
-					ui.MenuItem{Label: i18n.T("m_lp"), Value: lpVal})
+					ui.MenuItem{Label: i18n.T("m_lp"), Value: lpVal},
+					ui.MenuItem{Label: i18n.T("m_lmute"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.LocalMuted()]})
 			case pageADSB:
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_adsblat"), Value: fmt.Sprintf("%.5f", adsbLat)},
@@ -3461,6 +3469,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["ppm"]; ok {
 		fmt.Fprintf(f, "ppm=%s\n", v)
+	}
+	if v, ok := cfg["lmute"]; ok {
+		fmt.Fprintf(f, "lmute=%s\n", v)
 	}
 	if v, ok := cfg["aisrf"]; ok {
 		fmt.Fprintf(f, "aisrf=%s\n", v)

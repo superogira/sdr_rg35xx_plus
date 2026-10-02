@@ -193,6 +193,7 @@ type state struct {
 	PpmOff    bool      `json:"ppmOff"`
 	FT8       bool      `json:"ft8"`
 	AISRF     bool      `json:"aisrf"`
+	LocalMute bool      `json:"localmute"`
 	Connected bool      `json:"connected"`
 	Host      string    `json:"host"`
 	CPU       float64   `json:"cpu"`
@@ -214,7 +215,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		GainDb: radio.GainDb(), AGC: radio.AGCEnabled(), Vol: radio.Volume(),
 		SqlDb: radio.SquelchDb(), BwHz: radio.Bandwidth(), Bws: radio.Bandwidths(),
 		Ppm: radio.Ppm(), PpmOff: radio.PpmOff(),
-		FT8: radio.FT8Enabled(), AISRF: radio.AISRFEnabled(),
+		FT8: radio.FT8Enabled(), AISRF: radio.AISRFEnabled(), LocalMute: radio.LocalMuted(),
 		Connected: snap.Connected, Host: radio.Hostname(),
 		CPU: cpu, MEM: mem, BAT: sysinfo.SensorSnapshot().BattPct,
 		Planes: s.adsb.CountLive(), Ships: len(s.ais.Ships()),
@@ -281,6 +282,10 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 	case "aisrf":
 		if c.On != nil {
 			radio.SetAISRFEnabled(*c.On)
+		}
+	case "localmute":
+		if c.On != nil {
+			radio.SetLocalMute(*c.On)
 		}
 	default:
 		http.Error(w, "unknown cmd", http.StatusBadRequest)

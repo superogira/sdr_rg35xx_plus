@@ -44,6 +44,7 @@ var strings = map[string][2]string{
 	"m_clearcache":  {"ล้างแคชแผนที่", "Clear map cache"},
 	"m_web":         {"เว็บควบคุม (LAN)", "Web control (LAN)"},
 	"m_webport":     {"พอร์ตเว็บ", "Web port"},
+	"m_lmute":       {"ปิดลำโพงเครื่อง", "Mute device speaker"},
 	"m_aisrf":       {"รับ AIS จากคลื่น (RF)", "AIS RF decode"},
 	"m_aislog":      {"ข้อความ AIS", "AIS messages"},
 	"cache_cleared": {"ล้างแล้ว", "cleared"},
