@@ -110,3 +110,34 @@ func TestMercatorRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestTileBytesOfflineFallback: a tile already on disk must be served
+// even when the upstream server is unreachable — the handheld acts as
+// the tile source for the web map in offline locations.
+func TestTileBytesOfflineFallback(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "osmcache")
+	c := NewCache(dir)
+	// Redirect layer 0 to a dead port for this test.
+	saved := Layers[0].URL
+	defer func() { Layers[0].URL = saved }()
+	// Plant a 1x1 red PNG as if the radar had cached it earlier.
+	red := image.NewRGBA(image.Rect(0, 0, 256, 256))
+	for y := 0; y < 256; y++ {
+		for x := 0; x < 256; x++ {
+			red.Set(x, y, color.RGBA{200, 30, 30, 255})
+		}
+	}
+	var buf bytes.Buffer
+	png.Encode(&buf, red)
+	layerDir := filepath.Join(dir, Layers[0].Name)
+	os.MkdirAll(layerDir, 0o755)
+	os.WriteFile(filepath.Join(layerDir, "10_836_408.tile"), buf.Bytes(), 0o644)
+	Layers[0].URL = func(z, x, y int) string { return "http://127.0.0.1:1/nope.png" }
+	b, ct, err := c.TileBytes(0, 10, 836, 408)
+	if err != nil {
+		t.Fatalf("offline tile fetch failed: %v", err)
+	}
+	if ct != "image/png" || len(b) != buf.Len() {
+		t.Fatalf("ct=%s len=%d want %d", ct, len(b), buf.Len())
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"math"
 	"net/http"
 	"os"
@@ -18,11 +19,13 @@ import (
 	"sdr35/internal/adsb"
 	"sdr35/internal/ais"
 	"sdr35/internal/dsp"
+	"sdr35/internal/osm"
 	"sdr35/internal/radio"
 	"sdr35/internal/sysinfo"
 )
 
 //go:embed index.html
+//go:embed static/leaflet.js static/leaflet.css
 var page embed.FS
 
 // FT8Line is one decoded FT8 message for the web tables.
@@ -52,6 +55,8 @@ type Server struct {
 	radio   *radio.Radio
 	adsb    *adsb.Store
 	ais     *ais.Store
+	tiles   *osm.Cache
+	rx      [2]float64
 	ft8Log  []FT8Line
 	aisLog  []AISLine
 	logMu   sync.Mutex
@@ -59,8 +64,8 @@ type Server struct {
 }
 
 // New builds a (not yet listening) server.
-func New(r *radio.Radio, adsbStore *adsb.Store, aisStore *ais.Store, port int) *Server {
-	return &Server{radio: r, adsb: adsbStore, ais: aisStore, port: port, upSince: time.Now()}
+func New(r *radio.Radio, adsbStore *adsb.Store, aisStore *ais.Store, port int, tiles *osm.Cache, rxLat, rxLon float64) *Server {
+	return &Server{radio: r, adsb: adsbStore, ais: aisStore, port: port, tiles: tiles, rx: [2]float64{rxLat, rxLon}, upSince: time.Now()}
 }
 
 // AddFT8 mirrors one decode into the web log (called from the DSP
@@ -136,6 +141,12 @@ func (s *Server) startLocked() {
 	mux.HandleFunc("/api/ais", s.handleAIS)
 	mux.HandleFunc("/api/targets", s.handleTargets)
 	mux.HandleFunc("/api/spec", s.handleSpec)
+	mux.HandleFunc("/api/layers", s.handleLayers)
+	mux.HandleFunc("/tiles/", s.handleTile)
+	staticSub, err := fs.Sub(page, "static")
+	if err == nil {
+		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+	}
 	s.srv = &http.Server{Addr: fmt.Sprintf(":%d", s.port), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go s.srv.ListenAndServe() //nolint:errcheck // listener errors surface as "unreachable" in the UI
 	fmt.Fprintf(os.Stderr, "web: server listening on :%d\n", s.port)
@@ -185,6 +196,8 @@ type state struct {
 	Planes    int       `json:"planes"`
 	Ships     int       `json:"ships"`
 	UpSecs    int       `json:"upSecs"`
+	RxLat     float64   `json:"rxLat"`
+	RxLon     float64   `json:"rxLon"`
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
@@ -201,6 +214,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		CPU: cpu, MEM: mem, BAT: sysinfo.SensorSnapshot().BattPct,
 		Planes: s.adsb.CountLive(), Ships: len(s.ais.Ships()),
 		UpSecs: int(time.Since(s.upSince).Seconds()),
+		RxLat:  s.rx[0], RxLon: s.rx[1],
 	}
 	for _, m := range dsp.ModeList {
 		st.Modes = append(st.Modes, m.Name)
@@ -380,6 +394,49 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 		Bins:     bins,
 		ListenHz: s.radio.Freq(),
 	})
+}
+
+type layerInfo struct {
+	Name string `json:"name"`
+	Attr string `json:"attr"`
+}
+
+func (s *Server) handleLayers(w http.ResponseWriter, r *http.Request) {
+	var out []layerInfo
+	for _, l := range osm.Layers {
+		if l.NoFetch {
+			continue
+		}
+		out = append(out, layerInfo{Name: l.Name, Attr: l.Attr})
+	}
+	writeJSON(w, out)
+}
+
+// handleTile proxies one map tile through the handheld's own cache:
+// memory → disk → upstream. With no internet the radar's disk cache
+// still serves everything it has seen.
+func (s *Server) handleTile(w http.ResponseWriter, r *http.Request) {
+	var layer, z, x, y int
+	if _, err := fmt.Sscanf(r.URL.Path, "/tiles/%d/%d/%d/%d", &layer, &z, &x, &y); err != nil {
+		http.Error(w, "bad path", http.StatusBadRequest)
+		return
+	}
+	if layer < 0 || layer >= len(osm.Layers) || osm.Layers[layer].NoFetch {
+		http.NotFound(w, r)
+		return
+	}
+	if z < 0 || z > 19 || x < 0 || y < 0 || x >= 1<<z || y >= 1<<z {
+		http.NotFound(w, r)
+		return
+	}
+	b, ct, err := s.tiles.TileBytes(layer, z, x, y)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(b)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

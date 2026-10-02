@@ -145,6 +145,58 @@ func (c *Cache) tile(layer, zoom, x, y int) *image.RGBA {
 	return img
 }
 
+// TileBytes serves one tile as raw bytes for the web map proxy: memory
+// → disk → network (and caches what it fetches). The disk-first order
+// is what makes the handheld a tile source when the local network has
+// no internet — anything the radar ever showed is already here.
+func (c *Cache) TileBytes(layer, zoom, x, y int) ([]byte, string, error) {
+	key := fmt.Sprintf("%d/%d/%d/%d", layer, zoom, x, y)
+	c.mu.Lock()
+	img := c.mem[key]
+	c.mu.Unlock()
+	path := filepath.Join(c.dir, Layers[layer].Name, fmt.Sprintf("%d_%d_%d.tile", zoom, x, y))
+	if img != nil {
+		if b, err := os.ReadFile(path); err == nil {
+			return b, contentType(b), nil
+		}
+	}
+	if b, err := os.ReadFile(path); err == nil {
+		c.remember(key, decodePNG(b))
+		return b, contentType(b), nil
+	}
+	req, err := http.NewRequest("GET", Layers[layer].URL(zoom, x, y), nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("User-Agent", "SDRg35xx/1.0 (ham radio receiver; occasional static tiles)")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, "", fmt.Errorf("tile http %s", resp.Status)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, "", err
+	}
+	if img := decodePNG(b); img != nil {
+		c.remember(key, img)
+		os.MkdirAll(filepath.Join(c.dir, Layers[layer].Name), 0o755)
+		os.WriteFile(path, b, 0o644)
+		time.Sleep(120 * time.Millisecond)
+	}
+	return b, contentType(b), nil
+}
+
+func contentType(b []byte) string {
+	if len(b) > 3 && b[0] == 0xFF && b[1] == 0xD8 {
+		return "image/jpeg"
+	}
+	return "image/png"
+}
+
 // Clear drops every cached tile from memory and disk; the next radar
 // view refetches from the tile servers.
 func (c *Cache) Clear() error {
