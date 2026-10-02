@@ -76,17 +76,19 @@ header { display:flex; align-items:center; gap:12px; padding:10px 14px; backgrou
 header h1 { font-size:16px; margin:0; letter-spacing:1px; }
 #conn { font-size:12px; color:var(--dim); }
 #conn.on { color:var(--acc); }
-main { display:grid; grid-template-columns: 340px 1fr; gap:12px; padding:12px; }
+main { display:grid; grid-template-columns: 380px 1fr; gap:12px; padding:12px; }
 @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+select, input { min-width:0; }
+.row .val { flex:0 0 auto; }
 .card { background:var(--panel); border:1px solid var(--card-border); border-radius:10px; padding:12px; }
 .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:2px; color:var(--dim); margin:0 0 10px; }
 button.nudge { padding:2px 7px; font-size:11px; line-height:1.4; flex:0 0 auto; }
 .freq { font-size:34px; font-variant-numeric:tabular-nums; color:var(--acc); cursor:pointer; }
 .freq small { font-size:14px; color:var(--dim); }
-.row { display:flex; align-items:center; gap:8px; margin:8px 0; }
-.row label { flex:0 0 84px; color:var(--dim); font-size:12px; }
+.row { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:8px 0; }
+.row label { flex:0 0 76px; color:var(--dim); font-size:12px; }
 .row .val { flex:1; font-variant-numeric:tabular-nums; }
-button { background:var(--btn); color:var(--ink); border:1px solid var(--hdr-border); border-radius:6px; padding:6px 10px; cursor:pointer; font-size:13px; }
+button { background:var(--btn); color:var(--ink); border:1px solid var(--hdr-border); border-radius:6px; padding:5px 8px; cursor:pointer; font-size:12px; }
 button:hover { background:var(--btn-hover); }
 button.on { background:var(--acc); color:#062012; border-color:var(--acc); font-weight:700; }
 input[type=range] { flex:1; accent-color:var(--acc); }
