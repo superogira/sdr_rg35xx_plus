@@ -189,9 +189,16 @@ def render(size):
         d.line(R(*p0, *p1), fill=pill, width=round(w * u))
         for q in (p0, p1):  # round caps
             d.ellipse(R(q[0] - w / 2, q[1] - w / 2, q[0] + w / 2, q[1] + w / 2), fill=pill)
+    # 6 equal parallel slots, laid out as a row that runs parallel to the
+    # big bottom-right corner (row along (1,-1), each slot perpendicular).
+    k = math.sqrt(0.5)
+    cc = (88, 110)                       # centre of the corner arc (r=22)
+    g = (cc[0] + 11 * k, cc[1] + 11 * k)  # row centre, inset from the arc
     for i in range(6):
-        x = 85.5 + i * 3.0
-        d.line(R(x, 116, x + 2.5, 123.5), fill=(150, 156, 166, 255), width=round(1.3 * u))
+        o = (i - 2.5) * 3.0
+        c = (g[0] + o * k, g[1] - o * k)
+        d.line(R(c[0] - 3.5 * k, c[1] - 3.5 * k, c[0] + 3.5 * k, c[1] + 3.5 * k),
+               fill=(150, 156, 166, 255), width=round(1.3 * u))
 
     # clip everything (waves, shadow) to the tile so nothing bleeds
     # past the rounded corners in the launcher
