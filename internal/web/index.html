@@ -302,13 +302,6 @@ let specState = null;
 function dbColor(db) { // -120..0 dB → ramp that follows the theme
   const t = Math.max(0, Math.min(1, (db + 120) / 120));
   const th = document.documentElement.dataset.theme;
-  if (th === 'radio') {
-    // amber instrument ramp on the dark chassis
-    if (t < 0.25) return `rgb(${Math.round(t*4*60)},${Math.round(t*4*40)},${Math.round(t*4*10)})`;
-    if (t < 0.5)  return `rgb(${Math.round(60+(t-0.25)*4*140)},${Math.round(40+(t-0.25)*4*90)},${Math.round(10+(t-0.25)*4*30)})`;
-    if (t < 0.75) return `rgb(${Math.round(200+(t-0.5)*4*55)},${Math.round(130+(t-0.5)*4*60)},${Math.round(40+(t-0.5)*4*20)})`;
-    return `rgb(255,${Math.round(190+(t-0.75)*4*65)},${Math.round(60+(t-0.75)*4*30)})`;
-  }
   if (th === 'light') {
     // light theme: dark-blue → cyan → yellow → red on white cards
     if (t < 0.25) return `rgb(${Math.round(t*4*30)},${Math.round(t*4*30)},${Math.round(90+t*4*160)})`;
