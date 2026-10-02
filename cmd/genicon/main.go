@@ -1,5 +1,5 @@
-// genicon draws the APPS-menu icon (SDR35.png) with the same font/display
-// stack as the app itself.
+// genicon draws the v2 APPS-menu icon (SDRg35xx_v2.png, superseded by
+// tools/make_logo.py) with the same font/display stack as the app itself.
 package main
 
 import (
@@ -46,7 +46,7 @@ func main() {
 	ui.Face(40, true).DrawString(img, color.RGBA{240, 240, 240, 255}, 18, 128, "SDR")
 	ui.Face(19, false).DrawString(img, color.RGBA{80, 220, 255, 255}, 92, 128, "g35xx")
 
-	f, err := os.Create("rg35xx/SDRg35xx.png")
+	f, err := os.Create("rg35xx/SDRg35xx_v2.png")
 	if err != nil {
 		panic(err)
 	}
