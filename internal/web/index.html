@@ -95,7 +95,7 @@ th { text-align:left; color:var(--dim); font-weight:600; border-bottom:1px solid
 td { padding:4px 6px; border-bottom:1px solid var(--row-hover); font-variant-numeric:tabular-nums; }
 tr:hover td { background:var(--row-hover); }
 .tabs { display:flex; gap:6px; margin-bottom:8px; }
-.sys { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; text-align:center; }
+.sys { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; text-align:center; }
 .sys div { background:var(--input); border-radius:8px; padding:8px 4px; }
 .sys b { display:block; font-size:18px; color:var(--acc); }
 .sys span { font-size:11px; color:var(--dim); }
@@ -145,7 +145,13 @@ tr:hover td { background:var(--row-hover); }
         <div><b id="cpu">–</b><span>CPU %</span></div>
         <div><b id="mem">–</b><span>MEM %</span></div>
         <div><b id="bat">–</b><span>BAT %</span></div>
-        <div><b id="tgt">–</b><span>✈/</span></div>
+        <div><b id="tgt">–</b><span>✈ / ⛵</span></div>
+        <div><b id="tcpu">–</b><span>CPU °C</span></div>
+        <div><b id="tgpu">–</b><span>GPU °C</span></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="upd">⬆ อัปเดตระบบ</button>
+        <span class="val" id="updst" style="color:var(--dim);font-size:12px"></span>
       </div>
     </div>
   </section>
@@ -241,6 +247,9 @@ function renderState(s) {
   $('mem').textContent = s.mem.toFixed(0);
   $('bat').textContent = s.bat;
   $('tgt').textContent = s.planes + '/' + s.ships;
+  $('tcpu').textContent = s.cpuTemp ? s.cpuTemp.toFixed(0) : '–';
+  $('tgpu').textContent = s.gpuTemp ? s.gpuTemp.toFixed(0) : '–';
+  $('updst').textContent = s.updating || '';
 }
 
 async function poll() {
@@ -258,7 +267,7 @@ async function poll() {
     } else {
       const rows = await api('/api/targets');
       $('tgtb').innerHTML = rows.map(r =>
-        `<tr><td>${r.kind==='plane'?'✈':''}</td><td>${esc(r.call)}</td><td>${r.hasPos?r.lat.toFixed(4)+', '+r.lon.toFixed(4):'—'}</td><td>${r.kind==='plane'?r.altFt+' ft':r.speed.toFixed(1)+' kt'}</td><td>${r.track}°</td><td>${r.ageSec.toFixed(0)}s</td></tr>`).join('');
+        `<tr><td>${r.kind==='plane'?'✈':'⛵'}</td><td>${esc(r.call)}</td><td>${r.hasPos?r.lat.toFixed(4)+', '+r.lon.toFixed(4):'—'}</td><td>${r.kind==='plane'?r.altFt+' ft':r.speed.toFixed(1)+' kt'}</td><td>${r.track}°</td><td>${r.ageSec.toFixed(0)}s</td></tr>`).join('');
     }
   } catch (e) {}
 }
@@ -504,6 +513,7 @@ function stopAudio() {
 }
 $('listen').onclick = () => (audioOn ? stopAudio() : startAudio().catch(e => { $('err').textContent = 'audio: ' + e.message; stopAudio(); }));
 $('lmute').onclick = () => cmd({cmd:'localmute', on: !st.localmute});
+$('upd').onclick = () => cmd({cmd:'update'});
 $('wgain').oninput = e => {
   wgain = parseFloat(e.target.value);
   $('wgainv').textContent = Math.round(wgain * 100) + '%';
