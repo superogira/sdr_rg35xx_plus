@@ -768,10 +768,9 @@ func main() {
 	if v, ok := cfg["updateurl"]; ok && v != "" {
 		updateBase = v
 	}
-	if strings.EqualFold(cfg["update"], "off") {
+	autoUpdate := !strings.EqualFold(cfg["update"], "off")
+	if !autoUpdate {
 		fmt.Fprintln(os.Stderr, "update: auto-check disabled by config")
-	} else {
-		runUpdate(upd, updateBase, false, nil)
 	}
 
 	disp, err := ui.OpenDisplay(*display)
@@ -928,6 +927,9 @@ func main() {
 	quit := func() {
 		saveNow()
 		stop()
+	}
+	if autoUpdate {
+		runUpdate(upd, updateBase, false, saveNow)
 	}
 	// Screenshot support: the last presented frame and a transient status
 	// message pointing at the saved file (triggered from the menu).
@@ -1927,6 +1929,7 @@ func main() {
 					*host = ""
 					cfg["host"] = "off"
 					r.SetHost("")
+					saveNow()
 					uiMode = uiMenu
 				} else if hostSel == len(hostList)+1 {
 					hostText, hostEditIdx, kbTarget = "", -1, "host"
@@ -1938,6 +1941,7 @@ func main() {
 					cfg["host"] = h
 					r.SetHost(h)
 					saveHosts()
+					saveNow()
 					uiMode = uiMenu
 				}
 			case input.X:
@@ -1957,6 +1961,7 @@ func main() {
 						hostSel = len(hostList) + 1
 					}
 					saveHosts()
+					saveNow()
 				}
 			case input.B, input.Start:
 				uiMode = uiMenu
@@ -1999,6 +2004,7 @@ func main() {
 						cfg["adsbhost"] = "off"
 						adsbClient.SetHost("")
 					}
+					saveNow()
 					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuBeastRow(uiMode))
 				} else if *sel == len(*list)+1 {
 					hostText, hostEditIdx, kbTarget = "", -1, listTargetOf(uiMode)
@@ -2017,6 +2023,7 @@ func main() {
 						adsbClient.SetHost(h)
 						saveBeastHosts()
 					}
+					saveNow() // lists must survive a hard power-off
 					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuBeastRow(uiMode))
 				}
 			case input.X:
@@ -2046,6 +2053,7 @@ func main() {
 					} else {
 						saveAISHosts()
 					}
+					saveNow()
 				}
 			case input.B, input.Start:
 				uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuBeastRow(uiMode))
@@ -2126,6 +2134,7 @@ func main() {
 							hostEditIdx = len(beastList) - 1
 						}
 						saveBeastHosts()
+						saveNow()
 						adsbHost = hostText
 						cfg["adsbhost"] = adsbHost
 						adsbClient.SetHost(adsbHost)
@@ -2157,6 +2166,7 @@ func main() {
 							hostEditIdx = len(aisList) - 1
 						}
 						saveAISHosts()
+						saveNow()
 						aisHost = hostText
 						cfg["aishost"] = aisHost
 						aisClient.SetHost(aisHost)
@@ -2179,6 +2189,7 @@ func main() {
 						cfg["host"] = hostText
 						r.SetHost(hostText)
 						hostSel = hostEditIdx
+						saveNow()
 					}
 					hostEditIdx = -1
 					uiMode = uiHostList
@@ -2595,6 +2606,13 @@ func main() {
 					})
 				}
 			}
+		}
+		// Power-loss guard: flush the ini every 2 minutes on every
+		// path (not only screen-off) so a hard power-off mid-session
+		// keeps recent settings such as freshly added server lists.
+		if time.Since(lastSave) >= 2*time.Minute {
+			saveNow()
+			lastSave = time.Now()
 		}
 		if panelState == 2 {
 			// Screen off: skip the ENTIRE render pipeline — spectrum
