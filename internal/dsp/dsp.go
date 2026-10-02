@@ -28,6 +28,10 @@ var (
 	DisplaySpanHz = IF2Rate / 2
 )
 
+// SampleRates are the capture rates the app offers (hardware list
+// filtered to what our DSP chain supports).
+var SampleRates = []int{256_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000}
+
 // SetIQRate re-dimensions the DSP for a new capture rate. It must run
 // BEFORE NewChain (filters are designed from these values).
 func SetIQRate(hz int) bool {
