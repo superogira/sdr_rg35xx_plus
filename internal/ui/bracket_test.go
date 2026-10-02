@@ -12,9 +12,10 @@ func TestBracketRender(t *testing.T) {
 		st   FrameStats
 		off  float64
 	}{
-		{"fm_center", FrameStats{FreqHz: 145500000, LOHz: 145500000, BwHz: 12500, Mode: "NFM"}, 0},
-		{"usb_offset", FrameStats{FreqHz: 21074200, LOHz: 21074000, BwHz: 2600, Mode: "USB", SSBOneSided: true}, 200},
-		{"lsb_offset", FrameStats{FreqHz: 7074000, LOHz: 7075000, BwHz: 2600, Mode: "LSB"}, -1000},
+		{"fm_center", FrameStats{FreqHz: 145500000, LOHz: 145500000, BwHz: 12500, Mode: "NFM", PbLo: -6250, PbHi: 6250}, 0},
+		{"usb_offset", FrameStats{FreqHz: 21074200, LOHz: 21074000, BwHz: 2600, Mode: "USB", PbLo: 200, PbHi: 2800}, 200},
+		{"lsb_offset", FrameStats{FreqHz: 7074000, LOHz: 7075000, BwHz: 2600, Mode: "LSB", PbLo: -2800, PbHi: -200}, -1000},
+		{"cw_beat", FrameStats{FreqHz: 14024850, LOHz: 14024850, BwHz: 100, Mode: "CW", PbLo: 650, PbHi: 750}, 0},
 	} {
 		u := New(640, 480)
 		u.SetSpanKHz(100)

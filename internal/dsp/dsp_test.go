@@ -300,3 +300,26 @@ func TestSpectrumTap(t *testing.T) {
 		t.Errorf("snap[0]=%v, want %d (newest half)", snap[0], TapLen)
 	}
 }
+
+func TestPassbandHz(t *testing.T) {
+	cases := []struct {
+		name string
+		mode Mode
+		lo   float64
+		hi   float64
+	}{
+		{"cw_bw100", Mode{Name: "CW", SSB: true, ShiftHz: 700, BwHz: 100}, 650, 750},
+		{"cw_default300", ModeCW, 550, 850},
+		{"usb", ModeUSB, 200, 2800},
+		{"lsb", ModeLSB, -2800, -200},
+		{"usb_wide5k", Mode{Name: "USB", SSB: true, ShiftHz: 1500, BwHz: 5000}, 200, 5200}, // shift grows to keep the low edge ~200
+		{"nfm", ModeNFM, -6250, 6250},
+	}
+	for _, tc := range cases {
+		c := NewChain(tc.mode, nil, nil)
+		lo, hi := c.PassbandHz()
+		if math.Abs(lo-tc.lo) > 1 || math.Abs(hi-tc.hi) > 1 {
+			t.Errorf("%s: passband %.0f..%.0f, want %.0f..%.0f", tc.name, lo, hi, tc.lo, tc.hi)
+		}
+	}
+}

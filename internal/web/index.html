@@ -538,15 +538,18 @@ function drawView() {
 // corner brackets (rtl-sdr-web-monitor style). FM/AM brackets sit
 // symmetric around the carrier; USB extends right, LSB left.
 function drawChanBw(ctx, w, h) {
+  // True filter window from the DSP chain (pbLo/pbHi vs listenHz):
+  // CW is a beat-note window ABOVE the dial, USB/LSB their audio
+  // bands, FM symmetric — so what you bracket is where you hear.
   const bw = specState.bwHz || 12000;
-  const bwPx = Math.min(w, (bw / viewBw()) * w);
-  if (bwPx < 4) return;
+  let lo = specState.pbLo, hi = specState.pbHi;
+  if (lo === undefined || hi === undefined) { lo = -bw / 2; hi = bw / 2; }
+  let left = viewXofHz(specState.listenHz + lo), right = viewXofHz(specState.listenHz + hi);
   const cx = viewXofHz(specState.listenHz);
-  const mode = (specState.mode || '').toUpperCase();
-  let left, right;
-  if (mode === 'USB')      { left = cx;          right = cx + bwPx; }
-  else if (mode === 'LSB') { left = cx - bwPx;   right = cx; }
-  else                     { left = cx - bwPx/2; right = cx + bwPx/2; }
+  if (right - left < 4) { // sub-pixel window at wide zoom: still mark WHERE it is
+    const m = viewXofHz(specState.listenHz + (lo + hi) / 2);
+    left = m - 2; right = m + 2;
+  }
   const amber = 'rgba(234,179,8,';
   ctx.save();
   // faint dashed edges (full height) + centre line
@@ -714,7 +717,15 @@ for (const cv of [spc, wf]) {
   cv.onclick = (ev) => {
     if (dragMoved) return;
     const hz = canvasFreq(ev, cv);
-    if (hz) { cmd({cmd:'freq', hz: Math.round(hz)}); $('clickhz').textContent = STRINGS[lang].tuned + (hz/1e6).toFixed(4) + ' MHz'; }
+    if (!hz) return;
+    let dial = hz;
+    // CW: the beat window is above the dial (e.g. +650..+750) — dial
+    // below the click so the clicked carrier lands mid-window.
+    if ((specState.mode || '').toUpperCase() === 'CW' && specState.pbLo !== undefined) {
+      dial = hz - (specState.pbLo + specState.pbHi) / 2;
+    }
+    cmd({cmd:'freq', hz: Math.round(dial)});
+    $('clickhz').textContent = STRINGS[lang].tuned + (dial/1e6).toFixed(4) + ' MHz';
   };
 }
 

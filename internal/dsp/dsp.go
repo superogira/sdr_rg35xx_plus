@@ -163,6 +163,13 @@ type Chain struct {
 	mode   Mode
 	volume float64
 
+	// Live receive passband edges in Hz relative to the listening
+	// frequency (SSB/CW: the bandpass centre ± half-width AFTER the
+	// bandwidth-driven shift; FM/AM: ±bw/2). The waterfall bracket on
+	// the device and the web channel overlay draw from this so what
+	// you see is where the filter actually is.
+	pbLo, pbHi float64
+
 	dc DCBlocker
 
 	// IF decimator: complex, IQRate -> IF2Rate.
@@ -356,6 +363,7 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 			c.ssbTaps[n] = complex(h*math.Cos(ang), h*math.Sin(ang))
 		}
 		c.mode.HalfBwHz = half
+		c.pbLo, c.pbHi = shift-half, shift+half
 
 	case mode.Name == "NFM":
 		// Sharp channel filter that also decimates; the FM
@@ -366,6 +374,7 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 		// (auD = 4000/8000 = 0 → divide by zero).
 		c.outRate = SSBRate // 8 kHz
 		c.chTaps = DesignLowpass(511, bw/2, float64(IF2Rate))
+		c.pbLo, c.pbHi = -bw/2, bw/2
 		c.chD = 8
 		for IF2Rate/c.chD < c.outRate && c.chD > 1 {
 			c.chD--
@@ -384,6 +393,7 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 		// NFM), then |z| with DC blocking, then audio lowpass.
 		c.outRate = SSBRate // 8 kHz
 		c.chTaps = DesignLowpass(255, bw/2, float64(IF2Rate))
+		c.pbLo, c.pbHi = -bw/2, bw/2
 		c.chD = 4
 		for IF2Rate/c.chD < c.outRate && c.chD > 1 {
 			c.chD--
@@ -402,6 +412,7 @@ func NewChain(mode Mode, tap, rawTap *SpectrumTap) *Chain {
 			c.outRate = SSBRate // at 256k IQ: IF2=32k, can't do 32k/8=4k
 		}
 		c.chTaps = DesignLowpass(127, bw/2, float64(IF2Rate))
+		c.pbLo, c.pbHi = -bw/2, bw/2
 		c.chD = 1
 		c.chRate = IF2Rate
 		c.demod = FMDemod{rate: float64(IF2Rate)}
@@ -458,6 +469,10 @@ func (c *Chain) SetMute(m bool) { c.muted = m }
 
 // PowerDb returns the smoothed IF power in dBFS.
 func (c *Chain) PowerDb() float64 { return c.powerDb }
+
+// PassbandHz returns the live receive passband edges in Hz relative
+// to the listening frequency (see the pbLo/pbHi fields).
+func (c *Chain) PassbandHz() (float64, float64) { return c.pbLo, c.pbHi }
 
 // SetFT8Detector attaches or detaches an FT8 detector.
 func (c *Chain) SetFT8Detector(d *FT8Detector) {

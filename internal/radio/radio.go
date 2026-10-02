@@ -1194,6 +1194,18 @@ func (r *Radio) Bandwidths() []float64 {
 }
 
 // Bandwidth returns the current channel bandwidth in Hz.
+// PassbandHz returns the live receive passband edges in Hz relative
+// to the listening frequency — the device bracket and the web channel
+// overlay draw from this so they match what the filter actually passes.
+func (r *Radio) PassbandHz() (float64, float64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.chain == nil {
+		return -6000, 6000
+	}
+	return r.chain.PassbandHz()
+}
+
 func (r *Radio) Bandwidth() float64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
