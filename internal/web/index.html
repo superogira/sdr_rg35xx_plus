@@ -163,11 +163,11 @@ tr:hover td { background:var(--row-hover); }
     <div class="card">
       <h2><span data-i18n="spectrum">Spectrum</span> <span id="specinfo" style="color:var(--dim);text-transform:none;letter-spacing:0"></span></h2>
       <div style="position:relative">
-        <canvas id="spc" width="512" height="110" style="width:100%;height:110px;cursor:crosshair;background:var(--bg)"></canvas>
+        <canvas id="spc" width="512" height="110" style="width:100%;height:110px;cursor:crosshair;background:var(--bg);touch-action:none"></canvas>
         <canvas id="spcOv" width="512" height="110" style="position:absolute;inset:0;width:100%;height:110px;pointer-events:none"></canvas>
       </div>
       <div style="position:relative;margin-top:4px" id="wfwrap">
-        <canvas id="wf" width="512" height="240" style="width:100%;height:240px;cursor:crosshair"></canvas>
+        <canvas id="wf" width="512" height="240" style="width:100%;height:240px;cursor:crosshair;touch-action:none"></canvas>
         <canvas id="wfOv" width="512" height="240" style="position:absolute;inset:0;width:100%;height:240px;pointer-events:none"></canvas>
       </div>
       <div class="row" style="margin-top:6px"><label data-i18n="clicktune">คลิกกราฟ/น้ำตก = จูน</label><span class="val" id="clickhz" style="color:var(--dim)"></span></div>
@@ -603,6 +603,61 @@ for (const cv of [spc, wf]) {
   });
   cv.addEventListener('mouseup', () => { dragOn = false; });
   cv.addEventListener('mouseleave', () => { dragOn = false; });
+  // Touch: 1-finger drag pans (a stationary tap still tunes via the
+  // synthetic click; dragMoved guards drags), 2-finger pinch zooms
+  // anchored at the pinch midpoint — moving the midpoint pans too,
+  // same view math as the wheel path.
+  let tD = 0, lastTapT = 0, lastTapX = 0;
+  cv.addEventListener('touchstart', (e) => {
+    if (!specState) return;
+    if (e.touches.length === 2) {
+      const [a, b] = e.touches;
+      tD = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      dragOn = false; // the pinch owns the gesture
+    } else if (e.touches.length === 1) {
+      dragOn = true; dragMoved = false; dragX0 = e.touches[0].clientX; dragPan0 = wfPanHz;
+    }
+  }, { passive: true });
+  cv.addEventListener('touchmove', (e) => {
+    if (!specState) return;
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const [a, b] = e.touches;
+      const r = cv.getBoundingClientRect();
+      const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const x = ((a.clientX + b.clientX) / 2 - r.left) / r.width * wf.width;
+      const anchor = viewHzofX(x);
+      if (tD > 0) wfZoom = Math.max(1, Math.min(ZOOM_MAX, wfZoom * d / tD));
+      const newSpan = specState.spanHz / wfZoom;
+      wfPanHz = anchor - (x / wf.width - 0.5) * newSpan - specState.centreHz;
+      tD = d;
+      clampPan();
+      drawView();
+    } else if (e.touches.length === 1 && dragOn) {
+      e.preventDefault();
+      const dxPx = (e.touches[0].clientX - dragX0) / cv.getBoundingClientRect().width;
+      wfPanHz = dragPan0 - dxPx * viewBw();
+      clampPan();
+      if (Math.abs(e.touches[0].clientX - dragX0) > 6) dragMoved = true;
+      drawView();
+    }
+  }, { passive: false });
+  const touchDone = (e) => {
+    tD = 0;
+    if (e.touches.length === 1) { // pinch → drag handoff
+      dragOn = true; dragMoved = true; dragX0 = e.touches[0].clientX; dragPan0 = wfPanHz;
+    } else if (e.touches.length === 0) {
+      dragOn = false;
+      // double-tap = reset zoom (dblclick is unreliable on touch)
+      const t = Date.now(), x0 = e.changedTouches[0] ? e.changedTouches[0].clientX : 0;
+      if (t - lastTapT < 300 && Math.abs(x0 - lastTapX) < 40 && !dragMoved) {
+        wfZoom = 1; wfPanHz = 0; drawView();
+      }
+      lastTapT = t; lastTapX = x0;
+    }
+  };
+  cv.addEventListener('touchend', touchDone);
+  cv.addEventListener('touchcancel', touchDone);
   cv.onclick = (ev) => {
     if (dragMoved) return;
     const hz = canvasFreq(ev, cv);
