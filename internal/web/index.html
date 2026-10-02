@@ -18,6 +18,20 @@
   --card-border:#e5e7eb; --btn:#eef2f7; --btn-border:#cbd5e1; --btn-hover:#dbe4ee; --input:#ffffff;
   --row-hover:#f1f5f9; --hdr-border:#e5e7eb; --track:#e5e7eb; --thumb:#2563eb; --err:#dc2626;
 }
+[data-theme=radio] {
+  /* front-panel style: dark chassis, amber digits, pill controls */
+  --bg:#0d0f12; --panel:#15181d; --ink:#e8d9b0; --dim:#8a7a55; --acc:#f4a63c; --warn:#ff7043;
+  --card-border:#24292f; --btn:#1c2126; --btn-border:#3a4148; --btn-hover:#252b31; --input:#101318;
+  --row-hover:#1b2025; --hdr-border:#2c323a; --track:#101318; --thumb:#f4a63c; --err:#ff5252;
+}
+[data-theme=radio] .freq { font-family:"Courier New",monospace; font-weight:700; letter-spacing:2px;
+  color:var(--acc); text-shadow:0 0 14px rgba(244,166,60,.35); }
+[data-theme=radio] .card { border-radius:14px; box-shadow:inset 0 1px 0 rgba(255,255,255,.04), 0 2px 6px rgba(0,0,0,.4); }
+[data-theme=radio] button { border-radius:999px; }
+[data-theme=radio] button.on { background:var(--acc); color:#1a1204; }
+[data-theme=radio] .sys div { border-radius:999px; }
+[data-theme=radio] table th, [data-theme=radio] table td { border-color:var(--hdr-border); }
+[data-theme=radio] canvas { border-radius:8px; }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, sans-serif; transition:background .2s,color .2s; }
 header { display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--panel); border-bottom:2px solid var(--acc); position:sticky; top:0; z-index:2; }
@@ -124,20 +138,24 @@ tr:hover td { background:var(--row-hover); }
 <script>
 const $ = id => document.getElementById(id);
 // Theme: 'phosphor' (default) or 'light', remembered per browser.
-const THEMES = { phosphor: null, light: 'light' };
+const THEMES = { phosphor: null, light: 'light', radio: 'radio' };
+function themeLabel(name) {
+  return name === 'phosphor' ? '☀️ ขาว' : name === 'light' ? '📻 วิทยุ' : '💡 สีเขียว';
+}
 function applyTheme(name) {
   document.documentElement.dataset.theme = THEMES[name] || '';
   try { localStorage.setItem('sdr-theme', name); } catch (e) {}
-  $('theme').textContent = name === 'light' ? '🌙 วิทยุ' : '☀️ ขาว';
+  $('theme').textContent = themeLabel(name);
 }
 {
   let t = 'phosphor';
   try { t = localStorage.getItem('sdr-theme') || 'phosphor'; } catch (e) {}
-  if (t === 'light') applyTheme('light');
+  applyTheme(t);
 }
 $('theme').onclick = () => {
-  const cur = document.documentElement.dataset.theme === 'light' ? 'light' : 'phosphor';
-  applyTheme(cur === 'light' ? 'phosphor' : 'light');
+  const cur = document.documentElement.dataset.theme || 'phosphor';
+  const next = cur === '' ? 'light' : cur === 'light' ? 'radio' : 'phosphor';
+  applyTheme(next);
   if (typeof wf !== 'undefined' && wctx) { wctx.fillStyle = wfBg(); wctx.fillRect(0, 0, wf.width, wf.height); }
 };
 let st = null, tab = 'ft8';
@@ -235,12 +253,25 @@ for (const t of ['ft8','ais','tgt','map']) {
 // ---- spectrum + waterfall (phase 2) ----
 const spc = $('spc'), wf = $('wf');
 const sctx = spc.getContext('2d'), wctx = wf.getContext('2d');
-function wfBg() { return document.documentElement.dataset.theme === 'light' ? '#111827' : '#000'; }
+function wfBg() {
+  const th = document.documentElement.dataset.theme;
+  if (th === 'light') return '#111827';
+  if (th === 'radio') return '#0d0f12';
+  return '#000';
+}
 wctx.fillStyle = wfBg(); wctx.fillRect(0, 0, wf.width, wf.height);
 let specState = null;
 function dbColor(db) { // -120..0 dB → ramp that follows the theme
   const t = Math.max(0, Math.min(1, (db + 120) / 120));
-  if (document.documentElement.dataset.theme === 'light') {
+  const th = document.documentElement.dataset.theme;
+  if (th === 'radio') {
+    // amber instrument ramp on the dark chassis
+    if (t < 0.25) return `rgb(${Math.round(t*4*60)},${Math.round(t*4*40)},${Math.round(t*4*10)})`;
+    if (t < 0.5)  return `rgb(${Math.round(60+(t-0.25)*4*140)},${Math.round(40+(t-0.25)*4*90)},${Math.round(10+(t-0.25)*4*30)})`;
+    if (t < 0.75) return `rgb(${Math.round(200+(t-0.5)*4*55)},${Math.round(130+(t-0.5)*4*60)},${Math.round(40+(t-0.5)*4*20)})`;
+    return `rgb(255,${Math.round(190+(t-0.75)*4*65)},${Math.round(60+(t-0.75)*4*30)})`;
+  }
+  if (th === 'light') {
     // light theme: dark-blue → cyan → yellow → red on white cards
     if (t < 0.25) return `rgb(${Math.round(t*4*30)},${Math.round(t*4*30)},${Math.round(90+t*4*160)})`;
     if (t < 0.5)  return `rgb(${Math.round(30+(t-0.25)*4*120)},${Math.round(30+(t-0.25)*4*150)},250)`;
