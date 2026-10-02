@@ -404,11 +404,46 @@ function drawView() {
   sctx.strokeStyle = themeCol('--acc', '#35e08a'); sctx.stroke();
   drawOverlays();
 }
+// drawChanBw paints the listening channel as faint dashed edges plus
+// corner brackets (rtl-sdr-web-monitor style). FM/AM brackets sit
+// symmetric around the carrier; USB extends right, LSB left.
+function drawChanBw(ctx, w, h) {
+  const bw = specState.bwHz || 12000;
+  const bwPx = Math.min(w, (bw / viewBw()) * w);
+  if (bwPx < 4) return;
+  const cx = viewXofHz(specState.listenHz);
+  const mode = (specState.mode || '').toUpperCase();
+  let left, right;
+  if (mode === 'USB')      { left = cx;          right = cx + bwPx; }
+  else if (mode === 'LSB') { left = cx - bwPx;   right = cx; }
+  else                     { left = cx - bwPx/2; right = cx + bwPx/2; }
+  const amber = 'rgba(234,179,8,';
+  ctx.save();
+  // faint dashed edges (full height) + centre line
+  ctx.strokeStyle = amber + '0.35)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(Math.round(left)+0.5, 0); ctx.lineTo(Math.round(left)+0.5, h);
+  ctx.moveTo(Math.round(cx)+0.5, 0);  ctx.lineTo(Math.round(cx)+0.5, h);
+  ctx.moveTo(Math.round(right)+0.5, 0); ctx.lineTo(Math.round(right)+0.5, h);
+  ctx.stroke(); ctx.setLineDash([]);
+  // corner brackets top & bottom
+  const armH = 10, armW = 6;
+  ctx.strokeStyle = amber + '0.85)'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(left, armH); ctx.lineTo(left, 0); ctx.lineTo(left + armW, 0);
+  ctx.moveTo(right, armH); ctx.lineTo(right, 0); ctx.lineTo(right - armW, 0);
+  ctx.moveTo(left, h - armH); ctx.lineTo(left, h); ctx.lineTo(left + armW, h);
+  ctx.moveTo(right, h - armH); ctx.lineTo(right, h); ctx.lineTo(right - armW, h);
+  ctx.stroke();
+  ctx.restore();
+  return { cx };
+}
 function drawOverlays() {
   if (!specState) return;
   const warn = themeCol('--warn', '#ffd166'), dimc = themeCol('--dim', '#6f9c82');
   const lx = viewXofHz(specState.listenHz);
   soctx.clearRect(0, 0, sov.width, sov.height);
+  drawChanBw(soctx, sov.width, sov.height);
   if (lx >= 0 && lx <= sov.width) {
     soctx.strokeStyle = warn; soctx.lineWidth = 1.5; soctx.setLineDash([10, 5]);
     soctx.beginPath(); soctx.moveTo(lx, 0); soctx.lineTo(lx, sov.height); soctx.stroke();
@@ -426,6 +461,7 @@ function drawOverlays() {
   }
   soctx.globalAlpha = 1;
   woctx.clearRect(0, 0, wov.width, wov.height);
+  drawChanBw(woctx, wov.width, wov.height);
   if (lx >= 0 && lx <= wov.width) {
     woctx.strokeStyle = warn; woctx.lineWidth = 1.5; woctx.setLineDash([10, 5]);
     woctx.beginPath(); woctx.moveTo(lx, 0); woctx.lineTo(lx, 14); woctx.stroke();
