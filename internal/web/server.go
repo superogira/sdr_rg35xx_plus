@@ -58,6 +58,8 @@ type Server struct {
 	tiles   *osm.Cache
 	rx      [2]float64
 	audio   *audioHub
+	updMsg  func() string
+	updRun  func()
 	ft8Log  []FT8Line
 	aisLog  []AISLine
 	logMu   sync.Mutex
@@ -65,9 +67,18 @@ type Server struct {
 }
 
 // New builds a (not yet listening) server.
+// SetUpdater wires the OTA update hooks: msg returns the live status
+// text ("" when idle), run starts a manual check+install.
+func (s *Server) SetUpdater(msg func() string, run func()) {
+	s.mu.Lock()
+	s.updMsg, s.updRun = msg, run
+	s.mu.Unlock()
+}
+
 func New(r *radio.Radio, adsbStore *adsb.Store, aisStore *ais.Store, port int, tiles *osm.Cache, rxLat, rxLon float64) *Server {
 	srv := &Server{radio: r, adsb: adsbStore, ais: aisStore, port: port, tiles: tiles, rx: [2]float64{rxLat, rxLon}, upSince: time.Now()}
 	srv.audio = newAudioHub()
+	srv.updMsg = func() string { return "" }
 	r.SetAudioTap(srv.audio.push)
 	return srv
 }
@@ -204,12 +215,22 @@ type state struct {
 	UpSecs    int       `json:"upSecs"`
 	RxLat     float64   `json:"rxLat"`
 	RxLon     float64   `json:"rxLon"`
+	CPUTemp   float64   `json:"cpuTemp"`
+	GPUTemp   float64   `json:"gpuTemp"`
+	Updating  string    `json:"updating"`
+}
+
+func (s *Server) updateMsg() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.updMsg()
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	radio := s.radio
 	snap := radio.Snapshot()
 	cpu, mem, _ := sysinfo.Snapshot()
+	sens := sysinfo.SensorSnapshot()
 	st := state{
 		FreqHz: radio.Freq(), LOHz: radio.LO(), Mode: radio.Mode().Name,
 		GainDb: radio.GainDb(), AGC: radio.AGCEnabled(), Vol: radio.Volume(),
@@ -217,10 +238,12 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Ppm: radio.Ppm(), PpmOff: radio.PpmOff(),
 		FT8: radio.FT8Enabled(), AISRF: radio.AISRFEnabled(), LocalMute: radio.LocalMuted(),
 		Connected: snap.Connected, Host: radio.Hostname(),
-		CPU: cpu, MEM: mem, BAT: sysinfo.SensorSnapshot().BattPct,
+		CPU: cpu, MEM: mem, BAT: sens.BattPct,
 		Planes: s.adsb.CountLive(), Ships: len(s.ais.Ships()),
 		UpSecs: int(time.Since(s.upSince).Seconds()),
 		RxLat:  s.rx[0], RxLon: s.rx[1],
+		CPUTemp: sens.CPUTemp, GPUTemp: sens.GPUTemp,
+		Updating: s.updateMsg(),
 	}
 	for _, m := range dsp.ModeList {
 		st.Modes = append(st.Modes, m.Name)
@@ -286,6 +309,13 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 	case "localmute":
 		if c.On != nil {
 			radio.SetLocalMute(*c.On)
+		}
+	case "update":
+		s.mu.Lock()
+		run := s.updRun
+		s.mu.Unlock()
+		if run != nil {
+			go run()
 		}
 	default:
 		http.Error(w, "unknown cmd", http.StatusBadRequest)

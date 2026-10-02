@@ -935,6 +935,8 @@ func main() {
 	if autoUpdate {
 		runUpdate(upd, updateBase, false, saveNow)
 	}
+	// Web-triggered OTA uses the same single-flight updater as the menu.
+	webSrv.SetUpdater(upd.Msg, func() { runUpdate(upd, updateBase, true, saveNow) })
 	// Screenshot support: the last presented frame and a transient status
 	// message pointing at the saved file (triggered from the menu).
 	ft8Log := make([]ui.FT8Entry, 0, 100)
