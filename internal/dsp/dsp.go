@@ -252,10 +252,11 @@ type Chain struct {
 	// IF2 sample and is kept in [0, 2π).
 	offsetHz float64
 	ncoPhase float64
-	amDc     float64      // AM envelope DC tracker
-	fmDc     float64      // FM discriminator DC tracker (LO/ppm offset)
-	fx       *audProc     // user audio effects: NR + HP/LP
-	rtty     *RTTYDecoder // RTTY monitor (fed alongside the FT8 branch)
+	amDc     float64       // AM envelope DC tracker
+	fmDc     float64       // FM discriminator DC tracker (LO/ppm offset)
+	fx       *audProc      // user audio effects: NR + HP/LP
+	rtty     *RTTYDecoder  // RTTY monitor (fed alongside the FT8 branch)
+	wefax    *WefaxDecoder // WEFAX monitor (same 8 kHz branch)
 
 	// Squelch + metering state.
 	sqlOpen  bool
@@ -577,7 +578,7 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 	// FT8/RTTY monitor: the dedicated branch below feeds the detectors
 	// in every mode; the SSB-8k path keeps its in-processSSB feed
 	// (identical band, avoids running the branch twice).
-	if (c.ft8 != nil || c.rtty != nil) && !(c.mode.SSB && c.outRate == SSBRate) {
+	if (c.ft8 != nil || c.rtty != nil || c.wefax != nil) && !(c.mode.SSB && c.outRate == SSBRate) {
 		c.feedMonitors()
 	}
 
@@ -671,7 +672,7 @@ func (c *Chain) processSSB(out *[]float32) {
 
 	// FT8/RTTY expect 8 kHz audio — the wide 16 kHz SSB branches cannot
 	// feed them (the detectors' timing assumes 8 k).
-	if (c.ft8 != nil || c.rtty != nil) && c.outRate == SSBRate {
+	if (c.ft8 != nil || c.rtty != nil || c.wefax != nil) && c.outRate == SSBRate {
 		fbuf := make([]float64, 0, len(side))
 		for _, z := range side {
 			fbuf = append(fbuf, real(z)*3.0)
@@ -681,6 +682,9 @@ func (c *Chain) processSSB(out *[]float32) {
 		}
 		if c.rtty != nil {
 			c.rtty.Feed(fbuf)
+		}
+		if c.wefax != nil {
+			c.wefax.Feed(fbuf)
 		}
 	}
 	for _, z := range side {
@@ -730,6 +734,9 @@ func (c *Chain) feedMonitors() {
 	}
 	if c.rtty != nil {
 		c.rtty.Feed(buf)
+	}
+	if c.wefax != nil {
+		c.wefax.Feed(buf)
 	}
 }
 
@@ -904,6 +911,9 @@ func (c *Chain) SetAISDemods(a, b AISDemod) {
 
 // SetRTTYDetector attaches (or with nil detaches) the RTTY decoder.
 func (c *Chain) SetRTTYDetector(d *RTTYDecoder) { c.rtty = d }
+
+// SetWefaxDecoder attaches the WEFAX monitor (nil detaches).
+func (c *Chain) SetWefaxDecoder(d *WefaxDecoder) { c.wefax = d }
 
 // measure updates the power meter and squelch state from one IF block.
 func (c *Chain) measureIF(block []complex128) {

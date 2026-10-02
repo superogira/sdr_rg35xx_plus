@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"image"
+	"image/png"
 	"io"
 	"math"
 	"net"
@@ -399,6 +400,8 @@ const (
 	menuAF
 	menuRTTY
 	menuRTTYLog
+	menuWefax
+	menuWefaxClear
 	menuADSBHost
 	menuADSBLat
 	menuADSBLon
@@ -420,7 +423,7 @@ var pageItems = [][]int{
 	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 	{menuAF, menuNR, menuHP, menuLP, menuLocalMute},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
-	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog},
+	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear},
 	{menuBM},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 }
@@ -519,6 +522,7 @@ func main() {
 	myRig := strings.TrimSpace(cfg["rig"])
 	pskOn := cfg["psk"] == "on"
 	rttyOn := cfg["rtty"] == "on"
+	wefaxOn := cfg["wefax"] == "on"
 	sqlPref := 0.0
 	if v, ok := cfg["sql"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= -100 && f <= 40 {
@@ -826,6 +830,7 @@ func main() {
 	r.SetAudioFilter("hp", hpHz)
 	r.SetAudioFilter("lp", lpHz)
 	r.SetRTTYEnabled(rttyOn)
+	r.SetWefaxEnabled(wefaxOn)
 	if bwv, ok := cfg[fmt.Sprintf("bw.%s", r.Mode().Name)]; ok {
 		if f, err := strconv.ParseFloat(bwv, 64); err == nil {
 			r.SetBandwidth(f)
@@ -984,6 +989,42 @@ func main() {
 	var lastFrame *image.RGBA
 	capturedMsg := ""
 	var capturedAt time.Time
+	// WEFAX saves go to wefax/ next to the binary; auto = APT stop.
+	saveWefaxImage := func(img *image.Gray, auto bool) {
+		exe, err := os.Executable()
+		dir := "."
+		if err == nil {
+			dir = filepath.Dir(exe)
+		}
+		dir = filepath.Join(dir, "wefax")
+		os.MkdirAll(dir, 0o755)
+		name := fmt.Sprintf("wefax_%s_%.4fMHz.png", time.Now().Format("20060102_150405"), float64(r.Freq())/1e6)
+		path := filepath.Join(dir, name)
+		f, err := os.Create(path)
+		if err == nil {
+			err = png.Encode(f, img)
+			f.Close()
+		}
+		if err != nil {
+			capturedMsg = i18n.T("shot_fail") + err.Error()
+		} else {
+			key := "wefax_saved"
+			if auto {
+				key = "wefax_autosaved"
+			}
+			capturedMsg = i18n.T(key) + path
+		}
+		capturedAt = time.Now()
+		fmt.Fprintln(os.Stderr, "wefax:", capturedMsg)
+	}
+	saveWefax := func() {
+		img := r.Wefax().Snapshot()
+		if img == nil {
+			capturedMsg, capturedAt = i18n.T("wefax_empty"), time.Now()
+			return
+		}
+		saveWefaxImage(img, false)
+	}
 	capture := func() {
 		if lastFrame == nil {
 			return
@@ -1521,6 +1562,14 @@ func main() {
 		case menuRTTYLog:
 			rttyScroll = 0
 			uiMode = uiRTTY
+		case menuWefax:
+			r.SetWefaxEnabled(!r.WefaxEnabled())
+			cfg["wefax"] = map[bool]string{true: "on", false: "off"}[r.WefaxEnabled()]
+			saveNow()
+			fmt.Fprintf(os.Stderr, "wefax: decode %s\n", cfg["wefax"])
+		case menuWefaxClear:
+			r.Wefax().Clear()
+			capturedMsg, capturedAt = i18n.T("wefax_cleared"), time.Now()
 		case menuADSBHost:
 			beastSel = 0
 			uiMode = uiBeastList
@@ -1638,6 +1687,10 @@ func main() {
 				uiMode = uiAISLog
 			}
 		case input.Y:
+			if !r.FT8Enabled() && r.WefaxEnabled() {
+				saveWefax()
+				return
+			}
 			if r.FT8Enabled() {
 				r.SyncFT8()
 				capturedMsg = i18n.T("ft8_synced")
@@ -2793,7 +2846,9 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal},
 					ui.MenuItem{Label: i18n.T("m_map"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_rtty"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.RTTYEnabled()]},
-					ui.MenuItem{Label: i18n.T("m_rttylog"), Value: i18n.T("press_a")})
+					ui.MenuItem{Label: i18n.T("m_rttylog"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_wefax"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxEnabled()]},
+					ui.MenuItem{Label: i18n.T("m_wefaxclear"), Value: i18n.T("press_a")})
 			case pageAudio:
 				nrVal := i18n.T("off")
 				if lv := r.NoiseReduction(); lv > 0 {
@@ -3353,6 +3408,17 @@ func main() {
 			aisLogMu.Unlock()
 			u.DrawAISLog(view, flagDir)
 		}
+		if r.WefaxEnabled() && uiMode == uiMain {
+			prev, lines, st := r.Wefax().Preview(ui.WefaxPanelW, u.WefaxPreviewRows())
+			u.DrawWefaxPanel(prev, lines, wefaxStateLabel(st), i18n.T("wefax_hint"))
+		}
+		if r.WefaxEnabled() {
+			// Auto-save on APT stop — on any screen, so a chart that
+			// finishes while a menu is open is never lost.
+			for _, img := range r.Wefax().TakeDone() {
+				saveWefaxImage(img, true)
+			}
+		}
 		if uiMode == uiMain {
 			u.DrawSysBadge(cpu, mem, sysinfo.SensorSnapshot().BattPct)
 		}
@@ -3546,6 +3612,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	if v, ok := cfg["rtty"]; ok {
 		fmt.Fprintf(f, "rtty=%s\n", v)
 	}
+	if v, ok := cfg["wefax"]; ok {
+		fmt.Fprintf(f, "wefax=%s\n", v)
+	}
 	if v, ok := cfg["adsbhost"]; ok {
 		fmt.Fprintf(f, "adsbhost=%s\n", v)
 	}
@@ -3594,4 +3663,15 @@ func isSpotCallsign(s string) bool {
 		}
 	}
 	return hasDigit
+}
+
+// wefaxStateLabel names the decoder phase for the panel title.
+func wefaxStateLabel(st dsp.WefaxState) string {
+	switch st {
+	case dsp.WefaxPhasing:
+		return i18n.T("wefax_phasing")
+	case dsp.WefaxImage:
+		return i18n.T("wefax_rx")
+	}
+	return i18n.T("wefax_idle")
 }

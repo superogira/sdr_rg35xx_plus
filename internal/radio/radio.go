@@ -77,6 +77,8 @@ type Radio struct {
 	nrLevel    int     // audio noise reduction 0..9
 	rttyOn     bool
 	rtty       *dsp.RTTYDecoder
+	wefaxOn    bool
+	wefax      *dsp.WefaxDecoder
 	hpHz       int  // user audio high-pass corner, 0 = off
 	lpHz       int  // user audio low-pass corner, 0 = off
 	iqRate     int  // capture sample rate in Hz (server default 2.048M)
@@ -126,6 +128,7 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 	rttyDec := dsp.NewRTTYDecoder()
 	r := &Radio{
 		rtty:   rttyDec,
+		wefax:  dsp.NewWefaxDecoder(),
 		Host:   host,
 		tap:    dsp.NewSpectrumTap(),
 		rawTap: dsp.NewSpectrumTapN(dsp.RawTapLen),
@@ -672,6 +675,11 @@ func (r *Radio) applyAudioFx() {
 	if r.rttyOn {
 		r.chain.SetRTTYDetector(r.rtty)
 	}
+	if r.wefaxOn {
+		r.chain.SetWefaxDecoder(r.wefax)
+	} else {
+		r.chain.SetWefaxDecoder(nil)
+	}
 }
 
 // SetNoiseReduction applies the audio NR level 0 (off) .. 9.
@@ -896,6 +904,26 @@ func (r *Radio) SetRTTYEnabled(on bool) {
 	r.applyAudioFx()
 	r.mu.Unlock()
 }
+
+// SetWefaxEnabled turns the HF-FAX decoder on/off (decodes in every
+// mode via the monitor branch; convention is USB with the dial 1.9 kHz
+// below the station's assigned frequency).
+func (r *Radio) SetWefaxEnabled(on bool) {
+	r.mu.Lock()
+	r.wefaxOn = on
+	r.applyAudioFx()
+	r.mu.Unlock()
+}
+
+// WefaxEnabled reports whether the WEFAX decoder is running.
+func (r *Radio) WefaxEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.wefaxOn
+}
+
+// Wefax exposes the decoder for preview/snapshot/save.
+func (r *Radio) Wefax() *dsp.WefaxDecoder { return r.wefax }
 
 // RTTYEnabled reports whether RTTY decoding is active.
 func (r *Radio) RTTYEnabled() bool {
