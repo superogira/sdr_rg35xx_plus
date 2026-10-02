@@ -381,6 +381,8 @@ type spec struct {
 	SpanHz   float64 `json:"spanHz"`
 	Bins     []int16 `json:"bins"` // dB*10, clamped
 	ListenHz int64   `json:"listenHz"`
+	BwHz     float64 `json:"bwHz"`
+	Mode     string  `json:"mode"`
 }
 
 const specFFT = 4096
@@ -434,6 +436,8 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 		SpanHz:   float64(dsp.IF2Rate),
 		Bins:     bins,
 		ListenHz: s.radio.Freq(),
+		BwHz:     s.radio.Bandwidth(),
+		Mode:     s.radio.Mode().Name,
 	})
 }
 
