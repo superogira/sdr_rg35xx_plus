@@ -405,8 +405,12 @@ type spec struct {
 	Reboot   bool    `json:"reboot"`
 }
 
-const specFFT = 4096
-const specBins = 1024
+// Full-rate FFT at the tap length with 4096 sent bins: at 2.048 Msps a
+// bin is 500 Hz, so ×32 zoom still resolves real detail instead of
+// stretching 2 kHz blocks (the device's own waterfall uses the same
+// tap for its zoomed spans).
+const specFFT = 16384
+const specBins = 4096
 
 func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 	// Full-rate tap: the web view shows the ENTIRE capture span (like
