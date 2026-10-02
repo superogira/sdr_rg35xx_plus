@@ -2683,6 +2683,7 @@ func main() {
 		listenOff := float64(r.Freq() - loHz)
 		viewOff := u.ViewOffHzSmooth(listenOff)
 		u.SetViewOff(viewOff)
+		pbLo, pbHi := r.PassbandHz()
 		frame := u.Frame(ui.FrameStats{
 			FreqHz:      r.Freq(),
 			Mode:        r.Mode().Name,
@@ -2697,7 +2698,8 @@ func main() {
 			Host:        r.Hostname(),
 			LOHz:        loHz,
 			BwHz:        r.Bandwidth(),
-			SSBOneSided: r.Mode().SSB && r.Mode().Name != "LSB",
+			PbLo:        pbLo,
+			PbHi:        pbHi,
 			AmMode:      r.Mode().Name == "AM",
 			CpuPct:      cpu,
 			MemPct:      mem,

@@ -536,10 +536,13 @@ type FrameStats struct {
 
 	// Passband tuning: the hardware LO (waterfall centre) and the
 	// receive bandwidth for the bracket marker.
-	LOHz        int64
-	BwHz        float64
-	SSBOneSided bool // USB/CW: bracket on the high side
-	AmMode      bool // AM: symmetric bracket, envelope demod
+	LOHz int64
+	BwHz float64
+	// Live passband edges relative to the listening frequency (from
+	// the DSP chain — SSB/CW include the beat-note offset, e.g. CW
+	// BW100 = +650..+750). The bracket and FT8 grid draw from these.
+	PbLo, PbHi float64
+	AmMode     bool // AM: envelope demod (audio FX routing)
 
 	// System diagnostics (updated ~1 Hz).
 	CpuPct float64
@@ -772,19 +775,16 @@ func (u *UI) SetViewOff(hz float64) {
 func (u *UI) drawCenterLine() {
 	s := u.stats
 	off := float64(s.FreqHz-s.LOHz) - u.viewOffHz // bracket position relative to the view centre
-	px := u.W/2 + int(off/float64(u.SpanFull)*float64(u.W)+0.5)
-	bwPx := int(float64(s.BwHz) / float64(u.SpanFull) * float64(u.W))
-	if bwPx < 3 {
-		bwPx = 3
-	}
-	var x0, x1 int
-	switch {
-	case s.Mode == "LSB":
-		x0, x1 = px-bwPx, px
-	case s.SSBOneSided: // USB / CW: passband above the beat
-		x0, x1 = px, px+bwPx
-	default: // FM: symmetric around the channel
-		x0, x1 = px-bwPx/2, px+bwPx/2
+	pxPerHz := float64(u.W) / float64(u.SpanFull)
+	px := u.W/2 + int(off*pxPerHz+0.5)
+	// Filter edges straight from the DSP chain: for CW this is the
+	// beat-note window (e.g. +650..+750 at BW 100) — the bracket marks
+	// where you actually hear, not the dial frequency.
+	x0 := px + int(float64(s.PbLo)*pxPerHz+0.5)
+	x1 := px + int(float64(s.PbHi)*pxPerHz+0.5)
+	if x1-x0 < 3 {
+		m := (x0 + x1) / 2
+		x0, x1 = m-1, m+2
 	}
 	if x1 < 0 || x0 >= u.W {
 		return // bracket fully off-screen (shouldn't happen with panning)
@@ -1389,18 +1389,11 @@ func (u *UI) DrawFT8Grid(LOHz int64, viewOffHz float64) {
 	listenOff := float64(s.FreqHz - LOHz)
 	pxPerHz := float64(u.W) / float64(u.SpanFull)
 
-	// The grid lives inside the bracket's frequency extent.
-	loHz, hiHz := -5000, 5000
-	bw := int(s.BwHz)
-	if s.SSBOneSided { // USB/CW: passband above the beat
-		loHz = 0
-		hiHz = bw
-	} else if s.Mode == "LSB" {
-		loHz = -bw
-		hiHz = 0
-	} else { // FM: symmetric
-		loHz = -bw / 2
-		hiHz = bw / 2
+	// The grid lives inside the bracket's frequency extent (the live
+	// passband edges from the DSP chain).
+	loHz, hiHz := int(s.PbLo), int(s.PbHi)
+	if hiHz <= loHz {
+		loHz, hiHz = -5000, 5000
 	}
 
 	for hz := 500; hz <= 5000; hz += 500 {
