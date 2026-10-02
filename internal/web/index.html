@@ -313,6 +313,12 @@ const spc = $('spc'), wf = $('wf');
 const sctx = spc.getContext('2d'), wctx = wf.getContext('2d');
 const sov = $('spcOv'), wov = $('wfOv');
 const soctx = sov.getContext('2d'), woctx = wov.getContext('2d');
+function wfBg() {
+  const th = document.documentElement.dataset.theme;
+  if (th === 'light') return '#111827';
+  if (th === 'radio') return '#0d0f12';
+  return '#000';
+}
 wctx.fillStyle = wfBg(); wctx.fillRect(0, 0, wf.width, wf.height);
 let specState = null;
 function dbColor(db) { // -120..0 dB → theme ramp
