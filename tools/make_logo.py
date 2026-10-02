@@ -166,17 +166,29 @@ def render(size):
     bc = (90, 103)
     off, br = 7.2, 3.9
     for (dx, dy), col in (((0, -1), (66, 133, 244)),   # X blue
-                          ((-1, 0), (250, 204, 21)),   # Y yellow
+                          ((-1, 0), (52, 168, 83)),    # Y green
                           ((1, 0), (234, 67, 53)),     # A red
-                          ((0, 1), (52, 168, 83))):    # B green
+                          ((0, 1), (250, 204, 21))):   # B yellow
         x, y = bc[0] + dx * off, bc[1] + dy * off
         d.ellipse(R(x - br, y - br + 0.7, x + br, y + br + 0.7), fill=(0, 0, 0, 80))
         d.ellipse(R(x - br, y - br, x + br, y + br), fill=col + (255,))
         d.ellipse(R(x - br * 0.5, y - br * 0.65, x + br * 0.2, y - br * 0.1), fill=(255, 255, 255, 90))
 
-    # --- START / SELECT pills + speaker grille
-    for x in (62, 76):
-        d.rounded_rectangle(R(x - 4.5, 119, x + 4.5, 122), radius=round(1.5 * u), fill=(120, 126, 136, 255))
+    # --- MENU: small round button between the D-pad and ABXY
+    mc, mr = (71, 97), 2.6
+    d.ellipse(R(mc[0] - mr, mc[1] - mr + 0.6, mc[0] + mr, mc[1] + mr + 0.6), fill=(0, 0, 0, 70))
+    d.ellipse(R(mc[0] - mr, mc[1] - mr, mc[0] + mr, mc[1] + mr), fill=(96, 102, 114, 255))
+    d.ellipse(R(mc[0] - mr * 0.55, mc[1] - mr * 0.7, mc[0] + mr * 0.1, mc[1] - mr * 0.15), fill=(255, 255, 255, 70))
+
+    # --- SELECT / START: pills tilted 45 degrees (Game Boy style)
+    pill = (120, 126, 136, 255)
+    half, w = 3.4, 3.0
+    for x, y in ((61, 121), (73, 121)):
+        p0 = (x - half * 0.7071, y + half * 0.7071)
+        p1 = (x + half * 0.7071, y - half * 0.7071)
+        d.line(R(*p0, *p1), fill=pill, width=round(w * u))
+        for q in (p0, p1):  # round caps
+            d.ellipse(R(q[0] - w / 2, q[1] - w / 2, q[0] + w / 2, q[1] + w / 2), fill=pill)
     for i in range(3):
         x = 95 + i * 3.6
         d.line(R(x, 116 + i * 0.0, x - 3, 125), fill=(150, 156, 166, 255), width=round(1.3 * u))
