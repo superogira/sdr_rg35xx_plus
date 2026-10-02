@@ -193,7 +193,7 @@ def render(size):
     # big bottom-right corner (row along (1,-1), each slot perpendicular).
     k = math.sqrt(0.5)
     cc = (88, 110)                       # centre of the corner arc (r=22)
-    g = (cc[0] + 11 * k, cc[1] + 11 * k)  # row centre, inset from the arc
+    g = (cc[0] + 13 * k, cc[1] + 13 * k)  # row centre, inset from the arc
     for i in range(6):
         o = (i - 2.5) * 3.0
         c = (g[0] + o * k, g[1] - o * k)
