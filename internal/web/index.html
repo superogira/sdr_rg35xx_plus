@@ -158,8 +158,14 @@ tr:hover td { background:var(--row-hover); }
   <section>
     <div class="card">
       <h2>Spectrum <span id="specinfo" style="color:var(--dim);text-transform:none;letter-spacing:0"></span></h2>
-      <canvas id="spc" width="512" height="110" style="width:100%;height:110px;cursor:crosshair;background:var(--bg)"></canvas>
-      <canvas id="wf" width="512" height="240" style="width:100%;height:240px;cursor:crosshair;margin-top:4px"></canvas>
+      <div style="position:relative">
+        <canvas id="spc" width="512" height="110" style="width:100%;height:110px;cursor:crosshair;background:var(--bg)"></canvas>
+        <canvas id="spcOv" width="512" height="110" style="position:absolute;inset:0;width:100%;height:110px;pointer-events:none"></canvas>
+      </div>
+      <div style="position:relative;margin-top:4px">
+        <canvas id="wf" width="512" height="240" style="width:100%;height:240px;cursor:crosshair"></canvas>
+        <canvas id="wfOv" width="512" height="240" style="position:absolute;inset:0;width:100%;height:240px;pointer-events:none"></canvas>
+      </div>
       <div class="row" style="margin-top:6px"><label>คลิกกราฟ/น้ำตก = จูน</label><span class="val" id="clickhz" style="color:var(--dim)"></span></div>
     </div>
     <div class="card" style="margin-top:12px">
@@ -205,6 +211,7 @@ $('theme').onclick = () => {
   const next = cur === 'phosphor' ? 'light' : cur === 'light' ? 'radio' : 'phosphor';
   applyTheme(next);
   if (typeof wf !== 'undefined' && wctx) { wctx.fillStyle = wfBg(); wctx.fillRect(0, 0, wf.width, wf.height); }
+  if (typeof drawOverlays === 'function') drawOverlays();
 };
 let st = null, tab = 'ft8';
 const fmtMHz = hz => (hz/1e6).toFixed(4);
@@ -304,19 +311,14 @@ for (const t of ['ft8','ais','tgt','map']) {
 // ---- spectrum + waterfall (phase 2) ----
 const spc = $('spc'), wf = $('wf');
 const sctx = spc.getContext('2d'), wctx = wf.getContext('2d');
-function wfBg() {
-  const th = document.documentElement.dataset.theme;
-  if (th === 'light') return '#111827';
-  if (th === 'radio') return '#0d0f12';
-  return '#000';
-}
+const sov = $('spcOv'), wov = $('wfOv');
+const soctx = sov.getContext('2d'), woctx = wov.getContext('2d');
 wctx.fillStyle = wfBg(); wctx.fillRect(0, 0, wf.width, wf.height);
 let specState = null;
-function dbColor(db) { // -120..0 dB → ramp that follows the theme
+function dbColor(db) { // -120..0 dB → theme ramp
   const t = Math.max(0, Math.min(1, (db + 120) / 120));
   const th = document.documentElement.dataset.theme;
   if (th === 'light') {
-    // light theme: dark-blue → cyan → yellow → red on white cards
     if (t < 0.25) return `rgb(${Math.round(t*4*30)},${Math.round(t*4*30)},${Math.round(90+t*4*160)})`;
     if (t < 0.5)  return `rgb(${Math.round(30+(t-0.25)*4*120)},${Math.round(30+(t-0.25)*4*150)},250)`;
     if (t < 0.75) return `rgb(${Math.round(150+(t-0.5)*4*105)},${Math.round(180+(t-0.5)*4*30)},${Math.round(250-(t-0.5)*4*200)})`;
@@ -326,6 +328,63 @@ function dbColor(db) { // -120..0 dB → ramp that follows the theme
   if (t < 0.5)  return `rgb(0,${Math.round((t-0.25)*4*200)},${Math.round(140-(t-0.25)*4*60)})`;
   if (t < 0.75) return `rgb(${Math.round((t-0.5)*4*255)},200,${Math.round(80-(t-0.5)*4*80)})`;
   return `rgb(255,${Math.round(200+(t-0.75)*4*55)},0)`;
+}
+function themeCol(name, fallback) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+function specHz(x) {
+  if (!specState) return null;
+  return specState.centreHz - specState.spanHz/2 + (x / wf.width) * specState.spanHz;
+}
+function xOfHz(hz) {
+  if (!specState) return null;
+  return (hz - (specState.centreHz - specState.spanHz/2)) / specState.spanHz * wf.width;
+}
+function drawOverlays() {
+  if (!specState) return;
+  const acc = themeCol('--acc', '#35e08a'), warn = themeCol('--warn', '#ffd166');
+  const dimc = themeCol('--dim', '#6f9c82');
+  // spectrum overlay: listening line + freq ruler ticks
+  soctx.clearRect(0, 0, sov.width, sov.height);
+  const lx = xOfHz(specState.listenHz);
+  if (lx !== null && lx >= 0 && lx <= sov.width) {
+    soctx.strokeStyle = warn; soctx.lineWidth = 1.5; soctx.setLineDash([10, 5]);
+    soctx.beginPath(); soctx.moveTo(lx, 0); soctx.lineTo(lx, sov.height); soctx.stroke();
+    soctx.setLineDash([]);
+    soctx.strokeStyle = warn; soctx.lineWidth = 2;
+    soctx.beginPath(); soctx.moveTo(lx - 8, 0); soctx.lineTo(lx, 7); soctx.lineTo(lx + 8, 0); soctx.stroke();
+  }
+  // freq grid: nice steps across the span
+  const lo = specState.centreHz - specState.spanHz/2;
+  const step = niceStep(specState.spanHz / 8);
+  soctx.strokeStyle = dimc; soctx.globalAlpha = 0.35; soctx.lineWidth = 1;
+  soctx.font = '10px system-ui'; soctx.fillStyle = dimc; soctx.globalAlpha = 0.8;
+  for (let hz = Math.ceil(lo / step) * step; hz <= lo + specState.spanHz; hz += step) {
+    const x = xOfHz(hz);
+    soctx.globalAlpha = 0.35;
+    soctx.beginPath(); soctx.moveTo(x, 0); soctx.lineTo(x, sov.height); soctx.stroke();
+    soctx.globalAlpha = 0.9;
+    soctx.fillText(fmtTick(hz, step), x + 3, sov.height - 4);
+  }
+  soctx.globalAlpha = 1;
+  // waterfall overlay: listening marker at the top edge only (fades with age)
+  woctx.clearRect(0, 0, wov.width, wov.height);
+  if (lx !== null && lx >= 0 && lx <= wov.width) {
+    woctx.strokeStyle = warn; woctx.lineWidth = 1.5; woctx.setLineDash([10, 5]);
+    woctx.globalAlpha = 0.9;
+    woctx.beginPath(); woctx.moveTo(lx, 0); woctx.lineTo(lx, 14); woctx.stroke();
+    woctx.setLineDash([]); woctx.globalAlpha = 1;
+  }
+}
+function niceStep(raw) {
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  const m = raw / pow;
+  return (m >= 5 ? 5 : m >= 2 ? 2 : 1) * pow;
+}
+function fmtTick(hz, step) {
+  if (step >= 1e6) return (hz / 1e6).toFixed(1);
+  if (step >= 1e3) return (hz / 1e3).toFixed(0) + 'k';
+  return (hz / 1e3).toFixed(1) + 'k';
 }
 async function specPoll() {
   try {
@@ -348,11 +407,8 @@ async function specPoll() {
       const y = spc.height - Math.max(0, Math.min(1, (db + 120) / 120)) * (spc.height - 4) - 2;
       x === 0 ? sctx.moveTo(x, y) : sctx.lineTo(x, y);
     }
-    sctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--acc').trim(); sctx.stroke();
-    // listening marker on both canvases
-    const lx = (d.listenHz - (d.centreHz - d.spanHz / 2)) / d.spanHz * spc.width;
-    sctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--warn').trim(); sctx.beginPath(); sctx.moveTo(lx, 0); sctx.lineTo(lx, spc.height); sctx.stroke();
-    wctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--warn').trim(); wctx.beginPath(); wctx.moveTo(lx, 0); wctx.lineTo(lx, 6); wctx.stroke();
+    sctx.strokeStyle = themeCol('--acc', '#35e08a'); sctx.stroke();
+    drawOverlays();
     $('specinfo').textContent = (d.centreHz/1e6).toFixed(4) + ' MHz ±' + (d.spanHz/2000).toFixed(0) + ' kHz';
   } catch (e) {}
 }
@@ -362,6 +418,7 @@ function canvasFreq(ev, cv) {
   const x = (ev.clientX - r.left) / r.width;
   return specState.centreHz - specState.spanHz / 2 + x * specState.spanHz;
 }
+
 for (const cv of [spc, wf]) {
   cv.onclick = ev => {
     const hz = canvasFreq(ev, cv);
