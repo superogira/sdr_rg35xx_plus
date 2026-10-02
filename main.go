@@ -783,7 +783,9 @@ func main() {
 	dw, dh := disp.Size()
 	fmt.Fprintf(os.Stderr, "step: display ok %dx%d\n", dw, dh)
 	u := ui.New(dw, dh)
-	// Waterfall colour range (menu-adjustable, persisted).
+	// Waterfall colour range (menu-adjustable, persisted). Guarded by
+	// wfMu: the web server goroutine reads/writes it too.
+	wfMu := &sync.Mutex{}
 	wfMin, wfMax := 6.0, 62.0
 	if v, ok := cfg["wfmin"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 40 {
@@ -937,6 +939,23 @@ func main() {
 	}
 	// Web-triggered OTA uses the same single-flight updater as the menu.
 	webSrv.SetUpdater(upd.Msg, func() { runUpdate(upd, updateBase, true, saveNow) })
+	// The web WF min/max sliders share the device's waterfall range
+	// (same ini keys, persisted immediately like every other mutation).
+	webSrv.SetWaterfallRange(
+		func() (float64, float64) {
+			wfMu.Lock()
+			defer wfMu.Unlock()
+			return wfMin, wfMax
+		},
+		func(mn, mx float64) {
+			wfMu.Lock()
+			wfMin, wfMax = mn, mx
+			wfMu.Unlock()
+			u.SetWaterfallRange(mn, mx)
+			cfg["wfmin"] = fmt.Sprintf("%g", mn)
+			cfg["wfmax"] = fmt.Sprintf("%g", mx)
+			saveNow()
+		})
 	// Screenshot support: the last presented frame and a transient status
 	// message pointing at the saved file (triggered from the menu).
 	ft8Log := make([]ui.FT8Entry, 0, 100)
@@ -1411,6 +1430,7 @@ func main() {
 			}
 			cfg["step"] = strconv.FormatInt(stepHz, 10)
 		case menuWFMin:
+			wfMu.Lock()
 			wfMin += float64(dir)
 			if wfMin < 0 {
 				wfMin = 0
@@ -1418,9 +1438,11 @@ func main() {
 			if wfMin > 40 {
 				wfMin = 40
 			}
+			wfMu.Unlock()
 			u.SetWaterfallRange(wfMin, wfMax)
 			cfg["wfmin"] = fmt.Sprintf("%g", wfMin)
 		case menuWFMax:
+			wfMu.Lock()
 			wfMax += float64(dir) * 2
 			if wfMax < 10 {
 				wfMax = 10
@@ -1428,6 +1450,7 @@ func main() {
 			if wfMax > 120 {
 				wfMax = 120
 			}
+			wfMu.Unlock()
 			u.SetWaterfallRange(wfMin, wfMax)
 			cfg["wfmax"] = fmt.Sprintf("%g", wfMax)
 		case menuVolume:

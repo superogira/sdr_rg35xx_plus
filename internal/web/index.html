@@ -80,6 +80,7 @@ main { display:grid; grid-template-columns: 340px 1fr; gap:12px; padding:12px; }
 @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
 .card { background:var(--panel); border:1px solid var(--card-border); border-radius:10px; padding:12px; }
 .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:2px; color:var(--dim); margin:0 0 10px; }
+button.nudge { padding:2px 7px; font-size:11px; line-height:1.4; flex:0 0 auto; }
 .freq { font-size:34px; font-variant-numeric:tabular-nums; color:var(--acc); cursor:pointer; }
 .freq small { font-size:14px; color:var(--dim); }
 .row { display:flex; align-items:center; gap:8px; margin:8px 0; }
@@ -114,7 +115,12 @@ tr:hover td { background:var(--row-hover); }
 <main>
   <section>
     <div class="card">
-      <h2 data-i18n="receiver">Receiver</h2>
+      <div style="display:flex;align-items:center;gap:8px;margin:0 0 10px">
+        <h2 data-i18n="receiver" style="margin:0">Receiver</h2>
+        <span style="flex:1"></span>
+        <label data-i18n="rate" style="flex:0 0 auto;margin:0;font-size:12px;color:var(--dim)">Rate</label>
+        <select id="rate" style="width:auto"></select>
+      </div>
       <div class="freq" id="freq" title="click to tune">0.0000 <small>MHz</small></div>
       <div class="row">
         <button id="dn1k">−1k</button><button id="dn100">−100</button>
@@ -123,8 +129,7 @@ tr:hover td { background:var(--row-hover); }
       </div>
       <div class="row"><label data-i18n="tune">Tune</label><input type="number" id="tune" step="1000" style="flex:1"><button id="go">Go</button></div>
       <div class="row"><label data-i18n="mode">Mode</label><select id="mode"></select>
-        <label style="flex:0 0 auto">BW</label><select id="bw"></select>
-        <label style="flex:0 0 auto">Rate</label><select id="rate"></select></div>
+        <label style="flex:0 0 auto">BW</label><select id="bw"></select></div>
       <div class="row"><label data-i18n="gain">Gain</label><input type="range" id="gain" min="-10" max="49.6" step="0.1"><span class="val" id="gainv"></span></div>
       <div class="row"><label data-i18n="volume">Volume</label><input type="range" id="vol" min="0" max="1.5" step="0.05"><span class="val" id="volv"></span></div>
       <div class="row"><label data-i18n="squelch">Squelch</label><input type="range" id="sql" min="-100" max="0" step="1"><span class="val" id="sqlv"></span></div>
@@ -171,6 +176,8 @@ tr:hover td { background:var(--row-hover); }
         <canvas id="wfOv" width="512" height="240" style="position:absolute;inset:0;width:100%;height:240px;pointer-events:none"></canvas>
       </div>
       <div class="row" style="margin-top:6px"><label data-i18n="clicktune">คลิกกราฟ/น้ำตก = จูน</label><span class="val" id="clickhz" style="color:var(--dim)"></span></div>
+      <div class="row"><label data-i18n="wfmin">น้ำตก ต่ำสุด</label><input type="range" id="wfmin" min="0" max="40" step="1"><span class="val" id="wfminv"></span></div>
+      <div class="row"><label data-i18n="wfmax">น้ำตก สูงสุด</label><input type="range" id="wfmax" min="10" max="120" step="2"><span class="val" id="wfmaxv"></span></div>
     </div>
     <div class="card" style="margin-top:12px">
       <div class="tabs">
@@ -201,6 +208,7 @@ const STRINGS = {
     time: 'เวลา', msg: 'ข้อความ', ctry: 'ประเทศ/ระยะ',
     kind: 'ชนิด', name: 'ชื่อ/ทะเบียน', pos: 'พิกัด', altspd: 'สูง/เร็ว', dir: 'ทิศ', age: 'อายุ',
     clicktune: 'คลิกกราฟ/น้ำตก = จูน', mlayer: 'ชั้นแผนที่', webvol: 'เสียงเว็บ',
+    rate: 'Rate', wfmin: 'น้ำตก ต่ำสุด', wfmax: 'น้ำตก สูงสุด',
     tune: 'จูน', mode: 'โหมด', gain: 'กำลังสัญญาณ', volume: 'ระดับเสียง', squelch: 'สเกลช', ppm: 'PPM',
     listenOn: '🔊 ฟัง', listenOff: '🔇 ฟัง', compat: ' (compat)',
     devOn: '🔈 เครื่อง', devOff: '🔇 เครื่อง',
@@ -216,6 +224,7 @@ const STRINGS = {
     time: 'Time', msg: 'Message', ctry: 'Country/dist',
     kind: 'Kind', name: 'Name/reg', pos: 'Position', altspd: 'Alt/Spd', dir: 'Dir', age: 'Age',
     clicktune: 'Click graph/waterfall = tune', mlayer: 'Map layer', webvol: 'Web volume',
+    rate: 'Rate', wfmin: 'WF min', wfmax: 'WF max',
     tune: 'Tune', mode: 'Mode', gain: 'Gain', volume: 'Volume', squelch: 'Squelch', ppm: 'PPM',
     listenOn: '🔊 Listen', listenOff: '🔇 Listen', compat: ' (compat)',
     devOn: '🔈 Device', devOff: '🔇 Device',
@@ -309,6 +318,10 @@ function renderState(s) {
   $('vol').value = s.vol;    $('volv').textContent = Math.round(s.vol*100) + '%';
   $('sql').value = s.sqlDb;  $('sqlv').textContent = s.sqlDb + ' dBFS';
   $('ppm').value = s.ppm;    $('ppmv').textContent = (s.ppm>0?'+':'') + s.ppm;
+  if (s.wfMin !== undefined) {
+    $('wfmin').value = s.wfMin; $('wfminv').textContent = '+' + s.wfMin.toFixed(0) + ' dB';
+    $('wfmax').value = s.wfMax; $('wfmaxv').textContent = s.wfMax.toFixed(0) + ' dB';
+  }
   $('ppmoff').className = s.ppmOff ? 'on' : '';
   $('agc').className = s.agc ? 'on' : '';
   $('ft8').className = s.ft8 ? 'on' : '';
@@ -367,6 +380,8 @@ $('gain').oninput = e => cmd({cmd:'gain', db: parseFloat(e.target.value)});
 $('vol').oninput = e => cmd({cmd:'vol', v: parseFloat(e.target.value)});
 $('sql').oninput = e => cmd({cmd:'sql', db: parseFloat(e.target.value)});
 $('ppm').oninput = e => cmd({cmd:'ppm', v: parseFloat(e.target.value)});
+$('wfmin').oninput = e => { $('wfminv').textContent = '+' + e.target.value + ' dB'; cmd({cmd:'wfmin', v: parseFloat(e.target.value)}); };
+$('wfmax').oninput = e => { $('wfmaxv').textContent = e.target.value + ' dB'; cmd({cmd:'wfmax', v: parseFloat(e.target.value)}); };
 $('ppmoff').onclick = () => cmd({cmd:'ppmoff', on: !st.ppmOff});
 $('agc').onclick = () => cmd({cmd:'agc', on: !st.agc});
 $('ft8').onclick = () => cmd({cmd:'ft8', on: !st.ft8});
@@ -883,6 +898,26 @@ async function mapPoll() {
     await new Promise(r => setTimeout(r, Math.max(30, 120 - (performance.now() - t0))));
   }
 })();
+// Fine-adjust arrows for every slider: ◀/▶ nudge by one step (the
+// same handlers run via the input event, so cmds go out as usual).
+document.querySelectorAll('input[type=range]').forEach(sl => {
+  const step = parseFloat(sl.step) || 1;
+  const dec = (String(sl.step).split('.')[1] || '').length;
+  const nudge = d => {
+    let v = (parseFloat(sl.value) || 0) + d * step;
+    v = Math.max(+sl.min, Math.min(+sl.max, v));
+    sl.value = (Math.round(v / step) * step).toFixed(dec);
+    sl.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const mk = (txt, d) => {
+    const b = document.createElement('button');
+    b.className = 'nudge'; b.textContent = txt; b.tabIndex = -1;
+    b.onclick = () => nudge(d);
+    return b;
+  };
+  sl.insertAdjacentElement('beforebegin', mk('◀', -1));
+  sl.insertAdjacentElement('afterend', mk('▶', 1));
+});
 poll(); setInterval(poll, 1500);
 </script>
 </body>
