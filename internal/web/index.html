@@ -401,7 +401,7 @@ let specState = null;
 let wfZoom = 1, wfPanHz = 0;
 let wfHist = null, wfHistCtx = null, wfHistBins = 0;
 let dragOn = false, dragX0 = 0, dragPan0 = 0, dragMoved = false;
-const ZOOM_MAX = 64;
+const ZOOM_MAX = 128;
 function viewLow() {
   if (!specState) return 0;
   const span = specState.spanHz / wfZoom;

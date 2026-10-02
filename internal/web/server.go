@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"math/bits"
 	"slices"
 	"sync"
 	"time"
@@ -68,6 +69,15 @@ type Server struct {
 	aisLog   []AISLine
 	logMu    sync.Mutex
 	upSince  time.Time
+
+	// Spec scratch reused across /api/spec calls (FFT work arrays at
+	// specMaxFFT; per-call allocation would churn ~3 MB at 8 Hz).
+	specMu   sync.Mutex
+	specBuf  []complex128
+	specRe   []float64
+	specIm   []float64
+	specPow  []float64
+	specSort []float64
 }
 
 // New builds a (not yet listening) server.
@@ -407,12 +417,13 @@ type spec struct {
 	Reboot   bool    `json:"reboot"`
 }
 
-// Full-rate FFT at the tap length with 4096 sent bins: at 2.048 Msps a
-// bin is 500 Hz, so ×32 zoom still resolves real detail instead of
-// stretching 2 kHz blocks (the device's own waterfall uses the same
-// tap for its zoomed spans).
-const specFFT = 16384
-const specBins = 4096
+// Full-rate FFT on the raw tap with 8192 sent bins over the ENTIRE
+// capture span: 250 Hz/bin at 2.048 Msps (31 Hz at 256 ksps), so
+// ×128 zoom still resolves real detail. The FFT size adapts to the
+// capture rate (largest power of two within ~130 ms of signal) so a
+// waterfall row never smears more than ~130 ms.
+const specBins = 8192
+const specMaxFFT = 65536
 
 func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 	// Full-rate tap: the web view shows the ENTIRE capture span (like
@@ -422,35 +433,57 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no tap", http.StatusServiceUnavailable)
 		return
 	}
-	buf := make([]complex128, specFFT)
+	s.specMu.Lock()
+	defer s.specMu.Unlock()
+	n := specMaxFFT
+	if max := dsp.IQRate / 8000; max > 0 && max < n {
+		n = 1 << (bits.Len(uint(max)) - 1) // largest power of two ≤ max
+	}
+	if n < 16384 || n > specMaxFFT {
+		n = 16384
+	}
+	if len(s.specBuf) < specMaxFFT {
+		s.specBuf = make([]complex128, specMaxFFT)
+		s.specRe = make([]float64, specMaxFFT)
+		s.specIm = make([]float64, specMaxFFT)
+		s.specPow = make([]float64, specMaxFFT)
+		s.specSort = make([]float64, specMaxFFT/4)
+	}
+	buf := s.specBuf[:n]
 	gen := tap.SnapshotN(buf)
 	if gen == 0 {
 		writeJSON(w, spec{})
 		return
 	}
-	re := make([]float64, specFFT)
-	im := make([]float64, specFFT)
+	re, im := s.specRe[:n], s.specIm[:n]
 	for i, z := range buf {
 		re[i], im[i] = real(z), imag(z)
 	}
 	dsp.FFT(re, im)
 	// Power per bin, fftshifted so index 0 = lowest frequency.
-	pow := make([]float64, specFFT)
-	for i := 0; i < specFFT; i++ {
-		k := (i + specFFT/2) % specFFT
+	pow := s.specPow[:n]
+	for i := 0; i < n; i++ {
+		k := (i + n/2) % n
 		pow[i] = re[k]*re[k] + im[k]*im[k]
 	}
 	// Device-style mapping: dB relative to a tracked noise floor (25th
 	// percentile, EMA 0.05 — same recipe as ui.NewSpectrumRow), so the
 	// palette matches the handheld waterfall exactly. Bin value is
-	// t*620 (0..620) instead of absolute dB*10.
-	sortedPow := append([]float64(nil), pow...)
-	slices.Sort(sortedPow)
-	noise := sortedPow[len(sortedPow)/4]
+	// t*620 (0..620) instead of absolute dB*10. The percentile uses a
+	// stride-4 subsample: at 64k bins the estimate barely moves and
+	// the sort gets 4× cheaper.
+	j := 0
+	for i := 0; i < n; i += 4 {
+		s.specSort[j] = pow[i]
+		j++
+	}
+	sub := s.specSort[:j]
+	slices.Sort(sub)
+	noise := sub[len(sub)/4]
 	s.noise += 0.05 * (noise - s.noise)
 	const wfMinDb, wfMaxDb = 6.0, 62.0
 	bins := make([]int16, specBins)
-	per := specFFT / specBins
+	per := n / specBins
 	for b := 0; b < specBins; b++ {
 		mx := 0.0
 		for k := 0; k < per; k++ {

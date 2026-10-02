@@ -50,23 +50,36 @@ func HannWindow(re, im []float64) {
 	}
 }
 
-// SpectrumTap keeps the newest TapLen IF samples for the display thread.
-// Push happens from the DSP goroutine; Snapshot from the UI goroutine.
+// SpectrumTap keeps the newest len(buf) samples for the display
+// thread. Push happens from the DSP goroutine; Snapshot from the UI
+// goroutine. It is a true ring (write index, no shifting) so Push
+// stays O(len(block)) even with the 64k-sample raw history.
 type SpectrumTap struct {
-	mu  sync.Mutex
-	buf []complex128
-	gen uint64 // bumped on every Push
+	mu    sync.Mutex
+	buf   []complex128
+	head  int    // next write position
+	total uint64 // samples ever pushed (for partial-fill padding)
+	gen   uint64 // bumped on every Push
 }
 
-// TapLen is the retained history: enough samples for the finest zoom
-// FFT (16k points at 256 ksps → 15.6 Hz bins).
+// TapLen is the retained history of the default (IF) tap: enough
+// samples for the device UI's finest zoom FFT (16k points at 256
+// ksps → 15.6 Hz bins).
 const TapLen = 16384
 
-func NewSpectrumTap() *SpectrumTap {
-	return &SpectrumTap{buf: make([]complex128, TapLen)}
+// RawTapLen is the full-rate tap history: 64k points give the web
+// spectrum 4× finer resolution than TapLen (31 Hz FFT bins at 2.048
+// Msps).
+const RawTapLen = 65536
+
+func NewSpectrumTap() *SpectrumTap { return NewSpectrumTapN(TapLen) }
+
+// NewSpectrumTapN keeps the newest n samples.
+func NewSpectrumTapN(n int) *SpectrumTap {
+	return &SpectrumTap{buf: make([]complex128, n)}
 }
 
-// Push records the latest TapLen samples of block.
+// Push records the latest samples of block.
 func (t *SpectrumTap) Push(block []complex128) {
 	n := len(block)
 	if n == 0 {
@@ -74,22 +87,54 @@ func (t *SpectrumTap) Push(block []complex128) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if n >= TapLen {
-		copy(t.buf, block[n-TapLen:])
+	N := len(t.buf)
+	if n >= N {
+		copy(t.buf, block[n-N:])
+		t.head = 0
 	} else {
-		copy(t.buf, t.buf[n:])
-		copy(t.buf[TapLen-n:], block)
+		c := copy(t.buf[t.head:], block)
+		copy(t.buf, block[c:])
+		t.head = (t.head + n) % N
 	}
+	t.total += uint64(n)
 	t.gen++
 }
 
-// SnapshotN copies the NEWEST len(dst) samples into dst (len(dst) must
-// be ≤ TapLen — powers of two for the UI's FFT) and returns the
-// generation. The newest samples sit at the ring's tail.
+// SnapshotN copies the NEWEST min(len(dst), capacity) samples into dst
+// in chronological order (len(dst) should be ≤ capacity — powers of
+// two for the UI's FFT) and returns the generation. If fewer samples
+// were ever pushed than requested, the front is zero-padded. Returns
+// gen 0 if nothing has been pushed yet.
 func (t *SpectrumTap) SnapshotN(dst []complex128) uint64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	copy(dst, t.buf[len(t.buf)-len(dst):])
+	N := len(t.buf)
+	m := len(dst)
+	if m > N {
+		m = N
+	}
+	avail := t.total
+	if avail > uint64(N) {
+		avail = uint64(N)
+	}
+	if uint64(m) > avail {
+		pad := m - int(avail)
+		for i := 0; i < pad; i++ {
+			dst[i] = 0
+		}
+		dst = dst[pad:]
+		m = int(avail)
+	}
+	if m == 0 {
+		return t.gen
+	}
+	start := t.head - m
+	if start < 0 {
+		start += N
+	}
+	if c := copy(dst, t.buf[start:]); c < m {
+		copy(dst[c:], t.buf)
+	}
 	return t.gen
 }
 

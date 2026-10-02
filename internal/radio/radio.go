@@ -128,7 +128,7 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		rtty:   rttyDec,
 		Host:   host,
 		tap:    dsp.NewSpectrumTap(),
-		rawTap: dsp.NewSpectrumTap(),
+		rawTap: dsp.NewSpectrumTapN(dsp.RawTapLen),
 		out:    out,
 		freqHz: freqHz,
 		loHz:   freqHz,
