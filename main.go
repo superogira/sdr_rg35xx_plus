@@ -402,6 +402,7 @@ const (
 	menuRTTYLog
 	menuWefax
 	menuWefaxClear
+	menuWefaxAuto
 	menuADSBHost
 	menuADSBLat
 	menuADSBLon
@@ -423,7 +424,7 @@ var pageItems = [][]int{
 	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 	{menuAF, menuNR, menuHP, menuLP, menuLocalMute},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
-	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear},
+	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear, menuWefaxAuto},
 	{menuBM},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 }
@@ -523,6 +524,7 @@ func main() {
 	pskOn := cfg["psk"] == "on"
 	rttyOn := cfg["rtty"] == "on"
 	wefaxOn := cfg["wefax"] == "on"
+	wefaxAuto := cfg["wefaxauto"] == "on"
 	sqlPref := 0.0
 	if v, ok := cfg["sql"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= -100 && f <= 40 {
@@ -831,6 +833,7 @@ func main() {
 	r.SetAudioFilter("lp", lpHz)
 	r.SetRTTYEnabled(rttyOn)
 	r.SetWefaxEnabled(wefaxOn)
+	r.SetWefaxAutoSave(wefaxAuto)
 	if bwv, ok := cfg[fmt.Sprintf("bw.%s", r.Mode().Name)]; ok {
 		if f, err := strconv.ParseFloat(bwv, 64); err == nil {
 			r.SetBandwidth(f)
@@ -1570,6 +1573,10 @@ func main() {
 		case menuWefaxClear:
 			r.Wefax().Clear()
 			capturedMsg, capturedAt = i18n.T("wefax_cleared"), time.Now()
+		case menuWefaxAuto:
+			r.SetWefaxAutoSave(!r.WefaxAutoSave())
+			cfg["wefaxauto"] = map[bool]string{true: "on", false: "off"}[r.WefaxAutoSave()]
+			saveNow()
 		case menuADSBHost:
 			beastSel = 0
 			uiMode = uiBeastList
@@ -2848,7 +2855,8 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_rtty"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.RTTYEnabled()]},
 					ui.MenuItem{Label: i18n.T("m_rttylog"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_wefax"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxEnabled()]},
-					ui.MenuItem{Label: i18n.T("m_wefaxclear"), Value: i18n.T("press_a")})
+					ui.MenuItem{Label: i18n.T("m_wefaxclear"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_wefaxauto"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxAutoSave()]})
 			case pageAudio:
 				nrVal := i18n.T("off")
 				if lv := r.NoiseReduction(); lv > 0 {
@@ -3614,6 +3622,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["wefax"]; ok {
 		fmt.Fprintf(f, "wefax=%s\n", v)
+	}
+	if v, ok := cfg["wefaxauto"]; ok {
+		fmt.Fprintf(f, "wefaxauto=%s\n", v)
 	}
 	if v, ok := cfg["adsbhost"]; ok {
 		fmt.Fprintf(f, "adsbhost=%s\n", v)

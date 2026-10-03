@@ -82,6 +82,7 @@ var strings = map[string][2]string{
 	"m_rttylog":          {"ข้อความ RTTY >", "RTTY text >"},
 	"m_wefax":            {"WEFAX (แฟกซ์อากาศ) ถอดรหัส", "WEFAX (weather fax) decode"},
 	"m_wefaxclear":       {"ล้างภาพ WEFAX", "Clear WEFAX image"},
+	"m_wefaxauto":        {"WEFAX บันทึกอัตโนมัติ", "WEFAX auto save"},
 	"wefax_hint":         {"Y บันทึก · ←→ จูน", "Y save · ←→ tune"},
 	"wefax_idle":         {"รอ", "wait"},
 	"wefax_phasing":      {"phasing", "phasing"},

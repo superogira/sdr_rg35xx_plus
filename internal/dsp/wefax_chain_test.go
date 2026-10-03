@@ -17,6 +17,7 @@ func TestWefaxThroughUSBChain(t *testing.T) {
 	fax := demoWefaxAudio()
 	ch := NewChain(ModeUSB, nil, nil)
 	dec := NewWefaxDecoder()
+	dec.SetAutoSave(true)
 	ch.SetWefaxDecoder(dec)
 	const block = 51200
 	iq := make([]byte, 2*block)
