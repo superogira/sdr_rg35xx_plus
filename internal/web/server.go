@@ -71,6 +71,10 @@ type Server struct {
 	logMu    sync.Mutex
 	upSince  time.Time
 
+	// cmdMu serializes handleCmd: web commands run one at a time so
+	// no two HTTP goroutines can race on anything they touch.
+	cmdMu sync.Mutex
+
 	// WEFAX manual-save hook (main wires it so the file lands next to
 	// the binary exactly like the device's Y-save; "" = nothing yet).
 	wfSave func() string
@@ -350,6 +354,8 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
+	s.cmdMu.Lock()
+	defer s.cmdMu.Unlock()
 	var c cmd
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
