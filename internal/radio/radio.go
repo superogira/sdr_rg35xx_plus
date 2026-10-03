@@ -925,6 +925,19 @@ func (r *Radio) WefaxEnabled() bool {
 // Wefax exposes the decoder for preview/snapshot/save.
 func (r *Radio) Wefax() *dsp.WefaxDecoder { return r.wefax }
 
+// SetWefaxAutoSave toggles finishing on the APT stop tone (off =
+// receive continuously, saving is manual).
+func (r *Radio) SetWefaxAutoSave(on bool) {
+	r.mu.Lock()
+	r.wefax.SetAutoSave(on)
+	r.mu.Unlock()
+}
+
+// WefaxAutoSave reports the WEFAX auto-finish mode.
+func (r *Radio) WefaxAutoSave() bool {
+	return r.wefax.AutoSave()
+}
+
 // RTTYEnabled reports whether RTTY decoding is active.
 func (r *Radio) RTTYEnabled() bool {
 	r.mu.Lock()

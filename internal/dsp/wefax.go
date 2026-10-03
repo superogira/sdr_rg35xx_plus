@@ -3,6 +3,7 @@ package dsp
 import (
 	"image"
 	"math"
+	"slices"
 	"sync"
 )
 
@@ -59,15 +60,27 @@ type WefaxDecoder struct {
 	state          WefaxState
 	freeRun        bool // draw without an APT start (mid-transmission tune-in)
 
-	// APT tone detector: count black/white transitions per window
-	aptWin     int
-	aptTrans   int
-	aptLast    bool
-	aptStartN  int // consecutive windows with ~300 Hz toggling
-	aptStopN   int // consecutive windows with ~450 Hz toggling
-	stopAtLine int // image line count when the stop tone began
-	phasingAcc []float64
-	phasingN   int
+	// APT tone detector (regularity-based — see apt): edge timestamps
+	// of the last second, a sample counter, and the latch state.
+	edgeSamples []float64
+	sampleN     int64
+	aptWin      int
+	aptLast     bool
+	kindRun     int // tone kind seen in consecutive windows
+	kindRunN    int
+	kindClearN  int // windows since the latch last saw its tone
+	toneLatch   int // 0 / 300 / 450 — latched tone kind
+	stopAtLine  int // image line count when the stop tone began
+	greyStuck   int // Phasing entered but no phasing line seen yet
+
+	// autoSave: finish/reset on the APT tones (menu "WEFAX auto save").
+	// Off by default: keep receiving continuously, the user saves with
+	// Y — a weak signal must never silently end reception.
+	autoSave bool
+
+	phasingAcc  []float64
+	phasingN    int
+	lastPhaseBi int // last in-image phasing pulse position (agreement gate)
 
 	// completed images waiting for the caller to save
 	done []*image.Gray
@@ -96,6 +109,23 @@ func (d *WefaxDecoder) reset() {
 	d.state = WefaxIdle
 	d.phasingAcc = make([]float64, WefaxWidth)
 	d.phasingN = 0
+	d.greyStuck = 0
+}
+
+// SetAutoSave toggles finishing/resetting on the APT tones. When off
+// (the default) the decoder free-runs forever: lines keep accumulating
+// (rolling over at WefaxMaxLines) and only the user's save snapshots.
+func (d *WefaxDecoder) SetAutoSave(on bool) {
+	d.mu.Lock()
+	d.autoSave = on
+	d.mu.Unlock()
+}
+
+// AutoSave reports the APT-auto-finish mode.
+func (d *WefaxDecoder) AutoSave() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.autoSave
 }
 
 // Feed consumes 8 kHz real audio.
@@ -136,60 +166,117 @@ func (d *WefaxDecoder) Feed(x []float64) {
 	}
 }
 
-// apt counts black/white transitions in 0.25 s windows: ~300 Hz
-// toggling = 150 transitions/window... we use edges/sec instead:
-// 300 Hz square → 600 edges/s, 450 Hz → 900 edges/s.
+// apt detects the APT start (300 Hz) and stop (450 Hz) tones. They
+// are black/white SQUARE WAVES — metronome-regular — while a faded
+// signal's noise and chart content cross the threshold irregularly.
+// The old detector only counted edges per second and a weak signal's
+// noise landed in the 450 Hz band: it "finished" the chart mid-receive
+// and then sat waiting for phasing that never came. Now a tone must
+// show ~1 s of edges whose intervals agree within 25% of their median
+// AND whose median matches the tone's half-period.
 func (d *WefaxDecoder) apt(v float64) {
-	b := v > 0.5
+	// Hysteresis (0.4/0.6): through the RF chain the square wave's
+	// transitions carry ripple, and a plain 0.5 crossing chatters into
+	// many near-zero intervals that blow up the regularity check.
+	b := d.aptLast
+	if d.aptLast {
+		if v < 0.4 {
+			b = false
+		}
+	} else if v > 0.6 {
+		b = true
+	}
 	if b != d.aptLast {
-		d.aptTrans++
+		d.edgeSamples = append(d.edgeSamples, float64(d.sampleN))
+		if len(d.edgeSamples) > 1024 {
+			d.edgeSamples = d.edgeSamples[len(d.edgeSamples)-512:]
+		}
 		d.aptLast = b
 	}
+	d.sampleN++
 	d.aptWin++
-	const win = WefaxRate / 4 // 0.25 s
+	const win = WefaxRate / 4 // 0.25 s per decision
 	if d.aptWin < win {
 		return
 	}
-	edgesPerSec := float64(d.aptTrans) * 4
-	d.aptWin, d.aptTrans = 0, 0
-	switch {
-	case edgesPerSec > 520 && edgesPerSec < 680: // 300 Hz start
-		d.aptStartN++
-		d.aptStopN = 0
-	case edgesPerSec > 800 && edgesPerSec < 1000: // 450 Hz stop
-		if d.aptStopN == 0 {
-			// Remember where the stop tone began: every line rastered
-			// from here on is tone, not chart. The window that first
-			// matched began 0.25 s ago — a line boundary may sit inside
-			// it, so count from the line in progress at window start.
+	d.aptWin = 0
+	kind := 0
+	lo := d.sampleN - WefaxRate
+	iv := make([]float64, 0, 64)
+	prev := int64(-1)
+	for _, e := range d.edgeSamples {
+		if int64(e) < lo {
+			continue
+		}
+		if prev >= 0 {
+			iv = append(iv, e-float64(prev))
+		}
+		prev = int64(e)
+	}
+	if len(iv) >= 150 { // ≥150 half-periods in 1 s
+		slices.Sort(iv)
+		med := iv[len(iv)/2]
+		dev := 0.0
+		for _, x := range iv {
+			if m := math.Abs(x - med); m > dev {
+				dev = m
+			}
+		}
+		if dev < 0.25*med {
+			f := float64(WefaxRate) / (2 * med)
+			switch {
+			case math.Abs(f-300) < 15:
+				kind = 300
+			case math.Abs(f-450) < 22:
+				kind = 450
+			}
+		}
+	}
+	if kind != 0 && kind == d.kindRun {
+		d.kindRunN++
+	} else if kind != 0 {
+		d.kindRun, d.kindRunN = kind, 1
+	} else {
+		d.kindRun, d.kindRunN = 0, 0
+	}
+	if kind != 0 {
+		d.kindClearN = 0
+	} else if d.toneLatch != 0 {
+		d.kindClearN++
+		if d.kindClearN >= 12 { // 3 s without the tone → unlatch
+			d.toneLatch = 0
+		}
+	}
+	if d.kindRunN >= 6 && d.toneLatch != d.kindRun { // 1.5 s of tone
+		d.toneLatch = d.kindRun
+		if d.kindRun == 450 {
+			// Where the stop tone began (for the auto-mode trim).
 			d.stopAtLine = d.lines
 			if d.pos < WefaxRate/4 && d.lines > 0 {
 				d.stopAtLine = d.lines - 1
 			}
 		}
-		d.aptStopN++
-		d.aptStartN = 0
-	default:
-		d.aptStartN, d.aptStopN = 0, 0
 	}
-	if d.aptStartN == 8 && d.state != WefaxPhasing { // 2 s of start tone
+	if !d.autoSave {
+		return // manual mode: tones only mark lines to skip
+	}
+	if d.toneLatch == 300 && d.state != WefaxPhasing && d.kindRunN >= 6 {
 		// A start tone always begins a fresh chart, whatever free-run
 		// was drawing. Keep what came before only if it was a real
 		// chart in progress (the start tone itself is not one).
 		if d.state == WefaxImage {
-			if keep := d.lines - (2*WefaxLPM/60 + 1); keep > 50 {
+			if keep := d.lines - 4; keep > 50 {
 				d.lines = keep
 				d.finish()
 			}
 		}
 		d.reset()
 		d.state = WefaxPhasing
+		d.toneLatch = 300
 	}
-	if d.aptStopN == 8 && d.state == WefaxImage { // 2 s of stop tone
+	if d.toneLatch == 450 && d.state == WefaxImage && d.kindRunN >= 6 {
 		// Drop the stop-tone lines (plus the partial line the tone
 		// started in) so the saved chart ends at the real last line.
-		// stopAtLine is the line the tone began in; that partial line
-		// is mostly chart — keep it, drop everything after.
 		if end := d.stopAtLine + 1; end > 0 && end < d.lines {
 			d.lines = end
 		}
@@ -248,9 +335,20 @@ func (d *WefaxDecoder) raster(v float64) {
 			if d.phasingN >= 3 {
 				d.state = WefaxImage
 				d.storeLine() // this line is already chart content
+			} else {
+				// Grey/noise lines right after entering Phasing: either
+				// the start-tone tail (real chart coming) or a FALSE
+				// start from a weak signal. After ~2 s of nothing
+				// phasing-like, fall back to receiving — never get
+				// stuck silent ("saved and stopped receiving").
+				d.greyStuck++
+				if d.greyStuck >= 5 {
+					d.state = WefaxImage
+				}
 			}
 			return
 		}
+		d.greyStuck = 0
 		d.phasingN++
 		// The pulse (the sender's line start) was drawn at bi px: our
 		// line boundary is bi px EARLY. Delay the next boundary by bi px
@@ -272,8 +370,64 @@ func (d *WefaxDecoder) raster(v float64) {
 		if d.state == WefaxIdle {
 			d.state = WefaxImage // free-run: start drawing right away
 		}
+		if d.toneLatch != 0 {
+			// Inside an APT tone: not chart content — skip the line.
+			return
+		}
+		if phasingInfo, ok := d.imagePhasing(); ok {
+			// A phasing period between charts (manual mode never leaves
+			// Image): realign from the pulses and skip the black bar.
+			_ = phasingInfo
+			return
+		}
 		d.storeLine()
 	}
+}
+
+// imagePhasing checks the just-finished line while in the Image state:
+// if it is a phasing line (mostly black + a real pulse, and the pulse
+// position agrees with the previous line's), it corrects the line clock
+// the same way the Phasing state does and reports true so the caller
+// skips storing it. The agreement gate keeps a dark chart line with a
+// stray white blob from yanking the alignment: a real phasing run has
+// the pulse at (nearly) the same x on every line.
+func (d *WefaxDecoder) imagePhasing() (int, bool) {
+	const pulse = WefaxWidth * 5 / 100
+	mean := 0.0
+	for _, p := range d.line {
+		mean += p
+	}
+	mean /= WefaxWidth
+	if mean > 0.25 {
+		return 0, false
+	}
+	best, bi := -1.0, 0
+	run := 0.0
+	for k := 0; k < pulse; k++ {
+		run += d.line[k]
+	}
+	for i := 0; i < WefaxWidth; i++ {
+		if run > best {
+			best, bi = run, i
+		}
+		run += d.line[(i+pulse)%WefaxWidth] - d.line[i]
+	}
+	if best/pulse <= 0.6 {
+		return 0, false // dark chart line, no pulse
+	}
+	agree := d.lastPhaseBi >= 0 && math.Abs(float64(bi-d.lastPhaseBi)) < 60
+	d.lastPhaseBi = bi
+	if !agree {
+		return bi, false // first pulse of a run (or a blip): remember, don't steer
+	}
+	errPx := bi
+	if errPx > WefaxWidth/2 {
+		errPx -= WefaxWidth
+	}
+	if errPx < -2 || errPx > 2 {
+		d.pos -= float64(errPx) / WefaxWidth * d.samplesPerLine
+	}
+	return bi, true
 }
 
 // storeLine appends the just-finished line to the image (rolling over
