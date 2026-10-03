@@ -83,6 +83,8 @@ var strings = map[string][2]string{
 	"m_wefax":            {"WEFAX (แฟกซ์อากาศ) ถอดรหัส", "WEFAX (weather fax) decode"},
 	"m_wefaxclear":       {"ล้างภาพ WEFAX", "Clear WEFAX image"},
 	"m_wefaxauto":        {"WEFAX บันทึกอัตโนมัติ", "WEFAX auto save"},
+	"m_cwdec":            {"CW ถอดรหัสอัตโนมัติ", "CW auto decode"},
+	"m_cwclear":          {"ล้างข้อความ CW", "Clear CW text"},
 	"wefax_hint":         {"Y บันทึก · ←→ จูน", "Y save · ←→ tune"},
 	"wefax_idle":         {"รอ", "wait"},
 	"wefax_phasing":      {"phasing", "phasing"},

@@ -150,6 +150,7 @@ tr:hover td { background:var(--row-hover); }
         <button id="ft8">FT8</button>
         <button id="aisrf">AIS RF</button>
         <button id="wefax">FAX</button>
+        <button id="cwdec">CW</button>
         <button id="listen" data-i18n-title="ttListen">🔇 ฟัง</button>
         <button id="lmute" data-i18n-title="ttMute">🔈 เครื่อง</button>
       </div>
@@ -199,6 +200,14 @@ tr:hover td { background:var(--row-hover); }
         </div>
         <img id="wfximg" alt="WEFAX" style="display:block;width:100%;max-height:280px;object-fit:contain;image-rendering:pixelated;background:#000;border-radius:6px;border:1px solid var(--card-border)">
       </div>
+      <div id="cwbox" hidden>
+        <div class="row" style="margin:6px 0 2px">
+          <label data-i18n="cw">CW</label>
+          <span class="val" id="cwst" style="color:var(--dim)"></span>
+          <button id="cwclear" data-i18n="wefaxClear">ล้าง</button>
+        </div>
+        <div id="cwtext" style="font-family:monospace;font-size:13px;min-height:34px;max-height:96px;overflow-y:auto;background:#000;color:#bfe6bf;border-radius:6px;border:1px solid var(--card-border);padding:4px 6px;white-space:pre-wrap;word-break:break-all"></div>
+      </div>
     </div>
     <div class="card" style="margin-top:12px">
       <div class="tabs">
@@ -231,6 +240,7 @@ const STRINGS = {
     clicktune: 'คลิกกราฟ/น้ำตก = จูน', mlayer: 'ชั้นแผนที่', webvol: 'เสียงเว็บ',
     rate: 'Rate', wfmin: 'น้ำตก ต่ำสุด', wfmax: 'น้ำตก สูงสุด',
     wefax: 'WEFAX', wefaxSave: 'บันทึก', wefaxAuto: 'เซฟอัตโนมัติ', wefaxClear: 'ล้าง',
+    cw: 'CW', cwwpm: ' wpm', cwnone: 'ยังไม่มีข้อความ',
     nr: 'NR', hp: 'HP', lp: 'LP', off: 'ปิด', hz: ' Hz',
     af_narrow: 'แคบ', af_normal: 'ปกติ', af_wide: 'กว้าง',
     wfxWait: 'รอสัญญาณ', wfxPhasing: 'phasing', wfxRx: 'รับ', wfxLines: ' บรรทัด',
@@ -254,6 +264,7 @@ const STRINGS = {
     clicktune: 'Click graph/waterfall = tune', mlayer: 'Map layer', webvol: 'Web volume',
     rate: 'Rate', wfmin: 'WF min', wfmax: 'WF max',
     wefax: 'WEFAX', wefaxSave: 'Save', wefaxAuto: 'Auto save', wefaxClear: 'Clear',
+    cw: 'CW', cwwpm: ' wpm', cwnone: 'no text yet',
     nr: 'NR', hp: 'HP', lp: 'LP', off: 'off', hz: ' Hz',
     af_narrow: 'Narrow', af_normal: 'Normal', af_wide: 'Wide',
     wfxWait: 'waiting', wfxPhasing: 'phasing', wfxRx: 'receiving', wfxLines: ' lines',
@@ -370,6 +381,17 @@ function renderState(s) {
   $('ft8').className = s.ft8 ? 'on' : '';
   $('aisrf').className = s.aisrf ? 'on' : '';
   $('wefax').className = s.wefax ? 'on' : '';
+  $('cwdec').className = s.cw ? 'on' : '';
+  $('cwbox').hidden = !s.cw;
+  if (s.cw) {
+    $('cwst').textContent = (s.cwWpm > 0 ? s.cwWpm.toFixed(1) + STRINGS[lang].cwwpm : STRINGS[lang].cwnone);
+    const el = $('cwtext');
+    if (el.textContent !== s.cwText) {
+      const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+      el.textContent = s.cwText || '· · ·';
+      if (atEnd) el.scrollTop = el.scrollHeight;
+    }
+  }
   $('nr').value = s.nr;   $('nrv').textContent = s.nr > 0 ? s.nr : STRINGS[lang].off;
   afSet('hp', s.hp); afSet('lp', s.lp);
   $('afn').className = (s.hp === 400 && s.lp === 1700) ? 'on' : '';
@@ -445,6 +467,8 @@ $('agc').onclick = () => cmd({cmd:'agc', on: !st.agc});
 $('ft8').onclick = () => cmd({cmd:'ft8', on: !st.ft8});
 $('aisrf').onclick = () => cmd({cmd:'aisrf', on: !st.aisrf});
 $('wefax').onclick = () => cmd({cmd:'wefax', on: !st.wefax});
+$('cwdec').onclick = () => cmd({cmd:'cwdec', on: !st.cw});
+$('cwclear').onclick = () => cmd({cmd:'cwclear'});
 // Audio filters: HP/LP corners snap to the device's option lists.
 const HP_STEPS = [0, 100, 150, 200, 300, 400, 500, 700, 1000];
 const LP_STEPS = [0, 1500, 1800, 2000, 2200, 2500, 2800, 3000, 3500];

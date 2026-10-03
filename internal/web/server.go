@@ -277,6 +277,9 @@ type state struct {
 	WefaxAuto bool      `json:"wefaxAuto"`
 	WefaxLn   int       `json:"wefaxLines"`
 	WefaxSt   string    `json:"wefaxState"`
+	CW        bool      `json:"cw"`
+	CWText    string    `json:"cwText"`
+	CWWpm     float64   `json:"cwWpm"`
 }
 
 func (s *Server) updateMsg() string {
@@ -329,6 +332,10 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	st.Wefax, st.WefaxAuto = radio.WefaxEnabled(), radio.WefaxAutoSave()
 	st.Nr = radio.NoiseReduction()
 	st.Hp, st.Lp = radio.AudioFilter()
+	st.CW = radio.CWDecodeEnabled()
+	if st.CW {
+		st.CWText, st.CWWpm = radio.CW().Text(), radio.CW().WPM()
+	}
 	if st.Wefax {
 		if ln, ws := radio.Wefax().Stats(); true {
 			st.WefaxLn = ln
@@ -417,6 +424,12 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 		}
 	case "wefaxclear":
 		radio.Wefax().Clear()
+	case "cwdec":
+		if c.On != nil {
+			radio.SetCWDecodeEnabled(*c.On)
+		}
+	case "cwclear":
+		radio.CW().Clear()
 	case "nr":
 		radio.SetNoiseReduction(int(c.V))
 	case "hp":

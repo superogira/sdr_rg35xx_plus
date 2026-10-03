@@ -79,6 +79,8 @@ type Radio struct {
 	rtty       *dsp.RTTYDecoder
 	wefaxOn    bool
 	wefax      *dsp.WefaxDecoder
+	cwOn       bool
+	cw         *dsp.CWDecoder
 	hpHz       int  // user audio high-pass corner, 0 = off
 	lpHz       int  // user audio low-pass corner, 0 = off
 	iqRate     int  // capture sample rate in Hz (server default 2.048M)
@@ -129,6 +131,7 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 	r := &Radio{
 		rtty:   rttyDec,
 		wefax:  dsp.NewWefaxDecoder(),
+		cw:     dsp.NewCWDecoder(),
 		Host:   host,
 		tap:    dsp.NewSpectrumTap(),
 		rawTap: dsp.NewSpectrumTapN(dsp.RawTapLen),
@@ -680,6 +683,11 @@ func (r *Radio) applyAudioFx() {
 	} else {
 		r.chain.SetWefaxDecoder(nil)
 	}
+	if r.cwOn {
+		r.chain.SetCWDecoder(r.cw)
+	} else {
+		r.chain.SetCWDecoder(nil)
+	}
 }
 
 // SetNoiseReduction applies the audio NR level 0 (off) .. 9.
@@ -921,6 +929,25 @@ func (r *Radio) WefaxEnabled() bool {
 	defer r.mu.Unlock()
 	return r.wefaxOn
 }
+
+// SetCWDecodeEnabled turns the Morse decoder on/off. In CW mode the
+// beat note sits at +700 Hz, which is exactly where the decoder listens.
+func (r *Radio) SetCWDecodeEnabled(on bool) {
+	r.mu.Lock()
+	r.cwOn = on
+	r.applyAudioFx()
+	r.mu.Unlock()
+}
+
+// CWDecodeEnabled reports whether the Morse decoder is running.
+func (r *Radio) CWDecodeEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.cwOn
+}
+
+// CW exposes the decoder for the UI/log pollers.
+func (r *Radio) CW() *dsp.CWDecoder { return r.cw }
 
 // Wefax exposes the decoder for preview/snapshot/save.
 func (r *Radio) Wefax() *dsp.WefaxDecoder { return r.wefax }
