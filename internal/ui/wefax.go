@@ -11,22 +11,23 @@ import (
 // rows at a fixed horizontal scale.
 const WefaxPanelW = 200
 
-// DrawWefaxPanel draws the live HF-FAX preview on the right side of
-// the waterfall, above the clock/resource badges. preview is the
-// decoder's downscaled view (newest row at the bottom); lines and
-// state describe progress; hint is the key help line.
+// DrawWefaxPanel draws the live HF-FAX preview on the LEFT side of
+// the waterfall. preview is the decoder's downscaled view (newest row
+// at the bottom); lines and state describe progress; hint is the key
+// help line. The bottom keeps clear of the FT8/AIS mini log windows
+// which also live bottom-left.
 func (u *UI) DrawWefaxPanel(preview *image.Gray, lines int, state string, hint string) {
 	tf := Face(11, false)
 	const pad = 4
 	pw := WefaxPanelW + 2*pad
 	top := 4
-	// leave room for the clock + resource badge stack (2 × 16 + gaps)
-	bottom := u.WaterfallRows - 4 - 16 - 4 - 18 - 4
+	// leave room for the FT8/AIS mini log (6 rows × 15 + padding)
+	bottom := u.WaterfallRows - 4 - 100
 	ph := bottom - top
 	if ph < 80 {
 		return
 	}
-	px := u.W - pw - 4
+	px := 4
 	u.fillBlend(px, top, pw, ph, 0, 0, 0, 190)
 
 	title := fmt.Sprintf("WEFAX · %s · %d", state, lines)
@@ -63,7 +64,7 @@ func (u *UI) DrawWefaxPanel(preview *image.Gray, lines int, state string, hint s
 // current screen size — main asks the decoder for exactly this many.
 func (u *UI) WefaxPreviewRows() int {
 	top := 4
-	bottom := u.WaterfallRows - 4 - 16 - 4 - 18 - 4
+	bottom := u.WaterfallRows - 4 - 100
 	return bottom - top - 18 - 16
 }
 // DrawWefaxGuides marks where the fax subcarrier must sit: the black
