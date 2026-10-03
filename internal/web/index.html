@@ -141,6 +141,7 @@ tr:hover td { background:var(--row-hover); }
         <button id="agc">AGC</button>
         <button id="ft8">FT8</button>
         <button id="aisrf">AIS RF</button>
+        <button id="wefax">FAX</button>
         <button id="listen" data-i18n-title="ttListen">🔇 ฟัง</button>
         <button id="lmute" data-i18n-title="ttMute">🔈 เครื่อง</button>
       </div>
@@ -180,6 +181,16 @@ tr:hover td { background:var(--row-hover); }
       <div class="row" style="margin-top:6px"><label data-i18n="clicktune">คลิกกราฟ/น้ำตก = จูน</label><span class="val" id="clickhz" style="color:var(--dim)"></span></div>
       <div class="row"><label data-i18n="wfmin">น้ำตก ต่ำสุด</label><input type="range" id="wfmin" min="0" max="40" step="1"><span class="val" id="wfminv"></span></div>
       <div class="row"><label data-i18n="wfmax">น้ำตก สูงสุด</label><input type="range" id="wfmax" min="10" max="120" step="2"><span class="val" id="wfmaxv"></span></div>
+      <div id="wfxbox" hidden>
+        <div class="row" style="margin:6px 0 2px">
+          <label data-i18n="wefax">WEFAX</label>
+          <span class="val" id="wfxst" style="color:var(--dim)"></span>
+          <button id="wfxsave" data-i18n="wefaxSave">บันทึก</button>
+          <button id="wfxauto" data-i18n="wefaxAuto">เซฟอัตโนมัติ</button>
+          <button id="wfxclear" data-i18n="wefaxClear">ล้าง</button>
+        </div>
+        <img id="wfximg" alt="WEFAX" style="display:block;width:100%;max-height:280px;object-fit:contain;image-rendering:pixelated;background:#000;border-radius:6px;border:1px solid var(--card-border)">
+      </div>
     </div>
     <div class="card" style="margin-top:12px">
       <div class="tabs">
@@ -211,6 +222,9 @@ const STRINGS = {
     kind: 'ชนิด', name: 'ชื่อ/ทะเบียน', pos: 'พิกัด', altspd: 'สูง/เร็ว', dir: 'ทิศ', age: 'อายุ',
     clicktune: 'คลิกกราฟ/น้ำตก = จูน', mlayer: 'ชั้นแผนที่', webvol: 'เสียงเว็บ',
     rate: 'Rate', wfmin: 'น้ำตก ต่ำสุด', wfmax: 'น้ำตก สูงสุด',
+    wefax: 'WEFAX', wefaxSave: 'บันทึก', wefaxAuto: 'เซฟอัตโนมัติ', wefaxClear: 'ล้าง',
+    wfxWait: 'รอสัญญาณ', wfxPhasing: 'phasing', wfxRx: 'รับ', wfxLines: ' บรรทัด',
+    wefax_saved: 'บันทึก WEFAX: ', wefax_empty: 'WEFAX ยังไม่มีภาพ',
     ft8_modelock: 'FT8 ล็อกโหมด USB — ปิด FT8 ก่อนจึงเปลี่ยนโหมดได้',
     aisrf_modelock: 'AIS RF ล็อกโหมด NFM — ปิด AIS RF ก่อนจึงเปลี่ยนโหมดได้',
     tune: 'จูน', mode: 'โหมด', gain: 'กำลังสัญญาณ', volume: 'ระดับเสียง', squelch: 'สเกลช', ppm: 'PPM',
@@ -229,6 +243,9 @@ const STRINGS = {
     kind: 'Kind', name: 'Name/reg', pos: 'Position', altspd: 'Alt/Spd', dir: 'Dir', age: 'Age',
     clicktune: 'Click graph/waterfall = tune', mlayer: 'Map layer', webvol: 'Web volume',
     rate: 'Rate', wfmin: 'WF min', wfmax: 'WF max',
+    wefax: 'WEFAX', wefaxSave: 'Save', wefaxAuto: 'Auto save', wefaxClear: 'Clear',
+    wfxWait: 'waiting', wfxPhasing: 'phasing', wfxRx: 'receiving', wfxLines: ' lines',
+    wefax_saved: 'WEFAX saved: ', wefax_empty: 'WEFAX: no image yet',
     ft8_modelock: 'FT8 locks USB — turn FT8 off to change mode',
     aisrf_modelock: 'AIS RF locks NFM — turn AIS RF off to change mode',
     tune: 'Tune', mode: 'Mode', gain: 'Gain', volume: 'Volume', squelch: 'Squelch', ppm: 'PPM',
@@ -340,6 +357,13 @@ function renderState(s) {
   $('agc').className = s.agc ? 'on' : '';
   $('ft8').className = s.ft8 ? 'on' : '';
   $('aisrf').className = s.aisrf ? 'on' : '';
+  $('wefax').className = s.wefax ? 'on' : '';
+  $('wfxbox').hidden = !s.wefax;
+  if (s.wefax) {
+    $('wfxauto').className = s.wefaxAuto ? 'on' : '';
+    const map = {wait: 'wfxWait', phasing: 'wfxPhasing', rx: 'wfxRx'};
+    $('wfxst').textContent = STRINGS[lang][map[s.wefaxState] || 'wfxWait'] + ' · ' + s.wefaxLines + STRINGS[lang].wfxLines;
+  }
   // inverted: 'on' style = speaker active
   $('lmute').className = s.localmute ? '' : 'on';
   $('lmute').textContent = s.localmute ? STRINGS[lang].devOff : STRINGS[lang].devOn;
@@ -361,7 +385,10 @@ function renderState(s) {
 }
 
 async function poll() {
-  try { renderState(await api('/api/state')); }
+  try {
+    renderState(await api('/api/state'));
+    if (st.wefax) $('wfximg').src = '/api/wefaximg?' + Date.now();
+  }
   catch (e) { $('conn').textContent = STRINGS[lang].connFail; $('conn').className=''; }
   try {
     if (tab === 'ft8') {
@@ -400,6 +427,13 @@ $('ppmoff').onclick = () => cmd({cmd:'ppmoff', on: !st.ppmOff});
 $('agc').onclick = () => cmd({cmd:'agc', on: !st.agc});
 $('ft8').onclick = () => cmd({cmd:'ft8', on: !st.ft8});
 $('aisrf').onclick = () => cmd({cmd:'aisrf', on: !st.aisrf});
+$('wefax').onclick = () => cmd({cmd:'wefax', on: !st.wefax});
+$('wfxauto').onclick = () => cmd({cmd:'wefaxauto', on: !st.wefaxAuto});
+$('wfxclear').onclick = () => cmd({cmd:'wefaxclear'});
+$('wfxsave').onclick = () => api('/api/cmd', {cmd:'wefaxsave'}).then(d => {
+  const f = (d.path || '').split('\u005c').pop().split('/').pop();
+  showErr(STRINGS[lang].wefax_saved + f);
+}).catch(e => showErr(STRINGS[lang][e.message] || e.message));
 for (const t of ['ft8','ais','tgt','map']) {
   $('tab-'+t).onclick = () => {
     tab = t;
