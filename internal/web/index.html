@@ -137,6 +137,14 @@ tr:hover td { background:var(--row-hover); }
       <div class="row"><label data-i18n="squelch">Squelch</label><input type="range" id="sql" min="-100" max="0" step="1"><span class="val" id="sqlv"></span></div>
       <div class="row"><label data-i18n="ppm">PPM</label><input type="range" id="ppm" min="-120" max="120" step="1"><span class="val" id="ppmv"></span>
         <button id="ppmoff" title="leave correction to the server">OFF</button></div>
+      <div class="row"><label data-i18n="nr">NR</label><input type="range" id="nr" min="0" max="9" step="1"><span class="val" id="nrv"></span></div>
+      <div class="row"><label data-i18n="hp">HP</label><input type="range" id="hp" min="0" max="8" step="1"><span class="val" id="hpv"></span></div>
+      <div class="row"><label data-i18n="lp">LP</label><input type="range" id="lp" min="0" max="8" step="1"><span class="val" id="lpv"></span></div>
+      <div class="row" style="gap:4px">
+        <button id="afn" data-i18n="af_narrow">แคบ</button>
+        <button id="afm" data-i18n="af_normal">ปกติ</button>
+        <button id="afw" data-i18n="af_wide">กว้าง</button>
+      </div>
       <div class="row">
         <button id="agc">AGC</button>
         <button id="ft8">FT8</button>
@@ -223,6 +231,8 @@ const STRINGS = {
     clicktune: 'คลิกกราฟ/น้ำตก = จูน', mlayer: 'ชั้นแผนที่', webvol: 'เสียงเว็บ',
     rate: 'Rate', wfmin: 'น้ำตก ต่ำสุด', wfmax: 'น้ำตก สูงสุด',
     wefax: 'WEFAX', wefaxSave: 'บันทึก', wefaxAuto: 'เซฟอัตโนมัติ', wefaxClear: 'ล้าง',
+    nr: 'NR', hp: 'HP', lp: 'LP', off: 'ปิด', hz: ' Hz',
+    af_narrow: 'แคบ', af_normal: 'ปกติ', af_wide: 'กว้าง',
     wfxWait: 'รอสัญญาณ', wfxPhasing: 'phasing', wfxRx: 'รับ', wfxLines: ' บรรทัด',
     wefax_saved: 'บันทึก WEFAX: ', wefax_empty: 'WEFAX ยังไม่มีภาพ',
     ft8_modelock: 'FT8 ล็อกโหมด USB — ปิด FT8 ก่อนจึงเปลี่ยนโหมดได้',
@@ -244,6 +254,8 @@ const STRINGS = {
     clicktune: 'Click graph/waterfall = tune', mlayer: 'Map layer', webvol: 'Web volume',
     rate: 'Rate', wfmin: 'WF min', wfmax: 'WF max',
     wefax: 'WEFAX', wefaxSave: 'Save', wefaxAuto: 'Auto save', wefaxClear: 'Clear',
+    nr: 'NR', hp: 'HP', lp: 'LP', off: 'off', hz: ' Hz',
+    af_narrow: 'Narrow', af_normal: 'Normal', af_wide: 'Wide',
     wfxWait: 'waiting', wfxPhasing: 'phasing', wfxRx: 'receiving', wfxLines: ' lines',
     wefax_saved: 'WEFAX saved: ', wefax_empty: 'WEFAX: no image yet',
     ft8_modelock: 'FT8 locks USB — turn FT8 off to change mode',
@@ -358,6 +370,11 @@ function renderState(s) {
   $('ft8').className = s.ft8 ? 'on' : '';
   $('aisrf').className = s.aisrf ? 'on' : '';
   $('wefax').className = s.wefax ? 'on' : '';
+  $('nr').value = s.nr;   $('nrv').textContent = s.nr > 0 ? s.nr : STRINGS[lang].off;
+  afSet('hp', s.hp); afSet('lp', s.lp);
+  $('afn').className = (s.hp === 400 && s.lp === 1700) ? 'on' : '';
+  $('afm').className = (s.hp === 300 && s.lp === 2400) ? 'on' : '';
+  $('afw').className = (s.hp === 100 && s.lp === 3000) ? 'on' : '';
   $('wfxbox').hidden = !s.wefax;
   if (s.wefax) {
     $('wfxauto').className = s.wefaxAuto ? 'on' : '';
@@ -428,6 +445,26 @@ $('agc').onclick = () => cmd({cmd:'agc', on: !st.agc});
 $('ft8').onclick = () => cmd({cmd:'ft8', on: !st.ft8});
 $('aisrf').onclick = () => cmd({cmd:'aisrf', on: !st.aisrf});
 $('wefax').onclick = () => cmd({cmd:'wefax', on: !st.wefax});
+// Audio filters: HP/LP corners snap to the device's option lists.
+const HP_STEPS = [0, 100, 150, 200, 300, 400, 500, 700, 1000];
+const LP_STEPS = [0, 1500, 1800, 2000, 2200, 2500, 2800, 3000, 3500];
+function afSet(which, hz) {
+  const steps = which === 'hp' ? HP_STEPS : LP_STEPS;
+  const el = $(which), v = $(which + 'v');
+  let idx = steps.indexOf(hz);
+  if (idx < 0) { // custom value: snap the slider to the nearest option
+    idx = 0;
+    for (let i = 1; i < steps.length; i++) if (Math.abs(steps[i] - hz) < Math.abs(steps[idx] - hz)) idx = i;
+  }
+  el.value = idx;
+  v.textContent = hz > 0 ? hz + STRINGS[lang].hz : STRINGS[lang].off;
+}
+$('nr').oninput = e => { const v = +e.target.value; $('nrv').textContent = v > 0 ? v : STRINGS[lang].off; cmd({cmd:'nr', v}); };
+$('hp').oninput = e => { const hz = HP_STEPS[+e.target.value]; afSet('hp', hz); cmd({cmd:'hp', v: hz}); };
+$('lp').oninput = e => { const hz = LP_STEPS[+e.target.value]; afSet('lp', hz); cmd({cmd:'lp', v: hz}); };
+$('afn').onclick = () => { cmd({cmd:'hp', v: 400}); cmd({cmd:'lp', v: 1700}); };
+$('afm').onclick = () => { cmd({cmd:'hp', v: 300}); cmd({cmd:'lp', v: 2400}); };
+$('afw').onclick = () => { cmd({cmd:'hp', v: 100}); cmd({cmd:'lp', v: 3000}); };
 $('wfxauto').onclick = () => cmd({cmd:'wefaxauto', on: !st.wefaxAuto});
 $('wfxclear').onclick = () => cmd({cmd:'wefaxclear'});
 $('wfxsave').onclick = () => api('/api/cmd', {cmd:'wefaxsave'}).then(d => {
