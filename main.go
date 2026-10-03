@@ -3455,6 +3455,9 @@ func main() {
 			u.DrawFT8Grid(loHz, viewOff)
 			u.DrawFT8Log(ft8Log, flagDir)
 		}
+		if r.WefaxEnabled() && uiMode == uiMain {
+			u.DrawWefaxGuides()
+		}
 		if r.AISRFEnabled() && uiMode == uiMain && !r.FT8Enabled() {
 			aisLogMu.Lock()
 			view := make([]ui.AISEntry, len(aisLog))

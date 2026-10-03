@@ -605,11 +605,34 @@ function drawChanBw(ctx, w, h) {
   ctx.restore();
   return { cx };
 }
+// WEFAX tuning guides: the fax subcarrier must sit between the two
+// lines — black tone at +1500 Hz, white at +2300 Hz from the dial.
+// Tune so the signal's two tone bands align with the B and W lines.
+function drawWefaxGuides(ctx, w, h, labels) {
+  const xB = viewXofHz(specState.listenHz + 1500);
+  const xW = viewXofHz(specState.listenHz + 2300);
+  if (Math.abs(xW - xB) < 4) return; // span too wide to be useful
+  ctx.save();
+  ctx.strokeStyle = 'rgba(250,210,80,0.8)';
+  ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
+  for (const x of [xB, xW]) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+  if (labels) {
+    ctx.setLineDash([]);
+    ctx.font = '10px system-ui';
+    ctx.fillStyle = 'rgba(250,210,80,0.95)';
+    ctx.fillText('B', xB - 3, 11);
+    ctx.fillText('W', xW - 3, 11);
+  }
+  ctx.restore();
+}
 function drawOverlays() {
   if (!specState) return;
   const dimc = themeCol('--dim', '#6f9c82');
   soctx.clearRect(0, 0, sov.width, sov.height);
   drawChanBw(soctx, sov.width, sov.height);
+  if (specState.wefax) drawWefaxGuides(soctx, sov.width, sov.height, true);
   const step = niceStep(viewBw() / 8);
   soctx.font = '10px system-ui';
   for (let hz = Math.ceil(viewLow() / step) * step; hz <= viewLow() + viewBw(); hz += step) {
@@ -622,6 +645,7 @@ function drawOverlays() {
   soctx.globalAlpha = 1;
   woctx.clearRect(0, 0, wov.width, wov.height);
   drawChanBw(woctx, wov.width, wov.height);
+  if (specState.wefax) drawWefaxGuides(woctx, wov.width, wov.height, false);
   zoomBadge();
 }
 function niceStep(raw) {

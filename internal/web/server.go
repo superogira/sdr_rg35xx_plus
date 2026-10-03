@@ -518,6 +518,7 @@ type spec struct {
 	Bins     []int16 `json:"bins"` // dB*10, clamped
 	ListenHz int64   `json:"listenHz"`
 	BwHz     float64 `json:"bwHz"`
+	Wefax    bool    `json:"wefax"` // draw the fax tuning guides
 	PbLo     float64 `json:"pbLo"` // live passband edges vs listenHz
 	PbHi     float64 `json:"pbHi"` // (CW beat window, SSB band, FM ±bw/2)
 	Mode     string  `json:"mode"`
@@ -559,6 +560,7 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no tap", http.StatusServiceUnavailable)
 		return
 	}
+	wefaxOn := s.radio.WefaxEnabled()
 	pbLo, pbHi := s.radio.PassbandHz()
 	s.specMu.Lock()
 	defer s.specMu.Unlock()
@@ -642,6 +644,7 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 		Bins:     bins,
 		ListenHz: s.radio.Freq(),
 		BwHz:     s.radio.Bandwidth(),
+		Wefax:    wefaxOn,
 		PbLo:     pbLo,
 		PbHi:     pbHi,
 		Mode:     s.radio.Mode().Name,

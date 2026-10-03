@@ -66,3 +66,36 @@ func (u *UI) WefaxPreviewRows() int {
 	bottom := u.WaterfallRows - 4 - 16 - 4 - 18 - 4
 	return bottom - top - 18 - 16
 }
+// DrawWefaxGuides marks where the fax subcarrier must sit: the black
+// tone at +1500 Hz and the white tone at +2300 Hz from the dial (USB
+// with the dial 1.9 kHz below the assigned frequency). Tune until the
+// signal's two tone bands line up with the B and W dashed lines.
+func (u *UI) DrawWefaxGuides() {
+	s := u.stats
+	off := float64(s.FreqHz-s.LOHz) - u.viewOffHz
+	pxPerHz := float64(u.W) / float64(u.SpanFull)
+	x := func(dhz float64) int {
+		return u.W/2 + int((off+dhz)*pxPerHz+0.5)
+	}
+	x0, x1 := x(1500), x(2300)
+	if x1-x0 < 4 {
+		return // span too wide for the guides to mean anything
+	}
+	amber := color.RGBA{250, 210, 80, 255}
+	// dashed verticals: 6 px on, 4 px off
+	for _, xx := range []int{x0, x1} {
+		for y := 0; y < u.WaterfallRows; y += 10 {
+			for dy := 0; dy < 6 && y+dy < u.WaterfallRows; dy++ {
+				if xx < 0 || xx >= u.W || y+dy < 0 {
+					continue
+				}
+				o := (y+dy)*u.img.Stride + xx*4
+				u.img.Pix[o+0], u.img.Pix[o+1], u.img.Pix[o+2], u.img.Pix[o+3] = amber.R, amber.G, amber.B, 255
+			}
+		}
+	}
+	// labels at the top of the waterfall: B = black tone, W = white
+	tf := Face(10, false)
+	tf.DrawString(u.img, amber, x0-3, 10, "B")
+	tf.DrawString(u.img, amber, x1-3, 10, "W")
+}
