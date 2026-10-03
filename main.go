@@ -922,7 +922,10 @@ func main() {
 	// change made since boot — the bug behind settings reverting
 	// after an OTA update), and periodically from the render loop as
 	// a power-loss guard.
+	var saveMu sync.Mutex
 	saveNow := func() {
+		saveMu.Lock()
+		defer saveMu.Unlock()
 		langPref := i18n.Lang()
 		agcPref := "on"
 		if !r.AGCEnabled() {
@@ -3581,6 +3584,15 @@ func legacyConfigPath() string { return configFile("sdr35.ini") } // pre-rename 
 
 func loadConfig() map[string]string {
 	cfg := readIni(configPath())
+	if _, ok := cfg["host"]; !ok {
+		// A truncated ini (crash mid-write from the pre-atomic era):
+		// "host" is always the first key written — missing means the
+		// file is not whole. Prefer the backup generation.
+		if bak := readIni(configPath() + ".bak"); len(bak) > len(cfg) {
+			fmt.Fprintln(os.Stderr, "config: ini incomplete, using .bak")
+			cfg = bak
+		}
+	}
 	if len(cfg) == 0 {
 		// First run after the SDR35 → SDRg35xx rename: adopt the old
 		// settings so host/freq/gain survive.
@@ -3605,11 +3617,15 @@ func readIni(path string) map[string]string {
 }
 
 func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol float64, gainDb float64, rate, spanKHz int, dsPref, agcPref, langPref string, stepHz int64, myCall, myGrid, myAnt, myRig string, pskOn bool, wfMin, wfMax float64) {
-	f, err := os.Create(configPath())
+	// Atomic write: a crash or concurrent writer can never leave a
+	// half-written ini (which silently dropped optional keys like the
+	// host lists on reload). Write to .tmp, keep the previous file as
+	// .bak, then rename into place.
+	path := configPath()
+	f, err := os.Create(path + ".tmp")
 	if err != nil {
 		return
 	}
-	defer f.Close()
 	// Radio host: an empty host (radio disabled) persists as "off".
 	hostOut := host
 	if hostOut == "" {
@@ -3695,6 +3711,15 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 		if v, ok := cfg[fmt.Sprintf("bw.%s", m.Name)]; ok {
 			fmt.Fprintf(f, "bw.%s=%s\n", m.Name, v)
 		}
+	}
+	if err := f.Close(); err != nil {
+		return
+	}
+	os.Rename(path, path+".bak") // previous generation, kept for recovery
+	if err := os.Rename(path+".tmp", path); err != nil {
+		// Rename failed (odd fs): restore the old file so settings
+		// are not lost entirely.
+		os.Rename(path+".bak", path)
 	}
 }
 
