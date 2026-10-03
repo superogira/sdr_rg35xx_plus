@@ -74,3 +74,28 @@ func TestViewHysteresis(t *testing.T) {
 		t.Errorf("view did not follow the leftward scroll: %v", u.viewOffHz)
 	}
 }
+
+func TestWefaxGuides(t *testing.T) {
+	u := New(640, 480)
+	u.SetSpanKHz(12) // 12 kHz span: 800 Hz ≈ 43 px apart
+	frame := u.Frame(FrameStats{FreqHz: 10000000, LOHz: 10000000, BwHz: 2600, Mode: "USB", PbLo: 200, PbHi: 2800})
+	u.DrawWefaxGuides()
+	pxPerHz := 640.0 / 12000.0
+	xB, xW := 320+int(1500*pxPerHz+0.5), 320+int(2300*pxPerHz+0.5)
+	foundB, foundW := false, false
+	for y := 0; y < u.WaterfallRows; y += 10 {
+		for _, xx := range []int{xB, xW} {
+			r, g, b, _ := frame.At(xx, y).RGBA()
+			if r>>8 > 220 && g>>8 > 180 && b>>8 < 120 {
+				if xx == xB {
+					foundB = true
+				} else {
+					foundW = true
+				}
+			}
+		}
+	}
+	if !foundB || !foundW {
+		t.Fatalf("guides not drawn at x=%d/%d (B=%v W=%v)", xB, xW, foundB, foundW)
+	}
+}
