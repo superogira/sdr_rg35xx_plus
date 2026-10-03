@@ -271,6 +271,9 @@ type state struct {
 	WfMin     float64   `json:"wfMin"`
 	WfMax     float64   `json:"wfMax"`
 	Wefax     bool      `json:"wefax"`
+	Nr        int       `json:"nr"`
+	Hp        int       `json:"hp"`
+	Lp        int       `json:"lp"`
 	WefaxAuto bool      `json:"wefaxAuto"`
 	WefaxLn   int       `json:"wefaxLines"`
 	WefaxSt   string    `json:"wefaxState"`
@@ -324,6 +327,8 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	st.Wefax, st.WefaxAuto = radio.WefaxEnabled(), radio.WefaxAutoSave()
+	st.Nr = radio.NoiseReduction()
+	st.Hp, st.Lp = radio.AudioFilter()
 	if st.Wefax {
 		if ln, ws := radio.Wefax().Stats(); true {
 			st.WefaxLn = ln
@@ -412,6 +417,12 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 		}
 	case "wefaxclear":
 		radio.Wefax().Clear()
+	case "nr":
+		radio.SetNoiseReduction(int(c.V))
+	case "hp":
+		radio.SetAudioFilter("hp", int(c.V))
+	case "lp":
+		radio.SetAudioFilter("lp", int(c.V))
 	case "wefaxsave":
 		s.mu.Lock()
 		f := s.wfSave
