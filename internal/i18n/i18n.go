@@ -162,6 +162,7 @@ var strings = map[string][2]string{
 	"m_span":             {"Span จอ (zoom)", "Span (zoom)"},
 	"span_fmt":           {"Span %d kHz", "Span %d kHz"},
 	"m_step":             {"สเต็ปจูน", "Tune step"},
+	"step_fmt":           {"สเต็ป %s", "Step %s"},
 	"m_vol":              {"วอลุ่ม", "Volume"},
 	"m_shot":             {"ถ่ายภาพหน้าจอ", "Screenshot"},
 	"m_update":           {"ตรวจอัพเดท", "Check update"},

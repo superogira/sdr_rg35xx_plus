@@ -1757,6 +1757,21 @@ func main() {
 			// Zoom in: next narrower span.
 			spanStep(-1)
 			capturedMsg, capturedAt = fmt.Sprintf(i18n.T("span_fmt"), u.SpanFull/1000), time.Now()
+		case input.L2, input.R2:
+			// Tune step: R2 coarser, L2 finer (same ascending list +
+			// wrap + persistence as the menu row).
+			dir := 1
+			if b == input.L2 {
+				dir = -1
+			}
+			for i, s := range stepSteps {
+				if s == stepHz {
+					stepHz = stepSteps[(i+len(stepSteps)+dir)%len(stepSteps)]
+					break
+				}
+			}
+			cfg["step"] = strconv.FormatInt(stepHz, 10)
+			setMsg(fmt.Sprintf(i18n.T("step_fmt"), stepLabel(stepHz)))
 		}
 	}
 	handlePress := func(b input.Button) {
