@@ -947,6 +947,17 @@ func main() {
 	}
 	// Web-triggered OTA uses the same single-flight updater as the menu.
 	webSrv.SetUpdater(upd.Msg, func() { runUpdate(upd, updateBase, true, saveNow) })
+	// Web WEFAX save: same file, same folder as the device's Y-save.
+	// (Declared early; the implementation is assigned further down
+	// next to the other WEFAX save helpers.)
+	var saveWefaxFile func(img *image.Gray, auto bool) string
+	webSrv.SetWefaxSaver(func() string {
+		img := r.Wefax().Snapshot()
+		if img == nil {
+			return ""
+		}
+		return saveWefaxFile(img, false)
+	})
 	// The web WF min/max sliders share the device's waterfall range
 	// (same ini keys, persisted immediately like every other mutation).
 	webSrv.SetWaterfallRange(
@@ -993,7 +1004,8 @@ func main() {
 	capturedMsg := ""
 	var capturedAt time.Time
 	// WEFAX saves go to wefax/ next to the binary; auto = APT stop.
-	saveWefaxImage := func(img *image.Gray, auto bool) {
+	// Returns the written path ("" on error) — the web save uses it.
+	saveWefaxFile = func(img *image.Gray, auto bool) string {
 		exe, err := os.Executable()
 		dir := "."
 		if err == nil {
@@ -1010,6 +1022,7 @@ func main() {
 		}
 		if err != nil {
 			capturedMsg = i18n.T("shot_fail") + err.Error()
+			path = ""
 		} else {
 			key := "wefax_saved"
 			if auto {
@@ -1019,6 +1032,7 @@ func main() {
 		}
 		capturedAt = time.Now()
 		fmt.Fprintln(os.Stderr, "wefax:", capturedMsg)
+		return path
 	}
 	saveWefax := func() {
 		img := r.Wefax().Snapshot()
@@ -1026,7 +1040,7 @@ func main() {
 			capturedMsg, capturedAt = i18n.T("wefax_empty"), time.Now()
 			return
 		}
-		saveWefaxImage(img, false)
+		saveWefaxFile(img, false)
 	}
 	capture := func() {
 		if lastFrame == nil {
@@ -3424,7 +3438,7 @@ func main() {
 			// Auto-save on APT stop — on any screen, so a chart that
 			// finishes while a menu is open is never lost.
 			for _, img := range r.Wefax().TakeDone() {
-				saveWefaxImage(img, true)
+				saveWefaxFile(img, true)
 			}
 		}
 		if uiMode == uiMain {

@@ -522,6 +522,14 @@ func (d *WefaxDecoder) Preview(w, h int) (*image.Gray, int, WefaxState) {
 	return out, d.lines, d.state
 }
 
+// Stats reports the current line count and decoder state without
+// copying any image data (the web status poll).
+func (d *WefaxDecoder) Stats() (int, WefaxState) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.lines, d.state
+}
+
 // Clear discards the current image and returns to free-run.
 func (d *WefaxDecoder) Clear() {
 	d.mu.Lock()

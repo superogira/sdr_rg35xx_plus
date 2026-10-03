@@ -9,11 +9,12 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"image/png"
 	"io/fs"
 	"math"
+	"math/bits"
 	"net/http"
 	"os"
-	"math/bits"
 	"slices"
 	"sync"
 	"time"
@@ -70,6 +71,10 @@ type Server struct {
 	logMu    sync.Mutex
 	upSince  time.Time
 
+	// WEFAX manual-save hook (main wires it so the file lands next to
+	// the binary exactly like the device's Y-save; "" = nothing yet).
+	wfSave func() string
+
 	// Waterfall display range shared with the device menu (wfmin/
 	// wfmax ini): get returns the live values, set applies a change
 	// (device UI + cfg + saveNow). Nil until main wires them.
@@ -100,6 +105,13 @@ func (s *Server) SetUpdater(msg func() string, run func()) {
 func (s *Server) SetWaterfallRange(get func() (float64, float64), set func(min, max float64)) {
 	s.mu.Lock()
 	s.wfGet, s.wfSet = get, set
+	s.mu.Unlock()
+}
+
+// SetWefaxSaver wires the manual WEFAX snapshot saver.
+func (s *Server) SetWefaxSaver(f func() string) {
+	s.mu.Lock()
+	s.wfSave = f
 	s.mu.Unlock()
 }
 
@@ -184,6 +196,7 @@ func (s *Server) startLocked() {
 	mux.HandleFunc("/api/ais", s.handleAIS)
 	mux.HandleFunc("/api/targets", s.handleTargets)
 	mux.HandleFunc("/api/spec", s.handleSpec)
+	mux.HandleFunc("/api/wefaximg", s.handleWefaxImg)
 	mux.HandleFunc("/api/layers", s.handleLayers)
 	mux.HandleFunc("/api/audio", s.handleAudio)
 	mux.HandleFunc("/tiles/", s.handleTile)
@@ -253,6 +266,10 @@ type state struct {
 	Lang      string    `json:"lang"`
 	WfMin     float64   `json:"wfMin"`
 	WfMax     float64   `json:"wfMax"`
+	Wefax     bool      `json:"wefax"`
+	WefaxAuto bool      `json:"wefaxAuto"`
+	WefaxLn   int       `json:"wefaxLines"`
+	WefaxSt   string    `json:"wefaxState"`
 }
 
 func (s *Server) updateMsg() string {
@@ -287,7 +304,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Planes: s.adsb.CountLive(), Ships: len(s.ais.Ships()),
 		UpSecs: int(time.Since(s.upSince).Seconds()), Lang: i18n.Lang(),
 		WfMin: 6, WfMax: 62,
-		RxLat:  s.rx[0], RxLon: s.rx[1],
+		RxLat: s.rx[0], RxLon: s.rx[1],
 		CPUTemp: sens.CPUTemp, GPUTemp: sens.GPUTemp, DDRTemp: sens.DDRTemp,
 		Updating: s.updateMsg(),
 	}
@@ -300,6 +317,20 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	if wfGet != nil {
 		if mn, mx := wfGet(); mn > 0 || mx > 0 {
 			st.WfMin, st.WfMax = mn, mx
+		}
+	}
+	st.Wefax, st.WefaxAuto = radio.WefaxEnabled(), radio.WefaxAutoSave()
+	if st.Wefax {
+		if ln, ws := radio.Wefax().Stats(); true {
+			st.WefaxLn = ln
+			switch ws {
+			case dsp.WefaxPhasing:
+				st.WefaxSt = "phasing"
+			case dsp.WefaxImage:
+				st.WefaxSt = "rx"
+			default:
+				st.WefaxSt = "wait"
+			}
 		}
 	}
 	writeJSON(w, st)
@@ -364,6 +395,30 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 	case "aisrf":
 		if c.On != nil {
 			radio.SetAISRFEnabled(*c.On)
+		}
+	case "wefax":
+		if c.On != nil {
+			radio.SetWefaxEnabled(*c.On)
+		}
+	case "wefaxauto":
+		if c.On != nil {
+			radio.SetWefaxAutoSave(*c.On)
+		}
+	case "wefaxclear":
+		radio.Wefax().Clear()
+	case "wefaxsave":
+		s.mu.Lock()
+		f := s.wfSave
+		s.mu.Unlock()
+		if f == nil {
+			return
+		}
+		if path := f(); path == "" {
+			writeJSON(w, map[string]interface{}{"ok": false, "err": "wefax_empty"})
+			return
+		} else {
+			writeJSON(w, map[string]interface{}{"ok": true, "path": path})
+			return
 		}
 	case "rate":
 		radio.SetCaptureRate(int(c.V))
@@ -470,6 +525,25 @@ type spec struct {
 // waterfall row never smears more than ~130 ms.
 const specBins = 8192
 const specMaxFFT = 65536
+
+// handleWefaxImg serves the current fax image downscaled (grayscale
+// PNG, newest rows at the bottom). 204 while nothing is received.
+func (s *Server) handleWefaxImg(w http.ResponseWriter, r *http.Request) {
+	if !s.radio.WefaxEnabled() {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	prev, _, _ := s.radio.Wefax().Preview(400, 300)
+	if prev == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := png.Encode(w, prev); err != nil {
+		http.Error(w, err.Error(), 500)
+	}
+}
 
 func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 	// Full-rate tap: the web view shows the ENTIRE capture span (like
