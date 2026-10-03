@@ -23,12 +23,20 @@ func RunDemo(ctx context.Context, getChain func() *Chain, sink func([]float32)) 
 	// SDR_DEMO_WEFAX=1: the main station becomes a looping HF-FAX
 	// transmission (USB audio 1500-2300 Hz: start tone, phasing, a
 	// test chart, stop tone) so the decoder can be checked end-to-end.
+	// SDR_DEMO_CW=1: a looping Morse beacon at +700 Hz (the CW beat
+	// note) for the auto-decoder.
 	wefaxDemo := os.Getenv("SDR_DEMO_WEFAX") != ""
 	var fax []float64
 	if wefaxDemo {
 		fax = demoWefaxAudio()
 	}
+	cwDemo := os.Getenv("SDR_DEMO_CW") != ""
+	var cwKeyed []bool
+	if cwDemo {
+		_, cwKeyed = demoCWAudio()
+	}
 	faxPos, faxPh := 0.0, 0.0
+	cwPos := 0
 	for ctx.Err() == nil {
 		start := time.Now()
 		chain := getChain()
@@ -53,6 +61,15 @@ func RunDemo(ctx context.Context, getChain func() *Chain, sink func([]float32)) 
 				faxPh += 2 * math.Pi * f / float64(IQRate)
 				re = 0.30 * math.Cos(faxPh)
 				im = 0.30 * math.Sin(faxPh)
+			}
+			if cwDemo {
+				// USB tone at +700 Hz gated by the Morse timeline.
+				if cwKeyed[(cwPos>>10)%len(cwKeyed)] {
+					faxPh += 2 * math.Pi * 700 / float64(IQRate)
+					re = 0.30 * math.Cos(faxPh)
+					im = 0.30 * math.Sin(faxPh)
+				}
+				cwPos += WefaxRate * 1024 / IQRate // fixed-point: 0.39 IQ ticks per audio sample
 			}
 
 			// Two drifting carriers ±60-90 kHz off center.
@@ -139,4 +156,50 @@ func demoWefaxAudio() []float64 {
 	apt(450, 5)
 	tone(1, WefaxRate*2)
 	return f
+}
+
+// demoCWAudio returns a looping Morse beacon as the per-sample tone
+// amplitude (all 700 Hz) and keying mask at WefaxRate.
+func demoCWAudio() ([]float64, []bool) {
+	text := "VVV DE TEST BEACON "
+	wpm := 20.0
+	dotS := 8.0 * 600.0 / wpm
+	var keyed []bool
+	for _, r := range text {
+		var code string
+		for k, v := range cwMorse {
+			if v == r {
+				code = k
+				break
+			}
+		}
+		if code == "" {
+			for i := 0; i < int(dotS*7); i++ {
+				keyed = append(keyed, false)
+			}
+			continue
+		}
+		for _, e := range code {
+			n := dotS
+			if e == '-' {
+				n *= 3
+			}
+			for i := 0; i < int(n); i++ {
+				keyed = append(keyed, true)
+			}
+			for i := 0; i < int(dotS); i++ {
+				keyed = append(keyed, false)
+			}
+		}
+		for i := 0; i < int(dotS*2); i++ {
+			keyed = append(keyed, false)
+		}
+	}
+	amp := make([]float64, len(keyed))
+	for i := range amp {
+		if keyed[i] {
+			amp[i] = 1
+		}
+	}
+	return amp, keyed
 }

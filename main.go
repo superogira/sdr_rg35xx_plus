@@ -403,6 +403,8 @@ const (
 	menuWefax
 	menuWefaxClear
 	menuWefaxAuto
+	menuCWDec
+	menuCWClear
 	menuADSBHost
 	menuADSBLat
 	menuADSBLon
@@ -424,7 +426,7 @@ var pageItems = [][]int{
 	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 	{menuAF, menuNR, menuHP, menuLP, menuLocalMute},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
-	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear, menuWefaxAuto},
+	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear, menuWefaxAuto, menuCWDec, menuCWClear},
 	{menuBM},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
 }
@@ -525,6 +527,7 @@ func main() {
 	rttyOn := cfg["rtty"] == "on"
 	wefaxOn := cfg["wefax"] == "on"
 	wefaxAuto := cfg["wefaxauto"] == "on"
+	cwDec := cfg["cwdec"] == "on"
 	sqlPref := 0.0
 	if v, ok := cfg["sql"]; ok {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= -100 && f <= 40 {
@@ -834,6 +837,7 @@ func main() {
 	r.SetRTTYEnabled(rttyOn)
 	r.SetWefaxEnabled(wefaxOn)
 	r.SetWefaxAutoSave(wefaxAuto)
+	r.SetCWDecodeEnabled(cwDec)
 	if bwv, ok := cfg[fmt.Sprintf("bw.%s", r.Mode().Name)]; ok {
 		if f, err := strconv.ParseFloat(bwv, 64); err == nil {
 			r.SetBandwidth(f)
@@ -1614,6 +1618,13 @@ func main() {
 			r.SetWefaxAutoSave(!r.WefaxAutoSave())
 			cfg["wefaxauto"] = map[bool]string{true: "on", false: "off"}[r.WefaxAutoSave()]
 			saveNow()
+		case menuCWDec:
+			r.SetCWDecodeEnabled(!r.CWDecodeEnabled())
+			cfg["cwdec"] = map[bool]string{true: "on", false: "off"}[r.CWDecodeEnabled()]
+			saveNow()
+			fmt.Fprintf(os.Stderr, "cw: decode %s\n", cfg["cwdec"])
+		case menuCWClear:
+			r.CW().Clear()
 		case menuADSBHost:
 			beastSel = 0
 			uiMode = uiBeastList
@@ -2917,7 +2928,9 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_rttylog"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_wefax"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxEnabled()]},
 					ui.MenuItem{Label: i18n.T("m_wefaxclear"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_wefaxauto"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxAutoSave()]})
+					ui.MenuItem{Label: i18n.T("m_wefaxauto"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxAutoSave()]},
+					ui.MenuItem{Label: i18n.T("m_cwdec"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.CWDecodeEnabled()]},
+					ui.MenuItem{Label: i18n.T("m_cwclear"), Value: i18n.T("press_a")})
 			case pageAudio:
 				nrVal := i18n.T("off")
 				if lv := r.NoiseReduction(); lv > 0 {
@@ -3484,6 +3497,9 @@ func main() {
 			prev, lines, st := r.Wefax().Preview(ui.WefaxPanelW, u.WefaxPreviewRows())
 			u.DrawWefaxPanel(prev, lines, wefaxStateLabel(st), i18n.T("wefax_hint"))
 		}
+		if r.CWDecodeEnabled() && uiMode == uiMain {
+			u.DrawCWLog(r.CW().Text(), r.CW().WPM())
+		}
 		if r.WefaxEnabled() {
 			// Auto-save on APT stop — on any screen, so a chart that
 			// finishes while a menu is open is never lost.
@@ -3702,6 +3718,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["wefaxauto"]; ok {
 		fmt.Fprintf(f, "wefaxauto=%s\n", v)
+	}
+	if v, ok := cfg["cwdec"]; ok {
+		fmt.Fprintf(f, "cwdec=%s\n", v)
 	}
 	if v, ok := cfg["adsbhost"]; ok {
 		fmt.Fprintf(f, "adsbhost=%s\n", v)
