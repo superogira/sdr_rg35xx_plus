@@ -945,6 +945,28 @@ func main() {
 	if autoUpdate {
 		runUpdate(upd, updateBase, false, saveNow)
 	}
+	capturedMsg := ""
+	var capturedAt time.Time
+	// Web-server goroutines must not touch cfg or the capture message
+	// directly — a fatal "concurrent map writes" crashed the app when
+	// overlapping slider commands wrote cfg from two HTTP handlers.
+	// Web-triggered mutations are posted to webTasks and run on THIS
+	// (UI) goroutine, which stays the only cfg writer after boot.
+	webTasks := make(chan func(), 128)
+	postWeb := func(f func()) bool {
+		select {
+		case webTasks <- f:
+			return true
+		default:
+			return false
+		}
+	}
+	var msgMu sync.Mutex
+	setMsg := func(txt string) {
+		msgMu.Lock()
+		capturedMsg, capturedAt = txt, time.Now()
+		msgMu.Unlock()
+	}
 	// Web-triggered OTA uses the same single-flight updater as the menu.
 	webSrv.SetUpdater(upd.Msg, func() { runUpdate(upd, updateBase, true, saveNow) })
 	// Web WEFAX save: same file, same folder as the device's Y-save.
@@ -967,13 +989,15 @@ func main() {
 			return wfMin, wfMax
 		},
 		func(mn, mx float64) {
-			wfMu.Lock()
-			wfMin, wfMax = mn, mx
-			wfMu.Unlock()
-			u.SetWaterfallRange(mn, mx)
-			cfg["wfmin"] = fmt.Sprintf("%g", mn)
-			cfg["wfmax"] = fmt.Sprintf("%g", mx)
-			saveNow()
+			postWeb(func() {
+				wfMu.Lock()
+				wfMin, wfMax = mn, mx
+				wfMu.Unlock()
+				u.SetWaterfallRange(mn, mx)
+				cfg["wfmin"] = fmt.Sprintf("%g", mn)
+				cfg["wfmax"] = fmt.Sprintf("%g", mx)
+				saveNow()
+			})
 		})
 	// Screenshot support: the last presented frame and a transient status
 	// message pointing at the saved file (triggered from the menu).
@@ -1001,8 +1025,6 @@ func main() {
 	logScroll := 0
 	logReadAt := time.Time{}
 	var lastFrame *image.RGBA
-	capturedMsg := ""
-	var capturedAt time.Time
 	// WEFAX saves go to wefax/ next to the binary; auto = APT stop.
 	// Returns the written path ("" on error) — the web save uses it.
 	saveWefaxFile = func(img *image.Gray, auto bool) string {
@@ -1021,23 +1043,22 @@ func main() {
 			f.Close()
 		}
 		if err != nil {
-			capturedMsg = i18n.T("shot_fail") + err.Error()
+			setMsg(i18n.T("shot_fail") + err.Error())
 			path = ""
 		} else {
 			key := "wefax_saved"
 			if auto {
 				key = "wefax_autosaved"
 			}
-			capturedMsg = i18n.T(key) + path
+			setMsg(i18n.T(key) + path)
 		}
-		capturedAt = time.Now()
 		fmt.Fprintln(os.Stderr, "wefax:", capturedMsg)
 		return path
 	}
 	saveWefax := func() {
 		img := r.Wefax().Snapshot()
 		if img == nil {
-			capturedMsg, capturedAt = i18n.T("wefax_empty"), time.Now()
+			setMsg(i18n.T("wefax_empty"))
 			return
 		}
 		saveWefaxFile(img, false)
@@ -1053,11 +1074,10 @@ func main() {
 		}
 		path := filepath.Join(dir, fmt.Sprintf("capture_%s.png", time.Now().Format("150405")))
 		if err := ui.SavePNG(path, lastFrame); err != nil {
-			capturedMsg = i18n.T("shot_fail") + err.Error()
+			setMsg(i18n.T("shot_fail") + err.Error())
 		} else {
-			capturedMsg = i18n.T("shot_ok") + path
+			setMsg(i18n.T("shot_ok") + path)
 		}
-		capturedAt = time.Now()
 		fmt.Fprintln(os.Stderr, capturedMsg)
 	}
 
@@ -1586,7 +1606,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "wefax: decode %s\n", cfg["wefax"])
 		case menuWefaxClear:
 			r.Wefax().Clear()
-			capturedMsg, capturedAt = i18n.T("wefax_cleared"), time.Now()
+			setMsg(i18n.T("wefax_cleared"))
 		case menuWefaxAuto:
 			r.SetWefaxAutoSave(!r.WefaxAutoSave())
 			cfg["wefaxauto"] = map[bool]string{true: "on", false: "off"}[r.WefaxAutoSave()]
@@ -2387,6 +2407,15 @@ func main() {
 	lastSave := time.Now()
 
 	for {
+	drain:
+		for {
+			select {
+			case f := <-webTasks:
+				f()
+			default:
+				break drain
+			}
+		}
 		select {
 		case <-exitMenu:
 			quit()
