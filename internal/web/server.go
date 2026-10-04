@@ -5,6 +5,7 @@
 package web
 
 import (
+	"strings"
 	"context"
 	"embed"
 	"encoding/json"
@@ -305,6 +306,7 @@ type state struct {
 	CPU       float64   `json:"cpu"`
 	MEM       float64   `json:"mem"`
 	BAT       int       `json:"bat"`
+	BATChg    bool      `json:"batCharging"`
 	Planes    int       `json:"planes"`
 	Ships     int       `json:"ships"`
 	UpSecs    int       `json:"upSecs"`
@@ -359,6 +361,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Reboot:    s.rebooting(),
 		Connected: snap.Connected, Host: radio.Hostname(),
 		CPU: cpu, MEM: mem, BAT: sens.BattPct,
+		BATChg: strings.Contains(sens.BattStatus, "harg"),
 		Planes: s.adsb.CountLive(), Ships: len(s.ais.Ships()),
 		UpSecs: int(time.Since(s.upSince).Seconds()), Lang: i18n.Lang(),
 		WfMin: 6, WfMax: 62,

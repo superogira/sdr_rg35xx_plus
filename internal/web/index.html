@@ -453,7 +453,7 @@ function renderState(s) {
   $('lmute').textContent = s.localmute ? STRINGS[lang].devOff : STRINGS[lang].devOn;
   $('cpu').textContent = s.cpu.toFixed(0);
   $('mem').textContent = s.mem.toFixed(0);
-  $('bat').textContent = s.bat;
+  $('bat').textContent = s.bat + (s.batCharging ? '⚡' : '');
   $('tgt').textContent = s.planes + '/' + s.ships;
   $('tcpu').textContent = s.cpuTemp ? s.cpuTemp.toFixed(0) : '–';
   $('tgpu').textContent = s.gpuTemp ? s.gpuTemp.toFixed(0) : '–';

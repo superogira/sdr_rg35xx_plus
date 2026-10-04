@@ -110,7 +110,7 @@ const (
 
 // DrawRadar renders the ADS-B radar. Targets beyond rangeKm are not
 // drawn at all — they appear when the user zooms out to their range.
-func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string, labelMode int, panX, panY int, mapOffX, mapOffY int, battPct int, sel *RadarSel) int {
+func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string, labelMode int, panX, panY int, mapOffX, mapOffY int, battPct int, battCharging bool, sel *RadarSel) int {
 	// Phosphor palette.
 	bg := color.RGBA{2, 10, 4, 255}
 	dim := color.RGBA{0, 110, 55, 255}
@@ -523,6 +523,9 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 
 	// CPU + battery: bottom-right (one chip).
 	cpu := fmt.Sprintf("CPU %.0f%%  BAT %d%%", cpuPct, battPct)
+	if battCharging {
+		cpu += "⚡"
+	}
 	cw := sf.TextWidth(cpu)
 	u.fillBlend(u.W-cw-14, u.H-24, cw+10, 20, 2, 14, 7, 200)
 	sf.DrawString(u.img, bright, u.W-cw-9, u.H-9, cpu)

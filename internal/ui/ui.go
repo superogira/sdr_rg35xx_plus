@@ -1323,7 +1323,7 @@ func (u *UI) DrawSysMon(lines []string) {
 
 // DrawSysBadge paints a compact live badge at the bottom-right of the
 // waterfall: CPU %, MEM % and battery level.
-func (u *UI) DrawSysBadge(cpu, mem float64, batt int) {
+func (u *UI) DrawSysBadge(cpu, mem float64, batt int, charging bool) {
 	tf := Face(11, false)
 	// Clock chip stacked directly above the resource badge.
 	clock := time.Now().Format("15:04:05")
@@ -1334,6 +1334,9 @@ func (u *UI) DrawSysBadge(cpu, mem float64, batt int) {
 	tf.DrawString(u.img, color.RGBA{200, 230, 255, 255}, cx+6, cy+12, clock)
 
 	txt := fmt.Sprintf("CPU%.0f  MEM%.0f  BAT%d%%", cpu, mem, batt)
+	if charging {
+		txt += "⚡"
+	}
 	w := tf.TextWidth(txt) + 12
 	h := 16
 	x := u.W - w - 6

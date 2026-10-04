@@ -3420,7 +3420,12 @@ func main() {
 				i18n.T("sm_ve_temp") + "\t" + fDeg(sn.VETemp),
 				i18n.T("sm_ddr_temp") + "\t" + fDeg(sn.DDRTemp),
 				i18n.T("sm_batt_temp") + "\t" + fDeg(sn.BattTemp),
-				i18n.T("sm_batt_lvl") + "\t" + fmt.Sprintf("%d %%", sn.BattPct),
+				i18n.T("sm_batt_lvl") + "\t" + fmt.Sprintf("%d %%", sn.BattPct) + func() string {
+					if strings.Contains(sn.BattStatus, "harg") {
+						return " ⚡"
+					}
+					return ""
+				}(),
 				i18n.T("sm_batt_v") + "\t" + fmt.Sprintf("%.2f V", sn.BattVolt),
 				i18n.T("sm_batt_st") + "\t" + sn.BattStatus,
 				i18n.T("sm_cpu_use") + "\t" + fmt.Sprintf("%.0f %%", cpu),
@@ -3798,7 +3803,7 @@ func main() {
 			if hostLbl == "" {
 				hostLbl = "(" + i18n.T("off") + ")"
 			}
-			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarLabelMode, panX, panY, mapOffX, mapOffY, sysinfo.SensorSnapshot().BattPct, radarSel)
+			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarLabelMode, panX, panY, mapOffX, mapOffY, sysinfo.SensorSnapshot().BattPct, strings.Contains(sysinfo.SensorSnapshot().BattStatus, "harg"), radarSel)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
@@ -3829,7 +3834,7 @@ func main() {
 			}
 		}
 		if uiMode == uiMain {
-			u.DrawSysBadge(cpu, mem, sysinfo.SensorSnapshot().BattPct)
+			u.DrawSysBadge(cpu, mem, sysinfo.SensorSnapshot().BattPct, strings.Contains(sysinfo.SensorSnapshot().BattStatus, "harg"))
 		}
 		lastFrame = frame
 		if err := disp.Present(frame); err != nil {

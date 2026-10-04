@@ -22,7 +22,7 @@ func TestRadarNewestLabelOnTop(t *testing.T) {
 		{Call: "NEW9", ICAO: "880002", AltFt: 40000, SpdKt: 400, HasPos: true, MercX: -50, MercY: -50, Seen: time.Now()},
 		{Call: "OLD1", ICAO: "880001", AltFt: 0, HasPos: true, MercX: -50, MercY: -50, Seen: time.Now().Add(-30 * time.Second)},
 	}
-	u.DrawRadar(blips, 100, "x:1", true, 13.5, 100.5, 12, nil, "", "", nil, t.TempDir(), LabelFlagText, 0, 0, 0, 0, 80, nil)
+	u.DrawRadar(blips, 100, "x:1", true, 13.5, 100.5, 12, nil, "", "", nil, t.TempDir(), LabelFlagText, 0, 0, 0, 0, 80, false, nil)
 	nNew, nOld := 0, 0
 	for y := 0; y < u.H; y++ {
 		for x := 0; x < u.W; x++ {
@@ -60,7 +60,7 @@ func TestRadarOutOfRangeHidden(t *testing.T) {
 	u := New(640, 480)
 	mk := func(blips []RadarBlip) *image.RGBA {
 		img := u.Frame(FrameStats{FreqHz: 1090000000, Mode: "AM"})
-		u.DrawRadar(blips, 100, "x:1", true, 13.5, 100.5, 12, nil, "", "", nil, t.TempDir(), LabelFlagText, 0, 0, 0, 0, 80, nil)
+		u.DrawRadar(blips, 100, "x:1", true, 13.5, 100.5, 12, nil, "", "", nil, t.TempDir(), LabelFlagText, 0, 0, 0, 0, 80, false, nil)
 		return img
 	}
 	far := []RadarBlip{
@@ -108,19 +108,19 @@ func TestRadarSelectionFollowsResort(t *testing.T) {
 	}
 	now := time.Now()
 	// Select S2 (idx 2, newest), then re-sort so S0 becomes newest.
-	u.DrawRadar(mk([3]time.Time{now.Add(-30 * time.Second), now.Add(-20 * time.Second), now}), 10, "x:1", true, 13.5, 100.5, 10, nil, "", "", nil, "", LabelFlagText, 0, 0, 0, 0, 80, sel)
+	u.DrawRadar(mk([3]time.Time{now.Add(-30 * time.Second), now.Add(-20 * time.Second), now}), 10, "x:1", true, 13.5, 100.5, 10, nil, "", "", nil, "", LabelFlagText, 0, 0, 0, 0, 80, false, sel)
 	if sel.ID != "V567000002" {
 		t.Fatalf("anchored %q, want V567000002", sel.ID)
 	}
 	// Fresh report on S0 → it jumps to the END of the draw order; the
 	// selection must stay on S2.
-	n := u.DrawRadar(mk([3]time.Time{now, now.Add(-20 * time.Second), now.Add(-10 * time.Second)}), 10, "x:1", true, 13.5, 100.5, 10, nil, "", "", nil, "", LabelFlagText, 0, 0, 0, 0, 80, sel)
+	n := u.DrawRadar(mk([3]time.Time{now, now.Add(-20 * time.Second), now.Add(-10 * time.Second)}), 10, "x:1", true, 13.5, 100.5, 10, nil, "", "", nil, "", LabelFlagText, 0, 0, 0, 0, 80, false, sel)
 	if sel.ID != "V567000002" {
 		t.Fatalf("after resort selection drifted to %q (drawn=%d) — the 'moves by itself' bug", sel.ID, n)
 	}
 	// Walk the d-pad and verify the anchor updates.
 	sel.Idx++
-	u.DrawRadar(mk([3]time.Time{now, now.Add(-20 * time.Second), now.Add(-10 * time.Second)}), 10, "x:1", true, 13.5, 100.5, 10, nil, "", "", nil, "", LabelFlagText, 0, 0, 0, 0, 80, sel)
+	u.DrawRadar(mk([3]time.Time{now, now.Add(-20 * time.Second), now.Add(-10 * time.Second)}), 10, "x:1", true, 13.5, 100.5, 10, nil, "", "", nil, "", LabelFlagText, 0, 0, 0, 0, 80, false, sel)
 	if sel.ID == "V567000002" || sel.ID == "" {
 		t.Fatalf("d-pad move did not re-anchor: %q", sel.ID)
 	}
