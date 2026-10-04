@@ -721,7 +721,7 @@ function drawOverlays() {
     axctx.globalAlpha = 0.9; axctx.fillStyle = dimc;
     const lbl = fmtTick(hz, step);
     // Skip labels that would run past the right edge (last tick clipped).
-    if (x + 3 + axctx.measureText(lbl).width < axc.width - 2)
+    if (x + 3 + axctx.measureText(lbl).width < faxc.width - 2)
       axctx.fillText(lbl, x + 3, 14);
   }
   axctx.globalAlpha = 1;
