@@ -255,11 +255,14 @@ func runUpdate(u *updater, base string, manual bool, beforeRestart func()) {
 			u.setMsg("%s", fmt.Sprintf(i18n.T("upd_swap"), err))
 			return
 		}
-		// One-time sidecar for the USB dongle source: users who installed
-		// via OTA have no SD-card copy of rtl_tcp. Fetch it opportunistically
-		// (integrity = size sanity only; the exe above is hash-pinned) so the
-		// USB row works right after this update. Failures are non-fatal.
-		fetchUSBSidecar(base, filepath.Dir(exe))
+		// One-time sidecars for the USB sources: users who installed via
+		// OTA have no SD-card copy of rtl_tcp / gpsread. Fetch them
+		// opportunistically (integrity = size sanity only; the exe above
+		// is hash-pinned) so USB radio + GPS work right after this
+		// update. Failures are non-fatal.
+		for _, side := range []string{"rtl_tcp", "gpsread"} {
+			fetchSidecar(base, filepath.Dir(exe), side)
+		}
 		u.setMsg("%s", fmt.Sprintf(i18n.T("updated"), stamp))
 		fmt.Fprintf(os.Stderr, "update: installed stamp %d (was %s), re-exec\n", stamp, buildStamp)
 		time.Sleep(700 * time.Millisecond) // let the message reach the screen
@@ -275,52 +278,53 @@ func runUpdate(u *updater, base string, manual bool, beforeRestart func()) {
 	}()
 }
 
-// fetchUSBSidecar downloads the bundled rtl_tcp next to the app binary if
-// it is not there yet (called from the OTA path — the only moment every
-// user is guaranteed to be online). Best effort: on any failure the USB
-// source just reports "executable not found" and the README's manual copy
-// still works.
-func fetchUSBSidecar(base, dir string) {
-	dst := filepath.Join(dir, "rtl_tcp")
+// fetchSidecar downloads a bundled helper binary (rtl_tcp for the USB
+// dongle source, gpsread for the USB GPS) next to the app binary if it
+// is not there yet (called from the OTA path — the only moment every
+// user is guaranteed to be online). Best effort: on any failure the
+// feature just reports "executable not found" and the README's manual
+// copy still works. minBytes tolerates the small gpsread helper.
+func fetchSidecar(base, dir, name string) {
+	dst := filepath.Join(dir, name)
 	if _, err := os.Stat(dst); err == nil {
 		return // already installed (SD-card copy or previous fetch)
 	}
-	resp, err := updateGet(base+"/rtl_tcp-linux-arm64.gz", 60*time.Second)
+	resp, err := updateGet(fmt.Sprintf("%s/%s-linux-arm64.gz", base, name), 60*time.Second)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "usb sidecar: fetch failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "sidecar %s: fetch failed: %v\n", name, err)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		fmt.Fprintf(os.Stderr, "usb sidecar: HTTP %d\n", resp.StatusCode)
+		fmt.Fprintf(os.Stderr, "sidecar %s: HTTP %d\n", name, resp.StatusCode)
 		return
 	}
 	gz, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil || len(gz) < 10_000 {
-		fmt.Fprintf(os.Stderr, "usb sidecar: bad download (%v, %d bytes)\n", err, len(gz))
+	if err != nil || len(gz) < 3_000 {
+		fmt.Fprintf(os.Stderr, "sidecar %s: bad download (%v, %d bytes)\n", name, err, len(gz))
 		return
 	}
 	zr, err := gzip.NewReader(bytes.NewReader(gz))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "usb sidecar: gzip: %v\n", err)
+		fmt.Fprintf(os.Stderr, "sidecar %s: gzip: %v\n", name, err)
 		return
 	}
 	bin, err := io.ReadAll(io.LimitReader(zr, 4<<20))
-	if err != nil || len(bin) < 50_000 {
-		fmt.Fprintf(os.Stderr, "usb sidecar: bad payload (%v, %d bytes)\n", err, len(bin))
+	if err != nil || len(bin) < 8_000 {
+		fmt.Fprintf(os.Stderr, "sidecar %s: bad payload (%v, %d bytes)\n", name, err, len(bin))
 		return
 	}
 	tmp := dst + ".tmp"
 	if err := os.WriteFile(tmp, bin, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "usb sidecar: write: %v\n", err)
+		fmt.Fprintf(os.Stderr, "sidecar %s: write: %v\n", name, err)
 		return
 	}
 	if err := os.Rename(tmp, dst); err != nil {
 		os.Remove(tmp)
-		fmt.Fprintf(os.Stderr, "usb sidecar: rename: %v\n", err)
+		fmt.Fprintf(os.Stderr, "sidecar %s: rename: %v\n", name, err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "usb sidecar: installed rtl_tcp (%d bytes)\n", len(bin))
+	fmt.Fprintf(os.Stderr, "sidecar: installed %s (%d bytes)\n", name, len(bin))
 }
 
 // syncDir flushes the SD card buffers as far as the OS allows.

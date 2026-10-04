@@ -30,13 +30,17 @@ echo "package: dist/rg35xx/"
 echo "next:    copy SDRg35xx/ + SDRg35xx.sh + SDRg35xx.png to Roms/APPS on"
 echo "         the SD card, then launch from the APPS menu."
 
-# Bundled rtl_tcp for the USB dongle source (built from
+# Bundled sidecars for the USB dongle source (rtl_tcp, built from
 # rtlsdrblog/rtl-sdr-blog; static librtlsdr, links only system
-# libusb/libudev). Users who skip the SD-card copy get it via OTA.
-if [ -f dist/rg35xx/rtl_tcp ]; then
-  cp dist/rg35xx/rtl_tcp dist/rg35xx/SDRg35xx/rtl_tcp
-  chmod +x dist/rg35xx/SDRg35xx/rtl_tcp
-  echo "== bundled rtl_tcp sidecar =="
-else
-  echo "== WARNING: no rtl_tcp sidecar found in dist/rg35xx/ =="
-fi
+# libusb/libudev) and the USB GPS reader (tools/gpsread.c -- the
+# firmware kernel has no cdc_acm/usbserial modules). Users who skip
+# the SD-card copy get them via OTA.
+for side in rtl_tcp gpsread; do
+  if [ -f "dist/rg35xx/$side" ]; then
+    cp "dist/rg35xx/$side" "dist/rg35xx/SDRg35xx/$side"
+    chmod +x "dist/rg35xx/SDRg35xx/$side"
+    echo "== bundled $side sidecar =="
+  else
+    echo "== WARNING: no $side sidecar found in dist/rg35xx/ =="
+  fi
+done

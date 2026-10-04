@@ -6,7 +6,10 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -104,40 +107,92 @@ func portHasGPS(path string) (*os.File, error) {
 	return nil, lastErr
 }
 
-// Run scans for a GPS serial device, reads NMEA into the receiver and
-// rescans when the device disappears (the hub being replugged etc).
-// Stop with ctx.
+// Run feeds the receiver: first from a kernel serial port (firmwares
+// that ship cdc_acm), then through the bundled gpsread helper — this
+// firmware's kernel has NO usb serial drivers at all, so the u-blox is
+// read from user space over libusb (gpsread streams NMEA on stdout).
+// Rescans whenever the source goes away.
 func (r *Receiver) Run(ctx context.Context) {
 	for ctx.Err() == nil {
-		var f *os.File
-		var found string
-		for _, p := range portCandidates {
-			if _, err := os.Stat(p); err != nil {
-				continue
-			}
-			g, err := portHasGPS(p)
-			if err == nil {
-				f, found = g, p
-				break
-			}
-		}
-		if f == nil {
+		if f, found := scanPorts(); f != nil {
+			r.setDevice(found)
+			r.readLines(ctx, bufio.NewScanner(f), func() { f.Close() })
 			r.setDevice("")
-			sleepCtx(ctx, 5*time.Second)
+			r.setOpen(false)
+			sleepCtx(ctx, 2*time.Second)
 			continue
 		}
-		r.setDevice(found)
-		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 512), 512)
-		for ctx.Err() == nil && sc.Scan() {
-			r.Feed(sc.Text())
+		if rd, stop := startHelper(); rd != nil {
+			r.setDevice("usb:" + helperName)
+			r.readLines(ctx, bufio.NewScanner(rd), stop)
+			r.setDevice("")
+			r.setOpen(false)
+			sleepCtx(ctx, 2*time.Second)
+			continue
 		}
-		// Read error: device vanished (or cable pulled). Close, rescan.
-		f.Close()
 		r.setDevice("")
-		r.setOpen(false)
-		sleepCtx(ctx, 2*time.Second)
+		sleepCtx(ctx, 5*time.Second)
 	}
+}
+
+// readLines feeds NMEA lines until the scanner ends or ctx is done,
+// then runs the cleanup (closing the port / killing the helper).
+func (r *Receiver) readLines(ctx context.Context, sc *bufio.Scanner, cleanup func()) {
+	defer cleanup()
+	sc.Buffer(make([]byte, 512), 512)
+	for ctx.Err() == nil && sc.Scan() {
+		r.Feed(sc.Text())
+	}
+}
+
+// helperPaths mirrors the rtl_tcp sidecar convention: next to the app
+// binary first, a dev location on the test device, then PATH.
+const helperName = "gpsread"
+
+func helperPaths() []string {
+	var cands []string
+	if exe, err := os.Executable(); err == nil {
+		cands = append(cands, filepath.Join(filepath.Dir(exe), helperName))
+	}
+	return append(cands, "/root/"+helperName, helperName)
+}
+
+// startHelper spawns the gpsread sidecar and returns its stdout plus a
+// cleanup that kills and reaps it. Nil when no helper is installed.
+func startHelper() (io.Reader, func()) {
+	for _, p := range helperPaths() {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		cmd := exec.Command(p)
+		out, err := cmd.StdoutPipe()
+		if err != nil {
+			continue
+		}
+		if err := cmd.Start(); err != nil {
+			continue
+		}
+		return out, func() {
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+			}
+			_ = cmd.Wait()
+		}
+	}
+	return nil, nil
+}
+
+// scanPorts returns the first serial port that speaks NMEA.
+func scanPorts() (*os.File, string) {
+	for _, p := range portCandidates {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		if f, err := portHasGPS(p); err == nil {
+			return f, p
+		}
+	}
+	return nil, ""
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) {
