@@ -78,6 +78,15 @@ header h1 { font-size:16px; margin:0; letter-spacing:1px; }
 #conn.on { color:var(--acc); }
 main { display:grid; grid-template-columns: 380px 1fr; gap:12px; padding:12px; }
 @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+/* Fullscreen spectrum (⛶ / F): only the spectrum card stays, the
+   waterfall grows to fill the viewport. */
+body.specfull { overflow:hidden; }
+body.specfull main { display:block; padding:6px; }
+body.specfull section:not(#sec-spec) { display:none; }
+body.specfull #sec-spec > .card { display:flex; flex-direction:column; height:calc(100vh - 12px); box-sizing:border-box; }
+body.specfull #spc, body.specfull #spcOv { height:170px !important; }
+body.specfull #wfwrap { flex:1 1 auto; min-height:140px; }
+body.specfull #wf, body.specfull #wfOv { height:100% !important; }
 select, input { min-width:0; }
 .row .val { flex:0 0 auto; }
 .card { background:var(--panel); border:1px solid var(--card-border); border-radius:10px; padding:12px; }
@@ -176,9 +185,9 @@ tr:hover td { background:var(--row-hover); }
       </div>
     </div>
   </section>
-  <section>
+  <section id="sec-spec">
     <div class="card">
-      <h2><span data-i18n="spectrum">Spectrum</span> <span id="specinfo" style="color:var(--dim);text-transform:none;letter-spacing:0"></span></h2>
+      <h2 style="display:flex;align-items:center;gap:8px"><span data-i18n="spectrum">Spectrum</span> <span id="specinfo" style="color:var(--dim);text-transform:none;letter-spacing:0;font-size:13px"></span><button id="specfull" title="เต็มจอ / Fullscreen (F)" style="margin-left:auto;padding:2px 10px">⛶</button></h2>
       <div style="position:relative">
         <canvas id="spc" width="512" height="110" style="width:100%;height:110px;cursor:crosshair;background:var(--bg);touch-action:none"></canvas>
         <canvas id="spcOv" width="512" height="110" style="position:absolute;inset:0;width:100%;height:110px;pointer-events:none"></canvas>
@@ -710,7 +719,10 @@ function drawOverlays() {
     axctx.strokeStyle = dimc; axctx.globalAlpha = 0.5;
     axctx.beginPath(); axctx.moveTo(x + 0.5, 0); axctx.lineTo(x + 0.5, 4); axctx.stroke();
     axctx.globalAlpha = 0.9; axctx.fillStyle = dimc;
-    axctx.fillText(fmtTick(hz, step), x + 3, 14);
+    const lbl = fmtTick(hz, step);
+    // Skip labels that would run past the right edge (last tick clipped).
+    if (x + 3 + axctx.measureText(lbl).width < axc.width - 2)
+      axctx.fillText(lbl, x + 3, 14);
   }
   axctx.globalAlpha = 1;
   woctx.clearRect(0, 0, wov.width, wov.height);
@@ -732,6 +744,13 @@ async function specPoll() {
   try {
     const d = await api('/api/spec');
     if (!d.bins || !d.bins.length) return;
+    if (specState && d.spanHz !== specState.spanHz) {
+      // Capture span changed (new sample rate): a zoom factor anchored
+      // to the old span is meaningless — reopen the full span, or the
+      // waterfall looks stuck at the previous width after raising the
+      // rate (e.g. ×2 zoom from 1024k kept showing ±512 at 2048k).
+      wfZoom = 1; wfPanHz = 0;
+    }
     specState = d;
     clampPan();
     ensureHist(d.bins.length);
@@ -770,8 +789,7 @@ for (const cv of [spc, wf]) {
     drawView();
   }, { passive: false });
   cv.addEventListener('dblclick', () => { wfZoom = 1; wfPanHz = 0; drawView(); });
-  cv.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return;
+  cv.addEventListener('mousedown', (e) => {    if (e.button !== 0) return;
     dragOn = true; dragMoved = false; dragX0 = e.clientX; dragPan0 = wfPanHz;
   });
   cv.addEventListener('mousemove', (e) => {
@@ -856,6 +874,19 @@ for (const cv of [spc, wf]) {
     $('clickhz').textContent = STRINGS[lang].tuned + (dial/1e6).toFixed(4) + ' MHz';
   };
 }
+
+// ---- fullscreen spectrum: hide every other card, grow the waterfall ----
+let specFull = false;
+function setSpecFull(on) {
+  specFull = on;
+  document.body.classList.toggle('specfull', on);
+  $('specfull').textContent = on ? '\u2921' : '\u26f6';
+}
+$('specfull').onclick = () => setSpecFull(!specFull);
+addEventListener('keydown', (e) => {
+  if ((e.key === 'f' || e.key === 'F') &&
+      !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) setSpecFull(!specFull);
+});
 
 // ---- web audio (phase 4): µ-law 24 kHz chunked stream ----
 // AudioWorklet needs a secure context (https or localhost); on plain
