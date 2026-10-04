@@ -254,6 +254,11 @@ func runUpdate(u *updater, base string, manual bool, beforeRestart func()) {
 			u.setMsg("%s", fmt.Sprintf(i18n.T("upd_swap"), err))
 			return
 		}
+		// One-time sidecar for the USB dongle source: users who installed
+		// via OTA have no SD-card copy of rtl_tcp. Fetch it opportunistically
+		// (integrity = size sanity only; the exe above is hash-pinned) so the
+		// USB row works right after this update. Failures are non-fatal.
+		fetchUSBSidecar(base, filepath.Dir(exe))
 		u.setMsg("%s", fmt.Sprintf(i18n.T("updated"), stamp))
 		fmt.Fprintf(os.Stderr, "update: installed stamp %d (was %s), re-exec\n", stamp, buildStamp)
 		time.Sleep(700 * time.Millisecond) // let the message reach the screen
@@ -267,6 +272,54 @@ func runUpdate(u *updater, base string, manual bool, beforeRestart func()) {
 		syscall.Exec(exe, os.Args, os.Environ())
 		u.setMsg("%s", i18n.T("upd_restart"))
 	}()
+}
+
+// fetchUSBSidecar downloads the bundled rtl_tcp next to the app binary if
+// it is not there yet (called from the OTA path — the only moment every
+// user is guaranteed to be online). Best effort: on any failure the USB
+// source just reports "executable not found" and the README's manual copy
+// still works.
+func fetchUSBSidecar(base, dir string) {
+	dst := filepath.Join(dir, "rtl_tcp")
+	if _, err := os.Stat(dst); err == nil {
+		return // already installed (SD-card copy or previous fetch)
+	}
+	resp, err := updateGet(base+"/rtl_tcp-linux-arm64.gz", 60*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "usb sidecar: fetch failed: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		fmt.Fprintf(os.Stderr, "usb sidecar: HTTP %d\n", resp.StatusCode)
+		return
+	}
+	gz, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil || len(gz) < 10_000 {
+		fmt.Fprintf(os.Stderr, "usb sidecar: bad download (%v, %d bytes)\n", err, len(gz))
+		return
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(gz))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "usb sidecar: gzip: %v\n", err)
+		return
+	}
+	bin, err := io.ReadAll(io.LimitReader(zr, 4<<20))
+	if err != nil || len(bin) < 50_000 {
+		fmt.Fprintf(os.Stderr, "usb sidecar: bad payload (%v, %d bytes)\n", err, len(bin))
+		return
+	}
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, bin, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "usb sidecar: write: %v\n", err)
+		return
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		os.Remove(tmp)
+		fmt.Fprintf(os.Stderr, "usb sidecar: rename: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "usb sidecar: installed rtl_tcp (%d bytes)\n", len(bin))
 }
 
 // syncDir flushes the SD card buffers as far as the OS allows.
@@ -570,6 +623,10 @@ func main() {
 	} else {
 		r = radio.New(*host, *freq, dspMode, *gain, out)
 	}
+	// Every exit path (menu Exit, SIGTERM, ctx cancel) must release the
+	// USB dongle: the radio's Run goroutine is not waited for on quit, so
+	// its own defer can race the process exit.
+	defer func() { r.StopUSB() }()
 	if rate != 2_048_000 {
 		r.SetCaptureRate(rate)
 	}
@@ -2083,8 +2140,9 @@ func main() {
 			}
 		case uiHostList:
 			// Rows: a leading "(ปิดใช้งาน)" row (radio off — viewer
-			// only), saved hosts, "add new" at the bottom.
-			rows := len(hostList) + 2
+			// only), the local USB dongle, saved hosts, "add new" at the
+			// bottom.
+			rows := len(hostList) + 3
 			switch b {
 			case input.Up:
 				hostSel = (hostSel + rows - 1) % rows
@@ -2098,12 +2156,19 @@ func main() {
 					r.SetHost("")
 					saveNow()
 					uiMode = uiMenu
-				} else if hostSel == len(hostList)+1 {
+				} else if hostSel == 1 {
+					// Local USB dongle: the app spawns its own rtl_tcp.
+					*host = "usb"
+					cfg["host"] = "usb"
+					r.SetHost("usb")
+					saveNow()
+					uiMode = uiMenu
+				} else if hostSel == len(hostList)+2 {
 					hostText, hostEditIdx, kbTarget = "", -1, "host"
 					hostKbR, hostKbC = 0, 0
 					uiMode = uiHostEdit
 				} else {
-					h := hostList[hostSel-1]
+					h := hostList[hostSel-2]
 					*host = h
 					cfg["host"] = h
 					r.SetHost(h)
@@ -2112,20 +2177,20 @@ func main() {
 					uiMode = uiMenu
 				}
 			case input.X:
-				if hostSel >= 1 && hostSel <= len(hostList) {
-					hostText, hostEditIdx, kbTarget = hostList[hostSel-1], hostSel-1, "host"
+				if hostSel >= 2 && hostSel <= len(hostList)+1 {
+					hostText, hostEditIdx, kbTarget = hostList[hostSel-2], hostSel-2, "host"
 					hostKbR, hostKbC = 0, 0
 					uiMode = uiHostEdit
 				}
 			case input.Y:
-				if hostSel >= 1 && hostSel <= len(hostList) {
-					i := hostSel - 1
+				if hostSel >= 2 && hostSel <= len(hostList)+1 {
+					i := hostSel - 2
 					hostList = append(hostList[:i], hostList[i+1:]...)
 					if len(hostList) == 0 && *host != "" {
 						hostList = []string{*host}
 					}
-					if hostSel > len(hostList)+1 {
-						hostSel = len(hostList) + 1
+					if hostSel > len(hostList)+2 {
+						hostSel = len(hostList) + 2
 					}
 					saveHosts()
 					saveNow()
@@ -3008,14 +3073,16 @@ func main() {
 		} else if uiMode == uiHostEdit {
 			u.DrawKeyboard(kbTitle(), hostText, len(hostText), hostKbR, hostKbC, kbShifted)
 		} else if uiMode == uiHostList {
-			rows := append([]string{i18n.T("host_disable")}, hostList...)
+			rows := append([]string{i18n.T("host_disable"), i18n.T("host_usb")}, hostList...)
 			active := -1
 			if *host == "" {
 				active = 0
+			} else if *host == "usb" {
+				active = 1
 			} else {
 				for i, h := range hostList {
 					if h == *host {
-						active = i + 1
+						active = i + 2
 					}
 				}
 			}

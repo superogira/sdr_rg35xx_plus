@@ -10,6 +10,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -104,6 +105,10 @@ type Radio struct {
 	lastErr string
 	reconAt time.Time
 	bytesRx uint64
+
+	usbSrc  bool        // host == "usb": feed from the local dongle
+	usbProc *exec.Cmd   // our spawned rtl_tcp (Linux sidecar)
+	usbMu   sync.Mutex  // guards usbProc across ensure/stop
 }
 
 const (
@@ -144,6 +149,7 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		sqlDb:  -40,
 		iqRate: 2_048_000,
 		agcOn:  true,
+		usbSrc: host == USBHost,
 		ft8:    dsp.NewFT8Detector(),
 		chain:  dsp.NewChain(mode, nil, nil),
 	}
@@ -230,6 +236,9 @@ func NewDemo(mode dsp.Mode, out *audio.Output) *Radio {
 
 // Run is the connection loop; it returns when ctx is done.
 func (r *Radio) Run(ctx context.Context) {
+	// Leaving the app (or dropping to another source) must release the
+	// dongle for other programs.
+	defer r.stopUSBSrv()
 	if r.demo {
 		r.mu.Lock()
 		r.state = stateStreaming
@@ -315,15 +324,24 @@ func (r *Radio) session(ctx context.Context) error {
 	r.mu.Lock()
 	r.state = stateConnecting
 	r.lastErr = ""
+	dialAddr := r.Host
+	usbSrc := r.usbSrc
 	r.mu.Unlock()
 
-	client, err := rtltcp.Dial(r.Host, 5*time.Second)
+	if usbSrc {
+		if err := r.ensureUSBSrv(); err != nil {
+			return fmt.Errorf("usb: %v", err)
+		}
+		dialAddr = usbDialAddr
+	}
+
+	client, err := rtltcp.Dial(dialAddr, 5*time.Second)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "radio: connect to %s failed: %v\n", r.Host, err)
+		fmt.Fprintf(os.Stderr, "radio: connect to %s failed: %v\n", dialAddr, err)
 		return fmt.Errorf("connect: %v", err)
 	}
 	fmt.Fprintf(os.Stderr, "radio: connected to %s (tuner %d, %d gains, bigEndian=%v)\n",
-		r.Host, client.Info.TunerType, client.Info.GainCount, client.BigEndian())
+		dialAddr, client.Info.TunerType, client.Info.GainCount, client.BigEndian())
 
 	setup := func() error {
 		r.mu.Lock()
@@ -888,15 +906,22 @@ func (r *Radio) SetPpm(v int) {
 // SetHost retargets the rtl_tcp connection. An empty host disables the
 // radio entirely (no IQ, no decoding) — used by the host list's
 // "(ปิดใช้งาน)" row when the app is only wanted as an ADS-B/AIS viewer.
+// The magic value USBHost ("usb") switches to the local dongle: the app
+// spawns its own rtl_tcp and dials 127.0.0.1:1234.
 func (r *Radio) SetHost(host string) {
 	r.mu.Lock()
-	if r.Host == host {
+	wasUSB := r.usbSrc
+	if r.Host == host && wasUSB == (host == USBHost) {
 		r.mu.Unlock()
 		return
 	}
 	r.Host = host
+	r.usbSrc = host == USBHost
 	client := r.client
 	r.mu.Unlock()
+	if wasUSB && !r.usbSrc {
+		r.stopUSBSrv() // release the dongle for other programs
+	}
 	if client != nil {
 		client.CloseGraceful() // reconnect to the new address
 	}
@@ -1162,6 +1187,9 @@ func (r *Radio) FT8Process() {
 func (r *Radio) Hostname() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.usbSrc {
+		return "USB"
+	}
 	return r.Host
 }
 

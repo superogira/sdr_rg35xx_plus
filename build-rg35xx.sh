@@ -29,3 +29,14 @@ echo "== done =="
 echo "package: dist/rg35xx/"
 echo "next:    copy SDRg35xx/ + SDRg35xx.sh + SDRg35xx.png to Roms/APPS on"
 echo "         the SD card, then launch from the APPS menu."
+
+# Bundled rtl_tcp for the USB dongle source (built from
+# rtlsdrblog/rtl-sdr-blog; static librtlsdr, links only system
+# libusb/libudev). Users who skip the SD-card copy get it via OTA.
+if [ -f dist/rg35xx/rtl_tcp ]; then
+  cp dist/rg35xx/rtl_tcp dist/rg35xx/SDRg35xx/rtl_tcp
+  chmod +x dist/rg35xx/SDRg35xx/rtl_tcp
+  echo "== bundled rtl_tcp sidecar =="
+else
+  echo "== WARNING: no rtl_tcp sidecar found in dist/rg35xx/ =="
+fi

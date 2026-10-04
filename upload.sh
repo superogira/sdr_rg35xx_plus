@@ -32,5 +32,12 @@ echo "== uploading stamp $STAMP ($SIZE bytes gz) =="
 curl -sfT "$PKG" --ftp-create-dirs "ftp://$FTP_USER:$FTP_PASS@$FTP_HOST${FTP_PATH}sdrg35xx/sdrg35xx-linux-arm64.gz"
 curl -sfT dist/version.txt --ftp-create-dirs "ftp://$FTP_USER:$FTP_PASS@$FTP_HOST${FTP_PATH}sdrg35xx/version.txt"
 
+# rtl_tcp sidecar for the USB dongle source (small, rarely changes —
+# always re-uploaded, the app fetches it only when missing).
+if [ -f dist/rg35xx/rtl_tcp ]; then
+  gzip -9 -c dist/rg35xx/rtl_tcp > dist/rtl_tcp-linux-arm64.gz
+  curl -sfT dist/rtl_tcp-linux-arm64.gz --ftp-create-dirs "ftp://$FTP_USER:$FTP_PASS@$FTP_HOST${FTP_PATH}sdrg35xx/rtl_tcp-linux-arm64.gz"
+fi
+
 echo "== done =="
 echo "http://downloads.catgg.net/sdrg35xx/version.txt"

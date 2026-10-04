@@ -41,6 +41,7 @@ var strings = map[string][2]string{
 	"host_add":      {"+ เพิ่มรายการใหม่", "+ Add new entry"},
 	"beast_title":   {"รายการ Beast Server", "Beast server list"},
 	"host_disable":  {"(ปิดใช้งาน — ไม่เชื่อมต่อ)", "(disabled — no connection)"},
+	"host_usb":      {"USB — dongle ในเครื่อง", "USB — local dongle"},
 	"m_clearcache":  {"ล้างแคชแผนที่", "Clear map cache"},
 	"m_web":         {"เว็บควบคุม (LAN)", "Web control (LAN)"},
 	"m_webport":     {"พอร์ตเว็บ", "Web port"},

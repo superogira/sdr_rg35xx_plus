@@ -1,47 +1,104 @@
-# AIS-catcher: A multi-platform AIS Receiver
+# SDRg35xx — RTL-SDR receiver for Anbernic RG35XX (Plus/H/2024)
 
-This repository presents the `AIS-catcher` software, a versatile dual-channel AIS receiver that is compatible with a wide range of Software Defined Radios (SDRs). These include RTL-SDR dongles (such as the ShipXplorer AIS dongle and RTL SDR Blog v4), AirSpy (Mini/R2/HF+), HackRF, HydraSDR, SDRPlay, SoapySDR, and file/network input (ZMQ/RTL-TCP/SpyServer). AIS-catcher delivers output in the form of NMEA messages, which can be conveniently displayed on screen or forwarded via UDP/HTTP/TCP. Designed as a lightweight command line utility, AIS-catcher also incorporates a built-in web server for internal use within secure networks. The project home page including several realtime examples can be found at [www.aiscatcher.org](https://www.aiscatcher.org).
+แอปรับสัญญาณวิทยุ SDR บนเครื่องเกม Anbernic RG35XX Plus (H700 / linux arm64)
+เขียนด้วย Go — รับ IQ จาก **RTL-SDR ผ่าน USB ของเครื่องโดยตรง** หรือจาก
+**rtl_tcp server ทางเครือข่าย** แล้วถอดสัญญาณฟังเสียง + แสดงน้ำตก +
+ถอดรหัสดิจิทัล พร้อมเว็บควบคุมผ่าน LAN
 
-<img width="3804" height="1819" alt="image" src="https://github.com/user-attachments/assets/c13b7364-6abe-4df1-a983-ecf4f847f0b3" />
+![SDRg35xx](dist/rg35xx/SDRg35xx.png)
 
-## Purpose
+## ความสามารถ
 
-The purpose of `AIS-catcher` is to serve as a platform that encourages the perpetual enhancement of receiver models. We greatly value and appreciate any suggestions, observations, or shared recordings, particularly from setups where the existing models encounter difficulties.
+- โหมดรับ: WFM (วิทยุ FM), NFM, AM, USB, LSB, CW
+- น้ำตก + สเปกตรัม บนจอเครื่อง (ซูม span ด้วย L1/R1) และบนเว็บ
+  (แตะ/ลาก/ซูม 2 นิ้วได้)
+- ถอดรหัส: **FT8** (+ ส่ง PSK Reporter, แผนที่โลก), **RTTY**, **CW**
+  (ความเร็วอัตโนมัติ), **WEFAX/HF-FAX** (บันทึกรูป), **AIS** จากคลื่น RF
+- **ADS-B radar** — รับจาก Beast server หรือ AIS/ADS-B TCP feed, แผนที่
+  OSM หลายเลเยอร์, ธงประเทศ, breadcrumb
+- เว็บควบคุม + ฟังเสียงผ่านเบราว์เซอร์ (ตั้งเปิดในเมนูระบบ)
+- อัปเดตตัวเองผ่าน OTA
+
+## การติดตั้ง
+
+คัดลอกลงการ์ด SD ของเครื่อง:
+
+```
+dist/rg35xx/SDRg35xx/   →  Roms/APPS/SDRg35xx/
+dist/rg35xx/SDRg35xx.sh →  Roms/APPS/
+dist/rg35xx/SDRg35xx.png → Roms/APPS/
+```
+
+แล้วเปิดจากเมนู **APPS** ของเครื่อง อัปเดตเวอร์ชันใหม่ทำได้จากเมนู
+ระบบ → "ตรวจอัปเดต" (OTA) ไม่ต้องถอดการ์ด
+
+> ⚠️ **เปิดจากเมนู APPS เท่านั้น** — ห้ามรันแอบไปพร้อม launcher
+> (dmenu) ที่กำลังแสดงผลอยู่ ทั้งสองโปรแกรมจะแย่งจอ (fb0) และเสียง
+> ทำให้เครื่องค้างทั้งเครื่อง ถ้าจะรันผ่าน SSH ให้ `pkill -x dmenu.bin`
+> ก่อน (จอ launcher จะดับไปจนกว่าจะรีบูต)
+
+## ใช้ RTL-SDR เสียบ USB ของเครื่อง (ไม่ต้องมีคอมพิวเตอร์)
+
+เสียบ dongle RTL2832U (เช่น RTL-SDR Blog V3/V4, หรือรุ่น generic
+22–1100 MHz) เข้าช่อง USB ของ RG35XX แล้วเข้าเมนู
+
+**ตั้งค่า → รายการเครื่องแม่ข่าย → "USB — dongle ในเครื่อง"**
+
+แอปจะเรียก `rtl_tcp` ที่แนบมากับตัวแอปเอง (สร้างจาก
+[rtlsdrblog/rtl-sdr-blog](https://github.com/rtlsdrblog/rtl-sdr-blog) —
+รองรับ V4 + tuner รุ่นทั่วไป FC0013/E4000/R820T/FC0012/FC2580) ผูกกับ
+`127.0.0.1:1234` แล้วเชื่อมต่อเองโดยอัตโนมัติ — ไม่ต้องติดตั้งอะไรเพิ่ม
+(firmware ต้นฉบับมี libusb/libudev ที่ต้องใช้อยู่แล้ว) ตอนออกจากแอป
+หรือสลับกลับไปใช้ TCP dongle จะถูกปล่อยให้โปรแกรมอื่นใช้ได้ทันที
+
+หมายเหตุ:
+
+- ผู้ที่ติดตั้งแอปผ่าน OTA ครั้งแรก แอปจะดาวน์โหลดไฟล์ `rtl_tcp`
+  ให้เองหนึ่งครั้งระหว่างอัปเดต ถ้าดาวน์โหลดไม่สำเร็จให้คัดลอก
+  `dist/rg35xx/SDRg35xx/rtl_tcp` จาก repo ไปไว้ในโฟลเดอร์แอปบนการ์ด
+- ยังไม่รองรับรับคลื่น HF ผ่าน direct sampling ของ V3 ในโหมด USB
+  (ใช้ TCP server ที่เปิด Q-branch แทนได้)
+- อยากรัน `rtl_tcp` เอง (เช่น เปิดให้เครื่องอื่นใน LAN ใช้) —
+  รัน `rtl_tcp -a 0.0.0.0` ในเครื่อง แล้วเลือกใช้ host
+  `IPของเครื่อง:1234` ตามปกติ
+
+### Driver / DVB-T blacklist
+
+Firmware ของ RG35XX (พื้นฐาน Ubuntu) **ไม่ได้**โหลด driver DVB-T TV
+(`dvb_usb_rtl28xxu`) อัตโนมัติเมื่อเสียบ dongle จึงไม่ต้องทำอะไร
+แต่ถ้าใช้ firmware/distro อื่นที่มีอาการมองไม่เห็นอุปกรณ์ หรือ
+`lsusb` เห็นแต่ rtl_tcp เปิดไม่ได้ ให้ blacklist ตามวิธีมาตรฐานจาก
+[rtl-sdr.com](https://www.rtl-sdr.com/v4/) โดยสร้างไฟล์
+`/etc/modprobe.d/blacklist-rtl.conf`:
+
+```
+blacklist dvb_usb_rtl28xxu
+blacklist rtl2832
+blacklist rtl2838
+```
+
+แล้วรีบูต สำหรับ V4 ยังต้องใช้ librtlsdr จาก rtl-sdr-blog (แนบมากับ
+แอปแล้วในไฟล์ `rtl_tcp`)
+
+## ใช้ rtl_tcp ผ่านเครือข่าย (เหมือนเดิม)
+
+รัน rtl_tcp บนคอม/เซิร์ฟเวอร์ใดก็ได้ แล้วเพิ่ม host `IP:พอร์ต` ใน
+รายการเครื่องแม่ข่ายของแอป เหมาะกับกรณีวางคอมไว้ข้างเสาอากาศ
+หรือรับ HF ผ่าน direct sampling
+
+## Build จากซอร์ส
+
+```
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build .
+```
+
+หรือ `./build-rg35xx.sh` เพื่อสร้างแพ็กเกจพร้อม icon/launcher และ
+`./upload.sh` เพื่อเผยแพร่ OTA (ตั้งค่า `ftp.env` ก่อน)
+
+ไฟล์ `rtl_tcp` ใน `dist/rg35xx/` build จากซอร์ส rtl-sdr-blog แบบ
+static librtlsdr (link แค่ libusb/libudev ของระบบ) — ดูขั้นตอนใน
+คอมเมนต์ต้นไฟล์ `build-rg35xx.sh`
 
 ## License
 
-Copyright (C) 2021 - 2026 jvde.github at gmail.com. All rights reserved. Licensed under GNU General Public License v3.0.
-
-## Important Disclaimer
-`AIS-catcher` is created for research and educational purposes under the GNU GPL v3 license. It is a hobby project and has not been tested and designed for reliability and correctness. 
-You can play with the software but it is the user's responsibility to use it prudently. So, DO NOT rely upon this software in any way including for navigation 
-and/or safety of life or property purposes.
-There are variations in the legislation concerning radio reception in the different administrations around the world. 
-It is your responsibility to determine whether or not your local administration permits the reception and handling of AIS messages from ships. 
-It is specifically forbidden to use this software for any illegal purpose whatsoever. 
-Only use this software in regions where such use is permitted.
-
-## Plug-and-play solution
-
-Prefer a traditional AIS receiver over an SDR but want the same advantages? We recommend the **dAISy-catcher**, a dual-channel receiver developed with [Wegmatt](https://shop.wegmatt.com/products/daisy-catcher-high-performance-ais-receiver) that combines the benefits of SDR receivers with a dedicated hardware solution: plug-and-play operation, low power consumption, and precise signal processing. It connects directly to AIS-catcher over serial, as a USB device or Raspberry Pi HAT. See the [product page](https://shop.wegmatt.com/products/daisy-catcher-high-performance-ais-receiver) and [manual (PDF)](https://wegmatt.com/files/dAISy-catcher%20AIS%20Receiver%20Manual.pdf).
-
-<img width="2048" height="1365" alt="image" src="https://github.com/user-attachments/assets/d79f51ec-857d-4767-9c28-9cb8ebe4f2e5" />
-
-## Feature overview: Input -> Output
-
-![image](https://github.com/user-attachments/assets/6677b833-bd2c-4338-babe-3817d6a7c3ea)
-
-## The aiscatcher.org community
-
-To join, ensure you're on the latest version, visit [www.aiscatcher.org](https://www.aiscatcher.org), and [add](https://www.aiscatcher.org/addstation) your station. Upon registration, you'll receive a personal sharing key. Simply run AIS-catcher on the command line with "-X" followed by your sharing key to share your station's raw AIS data with the community hub. This activates a "Community Feed" in your station's web viewer, accessible under map layers and some other features.
-
-
-## Links
-
-- Documentation: [here](https://jvde-github.github.io/AIS-catcher-docs/)
-- Installation: [here](https://jvde-github.github.io/AIS-catcher-docs/installation/overview)
-- What is New? [here](https://jvde-github.github.io/AIS-catcher-docs/what-is-new/)
-- Python binding (`aiscat`): [PyPI](https://pypi.org/project/aiscat/) · [source & docs](python/)
-- Forum: [here](https://github.com/jvde-github/AIS-catcher/discussions)
-- Bug Reports: [here](https://github.com/jvde-github/AIS-catcher/issues)
-
+See [Licenses](Licenses).
