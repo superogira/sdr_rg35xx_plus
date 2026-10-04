@@ -187,7 +187,7 @@ tr:hover td { background:var(--row-hover); }
         <label data-i18n="panelLbl">หน้าจอ</label>
         <button id="pan-dim" data-i18n-title="ttPanDim">🔅 <span data-i18n="panelDim">ไฟหรี่</span></button>
         <button id="pan-off" data-i18n-title="ttPanOff">🌑 <span data-i18n="panelOff">ปิดจอ</span></button>
-        <button id="pan-on" class="on">🌕 <span data-i18n="panelOn">เปิดจอ</span></button>
+        <button id="pan-on">🌕 <span data-i18n="panelOn">เปิดจอ</span></button>
       </div>
       <div class="row" style="margin-top:10px">
         <button id="upd">⬆ <span data-i18n="update">อัปเดตระบบ</span></button>
@@ -376,8 +376,9 @@ $('theme').onclick = () => {
 let st = null, tab = 'ft8', rebootPending = false;
 const fmtMHz = hz => (hz/1e6).toFixed(4);
 
-async function api(path, body) {
+async function api(path, body, signal) {
   const opt = body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {};
+  if (signal) opt.signal = signal;
   const r = await fetch(path, opt);
   if (!r.ok) throw new Error(path + ' → ' + r.status);
   const d = await r.json();
@@ -461,6 +462,8 @@ function renderState(s) {
   $('upb').textContent = Math.floor(s.upSecs/60) + 'm';
   $('updst').textContent = s.updating || '';
   updateGPS(s.gps);
+  for (const [id, v] of [['pan-on',0], ['pan-dim',1], ['pan-off',2]])
+    $(id).className = (s.panel === v) ? 'on' : '';
   if (s.reboot) rebootPending = true;
   if (rebootPending && !s.reboot && !s.updating) {
     // the app came back from the OTA re-exec — pick up the new page
@@ -835,7 +838,14 @@ function fmtTick(hz, step) {
 }
 async function specPoll() {
   try {
-    const d = await api('/api/spec');
+    const ctl = new AbortController();
+    const tm = setTimeout(() => ctl.abort(), 5000);
+    let d;
+    try {
+      d = await api('/api/spec', undefined, ctl.signal);
+    } finally {
+      clearTimeout(tm);
+    }
     if (!d.bins || !d.bins.length) return;
     if (specState && d.spanHz !== specState.spanHz) {
       // Capture span changed (new sample rate): a zoom factor anchored

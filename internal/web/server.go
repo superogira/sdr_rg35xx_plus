@@ -87,6 +87,7 @@ type Server struct {
 	rxPos  func() (float64, float64)
 	gpsGet func() GPSInfo
 	panelSet func(state int)
+	panelGet func() int
 	wfSet func(min, max float64)
 
 	// Spec scratch reused across /api/spec calls (FFT work arrays at
@@ -148,6 +149,14 @@ type GPSInfo struct {
 func (s *Server) SetGPSProvider(f func() GPSInfo) {
 	s.mu.Lock()
 	s.gpsGet = f
+	s.mu.Unlock()
+}
+
+// SetPanelStateFunc exposes the live panel state (0/1/2) for the web
+// buttons' active highlight.
+func (s *Server) SetPanelStateFunc(f func() int) {
+	s.mu.Lock()
+	s.panelGet = f
 	s.mu.Unlock()
 }
 
@@ -307,6 +316,7 @@ type state struct {
 	MEM       float64   `json:"mem"`
 	BAT       int       `json:"bat"`
 	BATChg    bool      `json:"batCharging"`
+	Panel     int       `json:"panel"`
 	Planes    int       `json:"planes"`
 	Ships     int       `json:"ships"`
 	UpSecs    int       `json:"upSecs"`
@@ -386,7 +396,11 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	gpsGet := s.gpsGet
+	panelGet := s.panelGet
 	s.mu.Unlock()
+	if panelGet != nil {
+		st.Panel = panelGet()
+	}
 	if gpsGet != nil {
 		g := gpsGet()
 		st.GPS = &g

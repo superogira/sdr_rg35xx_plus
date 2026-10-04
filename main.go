@@ -1150,6 +1150,7 @@ func main() {
 	panelState := 0 // power-key cycle: 0=on, 1=dim, 2=off
 	// Web panel buttons (screen on/dim/off): applied on the UI goroutine
 	// so panelState stays single-writer, same as the power key.
+	webSrv.SetPanelStateFunc(func() int { return panelState })
 	webSrv.SetPanelFunc(func(state int) {
 		postWeb(func() {
 			if state >= 0 && state <= 2 {
