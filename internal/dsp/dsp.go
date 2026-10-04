@@ -811,6 +811,16 @@ func (c *Chain) feedAIS(in []complex128) {
 // output Nyquist, so a linear kernel suffices.
 func resampleLinear(in []complex128, pos *float64, ratio float64, out *[]complex128) {
 	n := len(in)
+	if n < 2 {
+		// A fragment too short to interpolate across — a micro TCP
+		// read can decimate down to a single sample, and indexing
+		// in[i+1] on it crashed the app the moment AIS RF switched
+		// on. Keep the position and wait for the next full block.
+		return
+	}
+	if *pos < 0 {
+		*pos = 0 // carry from the previous block: clamp to its edge
+	}
 	for *pos < float64(n-1) {
 		i := int(*pos)
 		frac := *pos - float64(i)
