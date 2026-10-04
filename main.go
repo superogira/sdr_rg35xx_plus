@@ -28,6 +28,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -484,6 +485,7 @@ const (
 	menuGPSHdop
 	menuGPSAge
 	menuGPSFollow
+	menuGPSTimeSync
 	menuExit
 )
 
@@ -496,7 +498,7 @@ var pageItems = [][]int{
 	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 	{menuAF, menuNR, menuHP, menuLP, menuLocalMute},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
-	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow},
+	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear, menuWefaxAuto, menuCWDec, menuCWClear},
 	{menuBM},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
@@ -807,6 +809,11 @@ func main() {
 	// the position to the radar/web receiver location.
 	gpsRx := gps.New()
 	gpsFollow := cfg["gpsfollow"] == "on"
+	gpsTimeSync := true
+	gpsLastClockCheck := time.Now().Add(-time.Hour) // allow first sync soon
+	if v, ok := cfg["gpstime"]; ok && v == "off" {
+		gpsTimeSync = false
+	}
 	go gpsRx.Run(ctx)
 	webSrv.SetRxPosFunc(func() (float64, float64) {
 		if gpsFollow {
@@ -1798,6 +1805,11 @@ func main() {
 			gpsFollow = !gpsFollow
 			cfg["gpsfollow"] = map[bool]string{true: "on", false: "off"}[gpsFollow]
 			saveNow()
+		case menuGPSTimeSync:
+			gpsTimeSync = !gpsTimeSync
+			cfg["gpstime"] = map[bool]string{true: "on", false: "off"}[gpsTimeSync]
+			gpsLastClockCheck = time.Now().Add(-time.Hour) // re-arm
+			saveNow()
 		case menuAISServer:
 			aisSel = 0
 			uiMode = uiAISList
@@ -2586,7 +2598,7 @@ func main() {
 	lastSave := time.Now()
 
 	for {
-		drain:
+			drain:
 		for {
 			select {
 			case f := <-webTasks:
@@ -2601,6 +2613,25 @@ func main() {
 		if gpsFollow {
 			if f := gpsRx.Snapshot(); f.Valid && time.Since(f.Updated) < 10*time.Second {
 				adsbLat, adsbLon = f.Lat, f.Lon
+			}
+		}
+		// GPS clock sync: the console has no RTC battery and its clock
+		// drifts across power-offs (it even breaks TLS validity windows
+		// for OTA). With a valid fix, set the system clock from the
+		// satellites when it has drifted >30 s; re-check hourly.
+		if gpsTimeSync && time.Since(gpsLastClockCheck) > time.Hour {
+			gpsLastClockCheck = time.Now()
+			if f := gpsRx.Snapshot(); f.Valid && len(f.TimeUTC) >= 6 && len(f.DateUTC) >= 6 {
+				if t, err := time.Parse("020106150405", f.DateUTC+f.TimeUTC[:6]); err == nil {
+					if drift := time.Since(t); drift > 30*time.Second || drift < -30*time.Second {
+						if out, err := exec.Command("date", "-u", "-s", t.UTC().Format("2006-01-02 15:04:05 UTC")).CombinedOutput(); err == nil {
+							fmt.Fprintf(os.Stderr, "gps: clock synced (was off by %v)\n", drift)
+							setMsg(fmt.Sprintf(i18n.T("gps_clock_set"), drift.Round(time.Second)))
+						} else {
+							fmt.Fprintf(os.Stderr, "gps: clock set failed: %v: %s\n", err, out)
+						}
+					}
+				}
 			}
 		}
 		select {
@@ -3268,6 +3299,7 @@ func main() {
 						return ui.MenuItem{Label: i18n.T("gps_age"), Value: v}
 					}(),
 					ui.MenuItem{Label: i18n.T("m_gpsfollow"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[gpsFollow]},
+					ui.MenuItem{Label: i18n.T("m_gpstimesync"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[gpsTimeSync]},
 				)
 			case pageSys:
 				items = append(items,
@@ -4013,6 +4045,10 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["gpsfollow"]; ok {
 		fmt.Fprintf(f, "gpsfollow=%s\n", v)
+	}
+
+	if v, ok := cfg["gpstime"]; ok {
+		fmt.Fprintf(f, "gpstime=%s\n", v)
 	}
 	if v, ok := cfg["adsbhost"]; ok {
 		fmt.Fprintf(f, "adsbhost=%s\n", v)

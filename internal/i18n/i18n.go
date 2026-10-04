@@ -90,6 +90,8 @@ var strings = map[string][2]string{
 	"gps_2d":             {"2D", "2D"},
 	"gps_3d":             {"3D", "3D"},
 	"gps_time":           {"เวลา (UTC)", "Time (UTC)"},
+	"m_gpstimesync":      {"ตั้งนาฬิกาเครื่องจาก GPS", "Set clock from GPS"},
+	"gps_clock_set":      {"ตั้งนาฬิกาจาก GPS (เดิมคลาด %v)", "clock set from GPS (was off by %v)"},
 	"m_adsbhost":         {"Beast server", "Beast server"},
 	"m_adsblat":          {"ละติจูดจุดรับ", "Receiver latitude"},
 	"m_adsblon":          {"ลองจิจูดจุดรับ", "Receiver longitude"},
