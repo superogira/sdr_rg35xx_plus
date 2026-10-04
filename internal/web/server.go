@@ -631,6 +631,7 @@ type spec struct {
 	PbLo     float64 `json:"pbLo"` // live passband edges vs listenHz
 	PbHi     float64 `json:"pbHi"` // (CW beat window, SSB band, FM ±bw/2)
 	Mode     string  `json:"mode"`
+	SigDb    float64 `json:"sigDb"` // smoothed IF power, dBFS (S-meter)
 	Reboot   bool    `json:"reboot"`
 }
 
@@ -760,6 +761,7 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 		PbLo:     pbLo,
 		PbHi:     pbHi,
 		Mode:     s.radio.Mode().Name,
+		SigDb:    s.radio.Snapshot().PowerDb,
 		Reboot:   s.rebooting(),
 	})
 }

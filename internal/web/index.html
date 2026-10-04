@@ -138,6 +138,13 @@ tr:hover td { background:var(--row-hover); }
         <button id="up100">+100</button><button id="up1k">+1k</button>
         <button id="up10k">+10k</button>
       </div>
+      <div class="row" style="align-items:center">
+        <div id="smeter" data-i18n-title="smeterTT" style="flex:1;position:relative;height:16px;border:1px solid var(--card-border);border-radius:4px;background:var(--panel);overflow:hidden">
+          <div id="sfill" style="position:absolute;inset:0;width:0;background:linear-gradient(90deg,#46c878 0%,#46c878 68.7%,#ffd250 68.7%,#ffd250 85%,#ff5a46 85%,#ff5a46 100%)"></div>
+          <div id="sticks" style="position:absolute;inset:0"></div>
+        </div>
+        <span class="val" id="sval" style="min-width:112px;text-align:right">S0 · −100.0 dBFS</span>
+      </div>
       <div class="row"><label data-i18n="mode">Mode</label><select id="mode"></select>
         <label style="flex:0 0 auto">BW</label><select id="bw"></select></div>
       <div class="row"><label data-i18n="gain">Gain</label><input type="range" id="gain" min="-10" max="49.6" step="0.1"><span class="val" id="gainv"></span></div>
@@ -207,6 +214,7 @@ tr:hover td { background:var(--row-hover); }
         <canvas id="wfOv" width="512" height="240" style="position:absolute;inset:0;width:100%;height:240px;pointer-events:none"></canvas>
       </div>
       <div class="row" style="margin-top:6px"><label data-i18n="clicktune">คลิกกราฟ/น้ำตก = จูน</label><span class="val" id="clickhz" style="color:var(--dim)"></span></div>
+      <div class="row" style="margin-top:6px"><label data-i18n="signal">สัญญาณ</label><span class="val" id="sigdb" style="color:var(--acc)">—</span></div>
       <div class="row"><label data-i18n="wfmin">น้ำตก ต่ำสุด</label><input type="range" id="wfmin" min="0" max="40" step="1"><span class="val" id="wfminv"></span></div>
       <div class="row"><label data-i18n="wfmax">น้ำตก สูงสุด</label><input type="range" id="wfmax" min="10" max="120" step="2"><span class="val" id="wfmaxv"></span></div>
       <div id="wfxbox" hidden>
@@ -294,6 +302,7 @@ const STRINGS = {
     tune: 'จูน', mode: 'โหมด', gain: 'กำลังสัญญาณ', volume: 'ระดับเสียง', squelch: 'สเกลช', ppm: 'PPM',
     tuneTitle: 'ตั้งความถี่', tuneGo: 'จูน', tuneCancel: 'ยกเลิก',
     tuneHint: 'กดเพื่อตั้งความถี่',
+    signal: 'สัญญาณ', smeterTT: 'มิเตอร์ความแรงสัญญาณ (dBFS) — S9 = −30 dBFS',
     listenOn: '🔊 ฟัง', listenOff: '🔇 ฟัง', compat: ' (compat)',
     devOn: '🔈 เครื่อง', devOff: '🔇 เครื่อง',
     connFail: '○ เว็บไม่ตอบ', connOff: '○ ไม่เชื่อมต่อ ', tuned: 'จูน → ', reset: ' · ดับเบิลคลิกรีเซ็ต',
@@ -328,6 +337,7 @@ const STRINGS = {
     tune: 'Tune', mode: 'Mode', gain: 'Gain', volume: 'Volume', squelch: 'Squelch', ppm: 'PPM',
     tuneTitle: 'Tune frequency', tuneGo: 'Tune', tuneCancel: 'Cancel',
     tuneHint: 'Click to set frequency',
+    signal: 'Signal', smeterTT: 'Signal strength meter (dBFS) — S9 = −30 dBFS',
     listenOn: '🔊 Listen', listenOff: '🔇 Listen', compat: ' (compat)',
     devOn: '🔈 Device', devOff: '🔇 Device',
     connFail: '○ no response', connOff: '○ offline ', tuned: 'Tuned → ', reset: ' · dbl-click reset',
@@ -594,6 +604,31 @@ $('fqin').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') fqApply();
   if (e.key === 'Escape') fqClose();
 });
+
+// ---- S-meter: same dBFS range/zones as the device's SIGNAL bar ----
+// Bar spans −100..−20 dBFS (80 dB); S-units at 6 dB steps, S1 bottom
+// at −78 dBFS, S9 at −30 (everything above counts as S9+over).
+const SIG_MIN = -100, SIG_SPAN = 80;
+(function buildSticks() {
+  const box = $('sticks');
+  for (let n = 1; n <= 9; n++) {
+    const t = (-78 + (n-1)*6 - SIG_MIN) / SIG_SPAN;
+    const d = document.createElement('div');
+    d.style.cssText = `position:absolute;top:0;bottom:0;left:${(t*100).toFixed(2)}%;width:1px;background:rgba(0,0,0,.35)`;
+    box.appendChild(d);
+  }
+})();
+function updateSMeter(db) {
+  const t = Math.max(0, Math.min(1, (db - SIG_MIN) / SIG_SPAN));
+  $('sfill').style.width = (t*100).toFixed(1) + '%';
+  let s;
+  if (db >= -30) s = 'S9+' + Math.max(0, Math.round(db + 30));
+  else if (db < -78) s = 'S0';
+  else s = 'S' + (Math.floor((db + 78) / 6) + 1);
+  const txt = s + ' · ' + db.toFixed(1) + ' dBFS';
+  $('sval').textContent = txt;
+  $('sigdb').textContent = txt;
+}
 $('dn1k').onclick = () => cmd({cmd:'freq', hz: st.freqHz - 1000});
 $('dn100').onclick = () => cmd({cmd:'freq', hz: st.freqHz - 100});
 $('up100').onclick = () => cmd({cmd:'freq', hz: st.freqHz + 100});
@@ -886,6 +921,7 @@ async function specPoll() {
     } finally {
       clearTimeout(tm);
     }
+    if (typeof d.sigDb === 'number') updateSMeter(d.sigDb);
     if (!d.bins || !d.bins.length) return;
     if (specState && d.spanHz !== specState.spanHz) {
       // Capture span changed (new sample rate): a zoom factor anchored
