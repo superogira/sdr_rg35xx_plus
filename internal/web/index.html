@@ -1281,9 +1281,19 @@ document.querySelectorAll('input[type=range]').forEach(sl => {
   const step = parseFloat(sl.step) || 1;
   const dec = (String(sl.step).split('.')[1] || '').length;
   const nudge = d => {
-    let v = (parseFloat(sl.value) || 0) + d * step;
-    v = Math.max(+sl.min, Math.min(+sl.max, v));
-    sl.value = (Math.round(v / step) * step).toFixed(dec);
+    let v = parseFloat(sl.value) || 0;
+    if (sl.id === 'vol') {
+      // Volume arrows: coarse step of 1 in the >1 zone (snapped to the
+      // 1 boundary — at 1.5 a press lands exactly on 1), fine 0.1 steps
+      // once at or below 1 so quiet levels stay adjustable.
+      v = d > 0 ? (v >= 1 ? Math.min(+sl.max, v + 1) : 1)
+                : (v <= 1 ? Math.max(+sl.min, v - 0.1) : 1);
+      sl.value = v.toFixed(1);
+    } else {
+      let nv = v + d * step;
+      nv = Math.max(+sl.min, Math.min(+sl.max, nv));
+      sl.value = (Math.round(nv / step) * step).toFixed(dec);
+    }
     sl.dispatchEvent(new Event('input', { bubbles: true }));
   };
   const mk = (txt, d) => {
@@ -1294,6 +1304,14 @@ document.querySelectorAll('input[type=range]').forEach(sl => {
   };
   sl.insertAdjacentElement('beforebegin', mk('◀', -1));
   sl.insertAdjacentElement('afterend', mk('▶', 1));
+  // Keyboard arrows follow the same custom stepping as the buttons
+  // (native arrows would use the 0.05 drag step).
+  if (sl.id === 'vol') {
+    sl.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { nudge(-1); e.preventDefault(); }
+      else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { nudge(1); e.preventDefault(); }
+    });
+  }
 });
 poll(); setInterval(poll, 1500);
 </script>
