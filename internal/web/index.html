@@ -149,7 +149,7 @@ tr:hover td { background:var(--row-hover); }
       <div class="row"><label data-i18n="mode">Mode</label><select id="mode"></select>
         <label style="flex:0 0 auto">BW</label><select id="bw"></select></div>
       <div class="row"><label data-i18n="gain">Gain</label><input type="range" id="gain" min="-10" max="49.6" step="0.1"><span class="val" id="gainv"></span></div>
-      <div class="row"><label data-i18n="volume">Volume</label><input type="range" id="vol" min="0" max="1.5" step="0.05"><span class="val" id="volv"></span></div>
+      <div class="row"><label data-i18n="volume">Volume</label><input type="range" id="vol" min="0" max="1.5" step="0.001"><span class="val" id="volv"></span></div>
       <div class="row"><label data-i18n="squelch">Squelch</label><input type="range" id="sql" min="-100" max="0" step="1"><span class="val" id="sqlv"></span></div>
       <div class="row"><label data-i18n="ppm">PPM</label><input type="range" id="ppm" min="-120" max="120" step="1"><span class="val" id="ppmv"></span>
         <button id="ppmoff" title="leave correction to the server">OFF</button></div>
@@ -447,7 +447,7 @@ function renderState(s) {
   $('bw').innerHTML = bws.map(b => `<option value="${b}">${(b/1000).toFixed(1)}k</option>`).join('');
   $('bw').value = String(s.bwHz);
   $('gain').value = s.gainDb; $('gainv').textContent = s.gainDb.toFixed(1) + ' dB';
-  $('vol').value = s.vol;    $('volv').textContent = Math.round(s.vol*100) + '%';
+  $('vol').value = s.vol;    $('volv').textContent = (s.vol*100 < 2 ? (s.vol*100).toFixed(1) : Math.round(s.vol*100)) + '%';
   $('sql').value = s.sqlDb;  $('sqlv').textContent = s.sqlDb + ' dBFS';
   $('ppm').value = s.ppm;    $('ppmv').textContent = (s.ppm>0?'+':'') + s.ppm;
   if (s.wfMin !== undefined) {
@@ -1283,13 +1283,15 @@ document.querySelectorAll('input[type=range]').forEach(sl => {
   const nudge = d => {
     let v = parseFloat(sl.value) || 0;
     if (sl.id === 'vol') {
-      // Volume arrows: fine 10% (0.1) steps at/below 1 — both
-      // directions, so 0% climbs back 10% at a time instead of jumping
-      // straight to 100% — and a coarse step of 1 in the >1 zone
-      // (1 ↔ 1.5, snapped to the 1 boundary).
-      v = d > 0 ? (v >= 1 ? Math.min(+sl.max, v + 1) : Math.min(1, v + 0.1))
-                : (v <= 1 ? Math.max(+sl.min, v - 0.1) : 1);
-      sl.value = v.toFixed(1);
+      // Volume arrows (display is %): 1% steps normally; in the quiet
+      // zone below 1% both directions step 0.1% — listening at very low
+      // levels needs it. Boundary-snapped: 1.1% ↓ lands on 1% (never
+      // skips into the fine zone), and climbing from below tops out at
+      // exactly 1% before the coarse 1% grid resumes.
+      const P1 = 0.01, P01 = 0.001; // 1% / 0.1% in slider units
+      if (d > 0) v = v < P1 ? Math.min(P1, v + P01) : Math.min(+sl.max, v + P1);
+      else       v = v > P1 ? Math.max(P1, v - P1) : Math.max(+sl.min, v - P01);
+      sl.value = v.toFixed(3);
     } else {
       let nv = v + d * step;
       nv = Math.max(+sl.min, Math.min(+sl.max, nv));
