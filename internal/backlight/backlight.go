@@ -102,6 +102,21 @@ func RestoreOn() {
 // Level returns the current panel brightness (0 when unreadable).
 func Level() int { return captureLevel() }
 
+// ApplyState sets the panel state directly: 0 on, 1 dim, 2 off. Used
+// by the power-key cycle and the web panel buttons.
+func ApplyState(state int) {
+	switch state {
+	case 0:
+		RestoreOn()
+	case 1:
+		BlankFB(false)
+		Set(10)
+	case 2:
+		Set(0)
+		BlankFB(true)
+	}
+}
+
 // Step changes the brightness by delta (clamped to 8..255 so it can
 // never go fully dark) and returns the new level. A blanked panel is
 // revived first; a level above the dim floor becomes the new restore

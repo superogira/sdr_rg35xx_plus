@@ -83,8 +83,9 @@ type Server struct {
 	// wfmax ini): get returns the live values, set applies a change
 	// (device UI + cfg + saveNow). Nil until main wires them.
 	wfGet func() (float64, float64)
-	rxPos func() (float64, float64)
+	rxPos  func() (float64, float64)
 	gpsGet func() GPSInfo
+	panelSet func(state int)
 	wfSet func(min, max float64)
 
 	// Spec scratch reused across /api/spec calls (FFT work arrays at
@@ -144,6 +145,15 @@ type GPSInfo struct {
 func (s *Server) SetGPSProvider(f func() GPSInfo) {
 	s.mu.Lock()
 	s.gpsGet = f
+	s.mu.Unlock()
+}
+
+// SetPanelFunc wires the web panel buttons (screen on/dim/off). The
+// callback runs on the cmd handler goroutine; the app posts the actual
+// state change to its UI loop.
+func (s *Server) SetPanelFunc(f func(state int)) {
+	s.mu.Lock()
+	s.panelSet = f
 	s.mu.Unlock()
 }
 
@@ -502,6 +512,15 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 	case "localmute":
 		if c.On != nil {
 			radio.SetLocalMute(*c.On)
+		}
+	case "panel":
+		// 0 = screen on, 1 = backlight dim, 2 = screen off (same states
+		// as the device power key).
+		s.mu.Lock()
+		f := s.panelSet
+		s.mu.Unlock()
+		if f != nil {
+			f(int(c.V))
 		}
 	case "update":
 		s.mu.Lock()

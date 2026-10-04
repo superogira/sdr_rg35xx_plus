@@ -1139,6 +1139,18 @@ func main() {
 	}()
 
 	panelState := 0 // power-key cycle: 0=on, 1=dim, 2=off
+	// Web panel buttons (screen on/dim/off): applied on the UI goroutine
+	// so panelState stays single-writer, same as the power key.
+	webSrv.SetPanelFunc(func(state int) {
+		postWeb(func() {
+			if state >= 0 && state <= 2 {
+				panelState = state
+				backlight.ApplyState(state)
+				fmt.Fprintf(os.Stderr, "panel: web set state %d (%s)\n", state,
+					[]string{"on", "dim", "off"}[state])
+			}
+		})
+	})
 	// Heal a panel left dim by a previous run that quit in the dim
 	// state (its level-10 would otherwise be adopted as "normal").
 	backlight.RestoreOn()

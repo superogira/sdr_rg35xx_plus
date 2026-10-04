@@ -183,6 +183,12 @@ tr:hover td { background:var(--row-hover); }
         <label style="font-weight:600">🛰 <span data-i18n="gpsLbl">GPS</span></label>
         <span class="val" id="gpssum" style="color:var(--dim)">–</span>
       </div>
+      <div class="row" style="margin-top:6px">
+        <label data-i18n="panelLbl">หน้าจอ</label>
+        <button id="pan-dim" data-i18n-title="ttPanDim">🔅 <span data-i18n="panelDim">ไฟหรี่</span></button>
+        <button id="pan-off" data-i18n-title="ttPanOff">🌑 <span data-i18n="panelOff">ปิดจอ</span></button>
+        <button id="pan-on" class="on">🌕 <span data-i18n="panelOn">เปิดจอ</span></button>
+      </div>
       <div class="row" style="margin-top:10px">
         <button id="upd">⬆ <span data-i18n="update">อัปเดตระบบ</span></button>
         <span class="val" id="updst" style="color:var(--dim);font-size:12px"></span>
@@ -277,6 +283,8 @@ const STRINGS = {
     ttTheme: 'สลับธีม', ttListen: 'สตรีมเสียงจากเครื่องเกม', ttMute: 'ปิดลำโพงเครื่องเกม (เว็บยังได้ยิน)', ttLang: 'Switch to English',
     nextTheme: { phosphor: '☀️ ขาว', light: '📻 วิทยุ', radio: '💡 เขียว' },
     gpsLbl: 'GPS', gpsTitle: 'คลิกดูข้อมูล GPS ทั้งหมด',
+    panelLbl: 'หน้าจอ', panelDim: 'ไฟหรี่', panelOff: 'ปิดจอ', panelOn: 'เปิดจอ',
+    ttPanDim: 'ลดแสง backlight (แอปยังทำงาน)', ttPanOff: 'ปิดจอ (แอป/เว็บ/วิทยุยังทำงาน)',
     gDev: 'อุปกรณ์', gStat: 'สถานะ', gPos: 'พิกัด', gGrid: 'Grid', gAlt: 'ความสูง',
     gSpd: 'ความเร็ว', gCse: 'ทิศทาง', gSat: 'ดาวเทียม (ใช้/เห็น)', gHdop: 'HDOP',
     gAge: 'อายุข้อมูล', gFollow: 'ตำแหน่งรับ (radar)', gNoFix: 'ยังไม่มี fix', gFix: 'Fix',
@@ -306,6 +314,8 @@ const STRINGS = {
     ttTheme: 'Switch theme', ttListen: 'Stream audio from device', ttMute: 'Mute device speaker (web still hears)', ttLang: 'เปลี่ยนเป็นภาษาไทย',
     nextTheme: { phosphor: '☀️ Light', light: '📻 Radio', radio: '💡 Green' },
     gpsLbl: 'GPS', gpsTitle: 'Click for full GPS details',
+    panelLbl: 'Screen', panelDim: 'Dim', panelOff: 'Off', panelOn: 'On',
+    ttPanDim: 'Dim the backlight (app keeps running)', ttPanOff: 'Screen off (app/web/radio keep running)',
     gDev: 'Device', gStat: 'Status', gPos: 'Position', gGrid: 'Grid', gAlt: 'Altitude',
     gSpd: 'Speed', gCse: 'Course', gSat: 'Satellites (use/view)', gHdop: 'HDOP',
     gAge: 'Data age', gFollow: 'Receiver pos (radar)', gNoFix: 'no fix', gFix: 'Fix',
@@ -500,6 +510,10 @@ $('gpsclose').onclick = () => { $('gpsmodal').style.display = 'none'; };
 $('gpsmodal').addEventListener('click', (e) => {
   if (e.target === $('gpsmodal')) $('gpsmodal').style.display = 'none';
 });
+// Panel buttons: 0 on, 1 dim, 2 off — the device keeps running.
+$('pan-on').onclick  = () => cmd({cmd:'panel', v: 0});
+$('pan-dim').onclick = () => cmd({cmd:'panel', v: 1});
+$('pan-off').onclick = () => cmd({cmd:'panel', v: 2});
 
 async function poll() {
   try {
