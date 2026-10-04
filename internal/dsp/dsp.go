@@ -959,7 +959,10 @@ func (c *Chain) measureIF(block []complex128) {
 		if c.powerDb > c.sqlLevel {
 			c.sqlOpen = true
 		}
-	} else if c.powerDb < c.sqlLevel-6 { // hysteresis
+	} else if c.powerDb < c.sqlLevel-2 { // hysteresis: keep small — the
+		// meter reading must reliably mean closed. A −6 dB latch zone
+		// kept playing audio for signals sitting between the two levels
+		// (e.g. meter −33 with SQL −31), which read as a broken setting.
 		c.sqlOpen = false
 	}
 }

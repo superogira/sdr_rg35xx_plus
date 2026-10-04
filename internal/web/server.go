@@ -631,7 +631,8 @@ type spec struct {
 	PbLo     float64 `json:"pbLo"` // live passband edges vs listenHz
 	PbHi     float64 `json:"pbHi"` // (CW beat window, SSB band, FM ±bw/2)
 	Mode     string  `json:"mode"`
-	SigDb    float64 `json:"sigDb"` // smoothed IF power, dBFS (S-meter)
+	SigDb    float64 `json:"sigDb"`   // smoothed IF power, dBFS (S-meter)
+	SqlOpen  bool    `json:"sqlOpen"` // squelch gate state (NFM)
 	Reboot   bool    `json:"reboot"`
 }
 
@@ -751,6 +752,7 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 		}
 		bins[b] = int16(t * 620)
 	}
+	sigSnap := s.radio.Snapshot()
 	writeJSON(w, spec{
 		CentreHz: s.radio.LO(),
 		SpanHz:   float64(dsp.IQRate),
@@ -761,7 +763,8 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 		PbLo:     pbLo,
 		PbHi:     pbHi,
 		Mode:     s.radio.Mode().Name,
-		SigDb:    s.radio.Snapshot().PowerDb,
+		SigDb:    sigSnap.PowerDb,
+		SqlOpen:  sigSnap.SquelchOpen,
 		Reboot:   s.rebooting(),
 	})
 }
