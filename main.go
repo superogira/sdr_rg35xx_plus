@@ -1037,6 +1037,9 @@ func main() {
 	quit := func() {
 		saveNow()
 		stop()
+		// Leaving in dim/off would strand the panel: the firmware has
+		// no /sys/class/backlight for the .sh restore loop to use.
+		backlight.RestoreOn()
 	}
 	if autoUpdate {
 		runUpdate(upd, updateBase, false, saveNow)
@@ -1116,6 +1119,9 @@ func main() {
 	}()
 
 	panelState := 0 // power-key cycle: 0=on, 1=dim, 2=off
+	// Heal a panel left dim by a previous run that quit in the dim
+	// state (its level-10 would otherwise be adopted as "normal").
+	backlight.RestoreOn()
 	// Log viewer state: the app's own log file, re-read every 2 s.
 	logLines := []string{}
 	logScroll := 0

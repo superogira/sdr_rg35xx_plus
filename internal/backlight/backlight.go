@@ -71,21 +71,32 @@ func Cycle(state int) int {
 	switch next {
 	case 1:
 		if state == 0 {
-			restoreLevel = captureLevel()
+			// Never adopt a dim-level brightness as the "normal" one:
+			// quitting the app in the dim state leaves the panel at 10,
+			// and a re-launch would otherwise capture that stale level
+			// and restore to it forever (screen stuck dim).
+			if v := captureLevel(); v > 10 {
+				restoreLevel = v
+			}
 		}
 		Set(10)
 	case 2:
 		Set(0)
 		BlankFB(true)
 	case 0:
-		BlankFB(false)
-		if restoreLevel > 0 {
-			Set(restoreLevel)
-		} else {
-			Set(200)
-		}
+		RestoreOn()
 	}
 	return next
+}
+
+// RestoreOn un-blanks the panel and heals a stuck-dim brightness (a
+// level <= 10 can only come from this app's dim state — the firmware
+// default is far higher). Called at app start and on quit.
+func RestoreOn() {
+	BlankFB(false)
+	if v := captureLevel(); v <= 10 {
+		Set(200)
+	}
 }
 
 var restoreLevel int
