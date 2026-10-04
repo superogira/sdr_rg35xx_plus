@@ -99,4 +99,31 @@ func RestoreOn() {
 	}
 }
 
+// Level returns the current panel brightness (0 when unreadable).
+func Level() int { return captureLevel() }
+
+// Step changes the brightness by delta (clamped to 8..255 so it can
+// never go fully dark) and returns the new level. A blanked panel is
+// revived first; a level above the dim floor becomes the new restore
+// level for the power-key cycle.
+func Step(delta int) int {
+	BlankFB(false)
+	v := captureLevel()
+	if v <= 0 {
+		v = 200
+	}
+	v += delta
+	if v < 8 {
+		v = 8
+	}
+	if v > 255 {
+		v = 255
+	}
+	Set(v)
+	if v > 10 {
+		restoreLevel = v
+	}
+	return v
+}
+
 var restoreLevel int

@@ -1440,6 +1440,10 @@ func main() {
 	// release so the combo doesn't also open the settings menu.
 	shotCombo := false
 	menuInCombo := false
+	// MENU+Vol = backlight combo (launcher style). While active the
+	// MENU hold-to-exit check is suspended — adjusting brightness must
+	// never quit the app.
+	var brightComboUntil time.Time
 
 	adjustItem := func(idx, dir int) {
 		switch idx {
@@ -2647,18 +2651,35 @@ func main() {
 					// Volume: the initial tap is an instant 0.1% step;
 					// the hold acceleration lives in the repeat loop below.
 					switch ev.Button {
-					case input.VolDown:
-						v := r.Volume() - 0.001
-						if v < 0 {
-							v = 0
+					case input.VolDown, input.VolUp:
+						if held[input.Menu] {
+							// MENU+Vol = backlight, like the game
+							// launcher. Each step restarts the MENU
+							// hold-to-exit timer so adjusting (even
+							// holding with repeat) can never quit.
+							d := 16
+							if ev.Button == input.VolDown {
+								d = -16
+							}
+							panelState = 0
+							brightComboUntil = time.Now().Add(400 * time.Millisecond)
+							menuInCombo = true
+							menuDownAt = time.Now()
+							capturedMsg = fmt.Sprintf("☀ %d", backlight.Step(d))
+							capturedAt = time.Now()
+						} else if ev.Button == input.VolDown {
+							v := r.Volume() - 0.001
+							if v < 0 {
+								v = 0
+							}
+							r.SetVolume(v)
+						} else {
+							v := r.Volume() + 0.001
+							if v > 1.5 {
+								v = 1.5
+							}
+							r.SetVolume(v)
 						}
-						r.SetVolume(v)
-					case input.VolUp:
-						v := r.Volume() + 0.001
-						if v > 1.5 {
-							v = 1.5
-						}
-						r.SetVolume(v)
 					default:
 						handlePress(ev.Button)
 					}
@@ -2680,9 +2701,14 @@ func main() {
 			} else {
 				shotCombo = false
 			}
-			// Hold-to-exit: MENU or START held 3 s.
+			// Hold-to-exit: MENU or START held 3 s — but never while a
+			// MENU+Vol brightness combo is running (its steps keep
+			// restarting the timer; the gate also hides the countdown
+			// hint while adjusting).
 			exitHint = ""
-			if !menuDownAt.IsZero() || !startDownAt.IsZero() {
+			if time.Now().Before(brightComboUntil) {
+				// brightness combo active: skip the exit check entirely
+			} else if !menuDownAt.IsZero() || !startDownAt.IsZero() {
 				var d time.Duration
 				if !menuDownAt.IsZero() {
 					d = time.Since(menuDownAt)
@@ -2696,7 +2722,9 @@ func main() {
 				}
 			}
 			// Volume keys work EVERYWHERE (main screen, menus, dialogs)
-			// — instantaneous tap = 0.1%; held = exponential ramp.
+			// — instantaneous tap = 0.1%; held = exponential ramp. With
+			// MENU held the same keys repeat backlight steps instead
+			// (fixed ±16, and every step restarts the exit timer).
 			for _, b := range []input.Button{input.VolDown, input.VolUp} {
 				if held[b] && time.Since(lastRepeat[b]) > (func() time.Duration {
 					if volHeldAt[b].IsZero() {
@@ -2704,6 +2732,23 @@ func main() {
 					}
 					return 150 * time.Millisecond
 				})() {
+					if held[input.Menu] {
+						if volHeldAt[b].IsZero() {
+							volHeldAt[b] = time.Now()
+						}
+						d := 16
+						if b == input.VolDown {
+							d = -16
+						}
+						panelState = 0
+						brightComboUntil = time.Now().Add(400 * time.Millisecond)
+						menuInCombo = true
+						menuDownAt = time.Now()
+						capturedMsg = fmt.Sprintf("☀ %d", backlight.Step(d))
+						capturedAt = time.Now()
+						lastRepeat[b] = time.Now()
+						continue
+					}
 					if volHeldAt[b].IsZero() {
 						volHeldAt[b] = time.Now()
 					}
