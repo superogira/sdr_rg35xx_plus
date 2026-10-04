@@ -815,6 +815,23 @@ func main() {
 		}
 		return adsbLat, adsbLon
 	})
+	webSrv.SetGPSProvider(func() web.GPSInfo {
+		f := gpsRx.Snapshot()
+		g := web.GPSInfo{
+			Device: gpsRx.Device(), Valid: f.Valid,
+			Lat: f.Lat, Lon: f.Lon, Alt: f.Alt,
+			SpeedKt: f.SpeedKt, Course: f.CourseDeg,
+			SatsUsed: f.SatsUsed, SatsView: f.SatsView,
+			HDOP: f.HDOP, Follow: gpsFollow,
+		}
+		if !f.Updated.IsZero() {
+			g.AgeSec = time.Since(f.Updated).Seconds()
+		}
+		if f.Lat != 0 || f.Lon != 0 {
+			g.Grid = gps.Maidenhead(f.Lat, f.Lon)
+		}
+		return g
+	})
 	aisClient := ais.NewClient(aisHost)
 	aisClient.Connected = func(c bool) { aisConnected = c }
 	go aisClient.Run(ctx, aisStore)

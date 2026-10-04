@@ -84,6 +84,7 @@ type Server struct {
 	// (device UI + cfg + saveNow). Nil until main wires them.
 	wfGet func() (float64, float64)
 	rxPos func() (float64, float64)
+	gpsGet func() GPSInfo
 	wfSet func(min, max float64)
 
 	// Spec scratch reused across /api/spec calls (FFT work arrays at
@@ -118,6 +119,31 @@ func (s *Server) SetWaterfallRange(get func() (float64, float64), set func(min, 
 func (s *Server) SetRxPosFunc(f func() (float64, float64)) {
 	s.mu.Lock()
 	s.rxPos = f
+	s.mu.Unlock()
+}
+
+// GPSInfo is the live GPS snapshot served to the web System card.
+type GPSInfo struct {
+	Device   string  `json:"device"`
+	Valid    bool    `json:"valid"`
+	Lat      float64 `json:"lat"`
+	Lon      float64 `json:"lon"`
+	Alt      float64 `json:"alt"`
+	SpeedKt  float64 `json:"speedKt"`
+	Course   float64 `json:"course"`
+	SatsUsed int     `json:"satsUsed"`
+	SatsView int     `json:"satsView"`
+	HDOP     float64 `json:"hdop"`
+	Grid     string  `json:"grid"`
+	AgeSec   float64 `json:"ageSec"`
+	Follow   bool    `json:"follow"`
+}
+
+// SetGPSProvider wires the live GPS snapshot for the System card and
+// the GPS detail window.
+func (s *Server) SetGPSProvider(f func() GPSInfo) {
+	s.mu.Lock()
+	s.gpsGet = f
 	s.mu.Unlock()
 }
 
@@ -272,6 +298,7 @@ type state struct {
 	UpSecs    int       `json:"upSecs"`
 	RxLat     float64   `json:"rxLat"`
 	RxLon     float64   `json:"rxLon"`
+	GPS       *GPSInfo  `json:"gps"`
 	CPUTemp   float64   `json:"cpuTemp"`
 	GPUTemp   float64   `json:"gpuTemp"`
 	DDRTemp   float64   `json:"ddrTemp"`
@@ -341,6 +368,13 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		if mn, mx := wfGet(); mn > 0 || mx > 0 {
 			st.WfMin, st.WfMax = mn, mx
 		}
+	}
+	s.mu.Lock()
+	gpsGet := s.gpsGet
+	s.mu.Unlock()
+	if gpsGet != nil {
+		g := gpsGet()
+		st.GPS = &g
 	}
 	st.Wefax, st.WefaxAuto = radio.WefaxEnabled(), radio.WefaxAutoSave()
 	st.Nr = radio.NoiseReduction()

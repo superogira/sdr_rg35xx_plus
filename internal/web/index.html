@@ -179,6 +179,10 @@ tr:hover td { background:var(--row-hover); }
         <div><b id="tgt">–</b><span>✈ / ⛵</span></div>
         <div><b id="upb">–</b><span data-i18n="uptime">UP</span></div>
       </div>
+      <div class="row" id="gpsrow" style="margin-top:10px;cursor:pointer" data-i18n-title="gpsTitle">
+        <label style="font-weight:600">🛰 <span data-i18n="gpsLbl">GPS</span></label>
+        <span class="val" id="gpssum" style="color:var(--dim)">–</span>
+      </div>
       <div class="row" style="margin-top:10px">
         <button id="upd">⬆ <span data-i18n="update">อัปเดตระบบ</span></button>
         <span class="val" id="updst" style="color:var(--dim);font-size:12px"></span>
@@ -236,6 +240,15 @@ tr:hover td { background:var(--row-hover); }
     </div>
   </section>
 </main>
+<div id="gpsmodal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);align-items:center;justify-content:center;z-index:50">
+  <div style="background:var(--panel);border:1px solid var(--card-border);border-radius:10px;padding:14px 16px;min-width:290px;max-width:340px;max-height:90vh;overflow-y:auto">
+    <div style="display:flex;align-items:center;margin-bottom:8px">
+      <b style="font-size:15px">🛰 GPS</b>
+      <button id="gpsclose" style="margin-left:auto;padding:2px 10px">✕</button>
+    </div>
+    <table id="gpstable" style="width:100%;border-collapse:collapse;font-size:13px"></table>
+  </div>
+</div>
 <script>
 const $ = id => document.getElementById(id);
 // ---- i18n: TH (default) / EN, remembered per browser ----
@@ -263,6 +276,11 @@ const STRINGS = {
     connFail: '○ เว็บไม่ตอบ', connOff: '○ ไม่เชื่อมต่อ ', tuned: 'จูน → ', reset: ' · ดับเบิลคลิกรีเซ็ต',
     ttTheme: 'สลับธีม', ttListen: 'สตรีมเสียงจากเครื่องเกม', ttMute: 'ปิดลำโพงเครื่องเกม (เว็บยังได้ยิน)', ttLang: 'Switch to English',
     nextTheme: { phosphor: '☀️ ขาว', light: '📻 วิทยุ', radio: '💡 เขียว' },
+    gpsLbl: 'GPS', gpsTitle: 'คลิกดูข้อมูล GPS ทั้งหมด',
+    gDev: 'อุปกรณ์', gStat: 'สถานะ', gPos: 'พิกัด', gGrid: 'Grid', gAlt: 'ความสูง',
+    gSpd: 'ความเร็ว', gCse: 'ทิศทาง', gSat: 'ดาวเทียม (ใช้/เห็น)', gHdop: 'HDOP',
+    gAge: 'อายุข้อมูล', gFollow: 'ตำแหน่งรับ (radar)', gNoFix: 'ยังไม่มี fix', gFix: 'Fix',
+    gStale: 'หยุดอัปเดต', gNone: 'ไม่พบอุปกรณ์', gOn: 'เปิด', gOff: 'ปิด',
   },
   en: {
     receiver: 'Receiver', system: 'System', spectrum: 'Spectrum',
@@ -287,6 +305,11 @@ const STRINGS = {
     connFail: '○ no response', connOff: '○ offline ', tuned: 'Tuned → ', reset: ' · dbl-click reset',
     ttTheme: 'Switch theme', ttListen: 'Stream audio from device', ttMute: 'Mute device speaker (web still hears)', ttLang: 'เปลี่ยนเป็นภาษาไทย',
     nextTheme: { phosphor: '☀️ Light', light: '📻 Radio', radio: '💡 Green' },
+    gpsLbl: 'GPS', gpsTitle: 'Click for full GPS details',
+    gDev: 'Device', gStat: 'Status', gPos: 'Position', gGrid: 'Grid', gAlt: 'Altitude',
+    gSpd: 'Speed', gCse: 'Course', gSat: 'Satellites (use/view)', gHdop: 'HDOP',
+    gAge: 'Data age', gFollow: 'Receiver pos (radar)', gNoFix: 'no fix', gFix: 'Fix',
+    gStale: 'stale', gNone: 'no device', gOn: 'on', gOff: 'off',
   },
 };
 let lang = 'th', langPinned = false;
@@ -425,6 +448,7 @@ function renderState(s) {
   $('tddr').textContent = s.ddrTemp ? s.ddrTemp.toFixed(0) : '–';
   $('upb').textContent = Math.floor(s.upSecs/60) + 'm';
   $('updst').textContent = s.updating || '';
+  updateGPS(s.gps);
   if (s.reboot) rebootPending = true;
   if (rebootPending && !s.reboot && !s.updating) {
     // the app came back from the OTA re-exec — pick up the new page
@@ -432,6 +456,50 @@ function renderState(s) {
     location.reload();
   }
 }
+
+// ---- GPS: System-card summary row + detail modal ----
+function gpsStatusText(g) {
+  const T = STRINGS[lang];
+  if (!g || !g.device) return T.gNone;
+  if (!g.valid) return T.gNoFix;
+  if (g.ageSec > 10) return T.gStale;
+  return T.gFix + (g.hdop ? ' · HDOP ' + g.hdop.toFixed(1) : '');
+}
+function updateGPS(g) {
+  const T = STRINGS[lang];
+  const sum = $('gpssum');
+  if (g && g.valid) {
+    sum.textContent = g.lat.toFixed(5) + ', ' + g.lon.toFixed(5) +
+      ' · 🛰 ' + g.satsUsed + '/' + g.satsView;
+    sum.style.color = '';
+  } else {
+    sum.textContent = gpsStatusText(g);
+    sum.style.color = 'var(--dim)';
+  }
+  const modal = $('gpsmodal');
+  if (modal.style.display !== 'flex') return;
+  const rows = [
+    [T.gDev, g && g.device ? g.device : T.gNone],
+    [T.gStat, gpsStatusText(g)],
+    [T.gPos, g && (g.lat || g.lon) ? g.lat.toFixed(6) + ', ' + g.lon.toFixed(6) : '–'],
+    [T.gGrid, g && g.grid ? g.grid : '–'],
+    [T.gAlt, g && g.alt ? g.alt.toFixed(1) + ' m' : '–'],
+    [T.gSpd, g && g.speedKt > 0.05 ? g.speedKt.toFixed(1) + ' kt / ' + (g.speedKt*1.852).toFixed(1) + ' km/h' : '–'],
+    [T.gCse, g && g.course > 0.05 ? g.course.toFixed(0) + '°' : '–'],
+    [T.gSat, g ? g.satsUsed + ' / ' + g.satsView : '–'],
+    [T.gHdop, g && g.hdop ? g.hdop.toFixed(1) : '–'],
+    [T.gAge, g && g.ageSec !== undefined ? Math.max(0, Math.round(g.ageSec)) + ' s' : '–'],
+    [T.gFollow, g ? (g.follow ? T.gOn : T.gOff) : '–'],
+  ];
+  $('gpstable').innerHTML = rows.map(r =>
+    '<tr><td style="color:var(--dim);padding:3px 8px 3px 0;white-space:nowrap">' + r[0] +
+    '</td><td style="text-align:right;padding:3px 0;font-weight:600">' + r[1] + '</td></tr>').join('');
+}
+$('gpsrow').onclick = () => { $('gpsmodal').style.display = 'flex'; };
+$('gpsclose').onclick = () => { $('gpsmodal').style.display = 'none'; };
+$('gpsmodal').addEventListener('click', (e) => {
+  if (e.target === $('gpsmodal')) $('gpsmodal').style.display = 'none';
+});
 
 async function poll() {
   try {
