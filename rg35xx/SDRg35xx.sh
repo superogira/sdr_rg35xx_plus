@@ -57,5 +57,12 @@ for f in /sys/class/backlight/*/bl_power /sys/class/graphics/fb0/blank; do
 done
 
 kill $syncer 2>/dev/null
+# Reap the sidecars even after a kill -9 of the app (this script is the
+# parent and still runs): an orphaned rtl_tcp keeps listening with a
+# dead device handle and SIGTERM cannot move it.
+pkill -9 -x rtl_tcp 2>/dev/null
+pkill -9 -x rtl_tcp_static 2>/dev/null
+pkill -9 -x gpsread 2>/dev/null
+sleep 0.3
 sync
 exit $status

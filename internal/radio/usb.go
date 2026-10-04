@@ -135,6 +135,19 @@ func (r *Radio) stopUSBSrv() {
 // race the process exit, orphaning the dongle holder.
 func (r *Radio) StopUSB() { r.stopUSBSrv() }
 
+// resetUSBSrv kills the local rtl_tcp — ours AND any orphan left by a
+// kill -9'd app instance — so the next connect respawns it against
+// freshly enumerated USB devices. A server whose device was unplugged
+// mid-stream still accepts connections but streams nothing, and
+// survives SIGTERM (stuck inside a USB read), so -9 is the only way.
+func (r *Radio) resetUSBSrv() {
+	r.stopUSBSrv()
+	if runtime.GOOS == "linux" {
+		exec.Command("pkill", "-9", "-x", "rtl_tcp").Run()
+		exec.Command("pkill", "-9", "-x", "rtl_tcp_static").Run()
+	}
+}
+
 // killUSBProcLocked reaps our child if it is still running. SIGKILL only:
 // rtl_tcp ignores SIGTERM while blocked inside a USB transfer.
 func (r *Radio) killUSBProcLocked() {

@@ -293,6 +293,17 @@ func (r *Radio) Run(ctx context.Context) {
 			continue
 		}
 		if err := r.session(ctx); err != nil {
+			r.mu.Lock()
+			usb := r.usbSrc
+			r.mu.Unlock()
+			if usb {
+				// A failed local session means the rtl_tcp's device
+				// handle is suspect (unplug/replug, orphaned server).
+				// Kill it so the retry spawns a fresh one instead of
+				// reconnecting to a zombie that accepts and streams
+				// nothing — the "listening but no data" loop.
+				r.resetUSBSrv()
+			}
 			wait := backoff + time.Duration(rand.Int63n(int64(backoff)/5))
 			r.mu.Lock()
 			r.state = stateDisconnected
