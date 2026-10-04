@@ -50,6 +50,12 @@ func TestRMCSpeedCourse(t *testing.T) {
 	if !f.Valid || f.SpeedKt != 0.55 || f.CourseDeg != 92.12 {
 		t.Fatalf("rmc: %+v", f)
 	}
+	if f.TimeUTC != "064733.00" || f.DateUTC != "041026" {
+		t.Fatalf("rmc time/date: %q %q", f.TimeUTC, f.DateUTC)
+	}
+	if l := TimeLabel(f); l != "06:47:33 · 04/10/26 UTC" {
+		t.Fatalf("time label %q", l)
+	}
 	// Status V drops the fix flag.
 	r.Feed(withSum("GPRMC,064800.00,V,1347.0231,N,10035.5123,E,,,041026,,,N"))
 	if r.Snapshot().Valid {

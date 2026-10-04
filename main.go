@@ -474,6 +474,7 @@ const (
 	menuPPM
 	menuGPSDev
 	menuGPSStat
+	menuGPSTime
 	menuGPSPos
 	menuGPSGrid
 	menuGPSAlt
@@ -495,7 +496,7 @@ var pageItems = [][]int{
 	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 	{menuAF, menuNR, menuHP, menuLP, menuLocalMute},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
-	{menuGPSDev, menuGPSStat, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow},
+	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear, menuWefaxAuto, menuCWDec, menuCWClear},
 	{menuBM},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
@@ -823,6 +824,7 @@ func main() {
 			SpeedKt: f.SpeedKt, Course: f.CourseDeg,
 			SatsUsed: f.SatsUsed, SatsView: f.SatsView,
 			HDOP: f.HDOP, Follow: gpsFollow,
+			TimeUTC: f.TimeUTC, DateUTC: f.DateUTC,
 		}
 		if !f.Updated.IsZero() {
 			g.AgeSec = time.Since(f.Updated).Seconds()
@@ -3205,6 +3207,13 @@ func main() {
 							v = i18n.T("gps_stale")
 						}
 						return ui.MenuItem{Label: i18n.T("gps_stat"), Value: v}
+					}(),
+					func() ui.MenuItem {
+						v := "-"
+						if l := gps.TimeLabel(gf); l != "" {
+							v = l
+						}
+						return ui.MenuItem{Label: i18n.T("gps_time"), Value: v}
 					}(),
 					func() ui.MenuItem {
 						v := "-"

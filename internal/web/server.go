@@ -138,6 +138,8 @@ type GPSInfo struct {
 	Grid     string  `json:"grid"`
 	AgeSec   float64 `json:"ageSec"`
 	Follow   bool    `json:"follow"`
+	TimeUTC  string  `json:"timeUTC"`
+	DateUTC  string  `json:"dateUTC"`
 }
 
 // SetGPSProvider wires the live GPS snapshot for the System card and

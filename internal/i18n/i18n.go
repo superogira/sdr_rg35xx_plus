@@ -89,6 +89,7 @@ var strings = map[string][2]string{
 	"gps_stale":          {"หยุดอัปเดต", "stale"},
 	"gps_2d":             {"2D", "2D"},
 	"gps_3d":             {"3D", "3D"},
+	"gps_time":           {"เวลา (UTC)", "Time (UTC)"},
 	"m_adsbhost":         {"Beast server", "Beast server"},
 	"m_adsblat":          {"ละติจูดจุดรับ", "Receiver latitude"},
 	"m_adsblon":          {"ลองจิจูดจุดรับ", "Receiver longitude"},

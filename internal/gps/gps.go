@@ -22,7 +22,8 @@ type Fix struct {
 	SatsView      int // GSV satellites in view
 	Quality       int // 0 none, 1 GPS fix, 2 DGPS
 	HDOP          float64
-	TimeUTC       string // hhmmss.ss from GGA
+	TimeUTC       string // hhmmss.ss from GGA/RMC
+	DateUTC       string // ddmmyy from RMC
 	Valid         bool   // RMC status A
 	Updated       time.Time
 }
@@ -177,6 +178,12 @@ func (r *Receiver) feedRMC(f []string) {
 	defer r.mu.Unlock()
 	r.fix.SpeedKt = num(f[7])
 	r.fix.CourseDeg = num(f[8])
+	if len(f) > 9 && len(f[9]) >= 6 {
+		r.fix.DateUTC = f[9] // ddmmyy
+	}
+	if f[1] != "" {
+		r.fix.TimeUTC = f[1]
+	}
 	r.fix.Updated = time.Now()
 	r.fix.Valid = true
 }
@@ -214,6 +221,22 @@ func (r *Receiver) feedGSV(f []string) {
 func (r *Receiver) Grid() string {
 	f := r.Snapshot()
 	return Maidenhead(f.Lat, f.Lon)
+}
+
+// TimeLabel formats the GPS UTC time/date for display, e.g.
+// "13:47:32 · 04/10/26 UTC". Empty when nothing received yet.
+func TimeLabel(f Fix) string {
+	var parts []string
+	if len(f.TimeUTC) >= 6 {
+		parts = append(parts, f.TimeUTC[0:2]+":"+f.TimeUTC[2:4]+":"+f.TimeUTC[4:6])
+	}
+	if len(f.DateUTC) >= 6 {
+		parts = append(parts, f.DateUTC[0:2]+"/"+f.DateUTC[2:4]+"/"+f.DateUTC[4:6])
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " · ") + " UTC"
 }
 
 // Maidenhead converts decimal degrees to a 6-character grid locator.

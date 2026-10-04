@@ -289,6 +289,7 @@ const STRINGS = {
     gSpd: 'ความเร็ว', gCse: 'ทิศทาง', gSat: 'ดาวเทียม (ใช้/เห็น)', gHdop: 'HDOP',
     gAge: 'อายุข้อมูล', gFollow: 'ตำแหน่งรับ (radar)', gNoFix: 'ยังไม่มี fix', gFix: 'Fix',
     gStale: 'หยุดอัปเดต', gNone: 'ไม่พบอุปกรณ์', gOn: 'เปิด', gOff: 'ปิด',
+    gTime: 'เวลา (UTC)',
   },
   en: {
     receiver: 'Receiver', system: 'System', spectrum: 'Spectrum',
@@ -320,6 +321,7 @@ const STRINGS = {
     gSpd: 'Speed', gCse: 'Course', gSat: 'Satellites (use/view)', gHdop: 'HDOP',
     gAge: 'Data age', gFollow: 'Receiver pos (radar)', gNoFix: 'no fix', gFix: 'Fix',
     gStale: 'stale', gNone: 'no device', gOn: 'on', gOff: 'off',
+    gTime: 'Time (UTC)',
   },
 };
 let lang = 'th', langPinned = false;
@@ -475,6 +477,14 @@ function gpsStatusText(g) {
   if (g.ageSec > 10) return T.gStale;
   return T.gFix + (g.hdop ? ' · HDOP ' + g.hdop.toFixed(1) : '');
 }
+function gpsTimeLabel(g) {
+  const p = [];
+  if (g && g.timeUTC && g.timeUTC.length >= 6)
+    p.push(g.timeUTC.slice(0,2)+':'+g.timeUTC.slice(2,4)+':'+g.timeUTC.slice(4,6));
+  if (g && g.dateUTC && g.dateUTC.length >= 6)
+    p.push(g.dateUTC.slice(0,2)+'/'+g.dateUTC.slice(2,4)+'/'+g.dateUTC.slice(4,6));
+  return p.length ? p.join(' · ') + ' UTC' : '–';
+}
 function updateGPS(g) {
   const T = STRINGS[lang];
   const sum = $('gpssum');
@@ -491,6 +501,7 @@ function updateGPS(g) {
   const rows = [
     [T.gDev, g && g.device ? g.device : T.gNone],
     [T.gStat, gpsStatusText(g)],
+    [T.gTime, gpsTimeLabel(g)],
     [T.gPos, g && (g.lat || g.lon) ? g.lat.toFixed(6) + ', ' + g.lon.toFixed(6) : '–'],
     [T.gGrid, g && g.grid ? g.grid : '–'],
     [T.gAlt, g && g.alt ? g.alt.toFixed(1) + ' m' : '–'],
