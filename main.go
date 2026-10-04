@@ -518,6 +518,9 @@ const (
 )
 
 func main() {
+	if !lockInstance() {
+		return
+	}
 	host := flag.String("host", defaultHost, "rtl_tcp server address host:port")
 	freq := flag.Int64("freq", 145_500_000, "startup frequency in Hz")
 	mode := flag.String("mode", "nfm", "demodulator: nfm | wfm")
