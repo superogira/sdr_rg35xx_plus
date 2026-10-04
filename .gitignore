@@ -10,3 +10,4 @@ synth_ais.raw
 truth_*.txt
 wfm_*.wav
 known_payloads.txt
+.webtest/
