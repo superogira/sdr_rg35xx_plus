@@ -1283,10 +1283,11 @@ document.querySelectorAll('input[type=range]').forEach(sl => {
   const nudge = d => {
     let v = parseFloat(sl.value) || 0;
     if (sl.id === 'vol') {
-      // Volume arrows: coarse step of 1 in the >1 zone (snapped to the
-      // 1 boundary — at 1.5 a press lands exactly on 1), fine 0.1 steps
-      // once at or below 1 so quiet levels stay adjustable.
-      v = d > 0 ? (v >= 1 ? Math.min(+sl.max, v + 1) : 1)
+      // Volume arrows: fine 10% (0.1) steps at/below 1 — both
+      // directions, so 0% climbs back 10% at a time instead of jumping
+      // straight to 100% — and a coarse step of 1 in the >1 zone
+      // (1 ↔ 1.5, snapped to the 1 boundary).
+      v = d > 0 ? (v >= 1 ? Math.min(+sl.max, v + 1) : Math.min(1, v + 0.1))
                 : (v <= 1 ? Math.max(+sl.min, v - 0.1) : 1);
       sl.value = v.toFixed(1);
     } else {
