@@ -45,6 +45,7 @@ import (
 	"sdr35/internal/backlight"
 	"sdr35/internal/dsp"
 	"sdr35/internal/geo"
+	"sdr35/internal/gps"
 	"sdr35/internal/i18n"
 	"sdr35/internal/input"
 	"sdr35/internal/osm"
@@ -467,6 +468,17 @@ const (
 	menuAISLog
 	menuClearMap
 	menuPPM
+	menuGPSDev
+	menuGPSStat
+	menuGPSPos
+	menuGPSGrid
+	menuGPSAlt
+	menuGPSSpd
+	menuGPSCourse
+	menuGPSSats
+	menuGPSHdop
+	menuGPSAge
+	menuGPSFollow
 	menuExit
 )
 
@@ -475,10 +487,11 @@ const (
 // root page at four rows while a fifth page existed — the Audio row
 // was unreachable from the d-pad.
 var pageItems = [][]int{
-	{0, 0, 0, 0, 0, 0, menuExit}, // rows 0-5 open subpages by position; the last row is Exit
+	{0, 0, 0, 0, 0, 0, 0, menuExit}, // rows 0-6 open subpages by position; the last row is Exit
 	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
 	{menuAF, menuNR, menuHP, menuLP, menuLocalMute},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
+	{menuGPSDev, menuGPSStat, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear, menuWefaxAuto, menuCWDec, menuCWClear},
 	{menuBM},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
@@ -494,6 +507,7 @@ const (
 	pageRx
 	pageAudio
 	pageADSB
+	pageGPS
 	pageFT8
 	pageBM
 	pageSys
@@ -780,6 +794,20 @@ func main() {
 	if cfg["web"] == "on" {
 		webSrv.SetEnabled(true)
 	}
+	// USB GPS receiver (NMEA over ttyACM/ttyUSB): auto-detected, read
+	// continuously; the GPS page shows the live fix and "follow" hands
+	// the position to the radar/web receiver location.
+	gpsRx := gps.New()
+	gpsFollow := cfg["gpsfollow"] == "on"
+	go gpsRx.Run(ctx)
+	webSrv.SetRxPosFunc(func() (float64, float64) {
+		if gpsFollow {
+			if f := gpsRx.Snapshot(); f.Valid && time.Since(f.Updated) < 10*time.Second {
+				return f.Lat, f.Lon
+			}
+		}
+		return adsbLat, adsbLon
+	})
 	aisClient := ais.NewClient(aisHost)
 	aisClient.Connected = func(c bool) { aisConnected = c }
 	go aisClient.Run(ctx, aisStore)
@@ -1191,6 +1219,8 @@ func main() {
 		uiMode, menuPage = uiMenu, pageAudio
 	case "adsbpage":
 		uiMode, menuPage = uiMenu, pageADSB
+	case "gpspage":
+		uiMode, menuPage = uiMenu, pageGPS
 	case "syspage":
 		uiMode, menuPage = uiMenu, pageSys
 	case "rtty":
@@ -1716,6 +1746,10 @@ func main() {
 				}
 				mapCacheClearedAt = time.Now()
 			}
+		case menuGPSFollow:
+			gpsFollow = !gpsFollow
+			cfg["gpsfollow"] = map[bool]string{true: "on", false: "off"}[gpsFollow]
+			saveNow()
 		case menuAISServer:
 			aisSel = 0
 			uiMode = uiAISList
@@ -2504,13 +2538,21 @@ func main() {
 	lastSave := time.Now()
 
 	for {
-	drain:
+		drain:
 		for {
 			select {
 			case f := <-webTasks:
 				f()
 			default:
 				break drain
+			}
+		}
+		// GPS follow: the radar, distances and the web map center on the
+		// live GPS fix (a fix older than 10 s is ignored so a lost signal
+		// doesn't drag the receiver marker).
+		if gpsFollow {
+			if f := gpsRx.Snapshot(); f.Valid && time.Since(f.Updated) < 10*time.Second {
+				adsbLat, adsbLon = f.Lat, f.Lon
 			}
 		}
 		select {
@@ -2934,6 +2976,7 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_rxpage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_audiopage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_adsbpage"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_gpspage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"},
@@ -3050,6 +3093,86 @@ func main() {
 						}
 						return ui.MenuItem{Label: i18n.T("m_clearcache"), Value: v}
 					}())
+			case pageGPS:
+				gf := gpsRx.Snapshot()
+				gd := gpsRx.Device()
+				items = append(items,
+					func() ui.MenuItem {
+						v := i18n.T("gps_nofix")
+						if gd != "" {
+							v = gd
+						}
+						return ui.MenuItem{Label: i18n.T("gps_dev"), Value: v}
+					}(),
+					func() ui.MenuItem {
+						v := i18n.T("gps_nofix")
+						switch {
+						case !gf.Valid:
+							v = i18n.T("gps_nofix")
+						case gf.Quality >= 2:
+							v = i18n.T("gps_fix2")
+						default:
+							v = i18n.T("gps_fix1")
+						}
+						if gf.Valid && time.Since(gf.Updated) > 10*time.Second {
+							v = i18n.T("gps_stale")
+						}
+						return ui.MenuItem{Label: i18n.T("gps_stat"), Value: v}
+					}(),
+					func() ui.MenuItem {
+						v := "-"
+						if gf.Lat != 0 || gf.Lon != 0 {
+							v = fmt.Sprintf("%.5f, %.5f", gf.Lat, gf.Lon)
+						}
+						return ui.MenuItem{Label: i18n.T("gps_pos"), Value: v}
+					}(),
+					func() ui.MenuItem {
+						v := "-"
+						// Maidenhead(0,0) is a real locator ("JJ00aa") — only
+						// show one once a position exists.
+						if gf.Lat != 0 || gf.Lon != 0 {
+							v = gpsRx.Grid()
+						}
+						return ui.MenuItem{Label: i18n.T("gps_grid"), Value: v}
+					}(),
+					func() ui.MenuItem {
+						v := "-"
+						if gf.Alt != 0 {
+							v = fmt.Sprintf("%.1f m", gf.Alt)
+						}
+						return ui.MenuItem{Label: i18n.T("gps_alt"), Value: v}
+					}(),
+					func() ui.MenuItem {
+						v := "-"
+						if gf.SpeedKt > 0.05 {
+							v = fmt.Sprintf("%.1f kt / %.1f km/h", gf.SpeedKt, gf.SpeedKt*1.852)
+						}
+						return ui.MenuItem{Label: i18n.T("gps_spd"), Value: v}
+					}(),
+					func() ui.MenuItem {
+						v := "-"
+						if gf.CourseDeg > 0.05 {
+							v = fmt.Sprintf("%.0f°", gf.CourseDeg)
+						}
+						return ui.MenuItem{Label: i18n.T("gps_cse"), Value: v}
+					}(),
+					ui.MenuItem{Label: i18n.T("gps_sats"), Value: fmt.Sprintf("%d / %d", gf.SatsUsed, gf.SatsView)},
+					func() ui.MenuItem {
+						v := "-"
+						if gf.HDOP > 0 {
+							v = fmt.Sprintf("%.1f", gf.HDOP)
+						}
+						return ui.MenuItem{Label: i18n.T("gps_hdop"), Value: v}
+					}(),
+					func() ui.MenuItem {
+						v := "-"
+						if !gf.Updated.IsZero() {
+							v = fmt.Sprintf("%ds", int(time.Since(gf.Updated).Seconds()))
+						}
+						return ui.MenuItem{Label: i18n.T("gps_age"), Value: v}
+					}(),
+					ui.MenuItem{Label: i18n.T("m_gpsfollow"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[gpsFollow]},
+				)
 			case pageSys:
 				items = append(items,
 					func() ui.MenuItem {
@@ -3791,6 +3914,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["cwdec"]; ok {
 		fmt.Fprintf(f, "cwdec=%s\n", v)
+	}
+	if v, ok := cfg["gpsfollow"]; ok {
+		fmt.Fprintf(f, "gpsfollow=%s\n", v)
 	}
 	if v, ok := cfg["adsbhost"]; ok {
 		fmt.Fprintf(f, "adsbhost=%s\n", v)

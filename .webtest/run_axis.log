@@ -1,0 +1,20 @@
+audio disabled: no audio backend (aplay/mpv) found
+adsb: beast=192.168.2.152:30005 pos=13.59550,100.56178 layer=0 | ais: 192.168.2.151:29420web: server listening on :8123
+SDRg35xx build 0 (-)
+step: display ok 640x480
+step: ui created
+step: boot frame presented
+input disabled: evdev input requires Linux
+alive: frames=303 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=606 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=910 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=1213 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=1514 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=1818 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=2121 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=2425 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=2729 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=3032 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=3335 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=3638 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=3942 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms

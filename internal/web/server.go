@@ -83,6 +83,7 @@ type Server struct {
 	// wfmax ini): get returns the live values, set applies a change
 	// (device UI + cfg + saveNow). Nil until main wires them.
 	wfGet func() (float64, float64)
+	rxPos func() (float64, float64)
 	wfSet func(min, max float64)
 
 	// Spec scratch reused across /api/spec calls (FFT work arrays at
@@ -109,6 +110,14 @@ func (s *Server) SetUpdater(msg func() string, run func()) {
 func (s *Server) SetWaterfallRange(get func() (float64, float64), set func(min, max float64)) {
 	s.mu.Lock()
 	s.wfGet, s.wfSet = get, set
+	s.mu.Unlock()
+}
+
+// SetRxPosFunc wires the live receiver position (GPS follow overrides
+// the ini lat/lon; state and the radar center track it).
+func (s *Server) SetRxPosFunc(f func() (float64, float64)) {
+	s.mu.Lock()
+	s.rxPos = f
 	s.mu.Unlock()
 }
 
@@ -323,7 +332,11 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	wfGet := s.wfGet
+	rxPos := s.rxPos
 	s.mu.Unlock()
+	if rxPos != nil {
+		st.RxLat, st.RxLon = rxPos()
+	}
 	if wfGet != nil {
 		if mn, mx := wfGet(); mn > 0 || mx > 0 {
 			st.WfMin, st.WfMax = mn, mx

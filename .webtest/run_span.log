@@ -1,0 +1,41 @@
+audio disabled: no audio backend (aplay/mpv) found
+adsb: beast=192.168.2.152:30005 pos=13.59550,100.56178 layer=0 | ais: 192.168.2.151:29420web: server listening on :8123
+SDRg35xx build 0 (-)
+step: display ok 640x480
+radio: direct sampling preference 0
+radio: bandwidth 1.25e+04 Hz (NFM)
+step: ui created
+step: boot frame presented
+input disabled: evdev input requires Linux
+radio: capture rate now 1024000 Hz (IF2 128000, audio 32000)
+radio: capture rate now 1536000 Hz (IF2 192000, audio 48000)
+radio: capture rate now 2048000 Hz (IF2 256000, audio 64000)
+radio: capture rate now 2560000 Hz (IF2 320000, audio 80000)
+alive: frames=303 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=606 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=897 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=1160 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=1447 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=1735 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=2022 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=2312 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=2600 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=2888 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=3176 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=3464 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=3750 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=4039 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=4327 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=4613 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=4902 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=5189 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=5477 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=5766 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=6053 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=6341 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=6632 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=6919 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=7207 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=7496 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=7782 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
+alive: frames=8068 connected=true freq=145.5000 MHz mode=NFM bytes=0 audioFrames=0 maxStall=0ms
