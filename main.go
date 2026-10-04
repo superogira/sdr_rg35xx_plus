@@ -1710,9 +1710,12 @@ func main() {
 		case input.Right:
 			r.SetFreq(r.Freq() + stepFor())
 		case input.Up:
-			r.SetFreq(r.Freq() + 10*stepFor())
-		case input.Down:
+			// D-pad up/down walk the frequency axis like a list
+			// (down = next/higher), the same orientation as the
+			// waterfall's frequency grid.
 			r.SetFreq(r.Freq() - 10*stepFor())
+		case input.Down:
+			r.SetFreq(r.Freq() + 10*stepFor())
 		case input.A:
 			if r.FT8Enabled() {
 				// Mode cycling disabled while FT8 decodes — USB only
