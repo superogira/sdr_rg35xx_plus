@@ -698,18 +698,21 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 		re[i], im[i] = real(z), imag(z)
 	}
 	dsp.FFT(re, im)
-	// Power per bin, fftshifted so index 0 = lowest frequency.
+	// dB per bin (fftshifted so index 0 = lowest frequency) — the same
+	// amplitude metric the device waterfall uses (20·log10|X|).
 	pow := s.specPow[:n]
 	for i := 0; i < n; i++ {
 		k := (i + n/2) % n
-		pow[i] = re[k]*re[k] + im[k]*im[k]
+		pow[i] = 20 * math.Log10(math.Hypot(re[k], im[k]) + 1e-12)
 	}
 	// Device-style mapping: dB relative to a tracked noise floor (25th
 	// percentile, EMA 0.05 — same recipe as ui.NewSpectrumRow), so the
 	// palette matches the handheld waterfall exactly. Bin value is
-	// t*620 (0..620) instead of absolute dB*10. The percentile uses a
-	// stride-4 subsample: at 64k bins the estimate barely moves and
-	// the sort gets 4× cheaper.
+	// t*620 (0..620). The floor MUST stay in dB: a linear-power floor
+	// runs into the hundreds/thousands after FFT amplification and
+	// swamps the dB subtraction — that blacked the whole display out.
+	// The percentile uses a stride-4 subsample: at 64k bins the
+	// estimate barely moves and the sort gets 4× cheaper.
 	j := 0
 	for i := 0; i < n; i += 4 {
 		s.specSort[j] = pow[i]
@@ -731,13 +734,13 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 	bins := make([]int16, specBins)
 	per := n / specBins
 	for b := 0; b < specBins; b++ {
-		mx := 0.0
+		mx := math.Inf(-1)
 		for k := 0; k < per; k++ {
 			if pow[b*per+k] > mx {
 				mx = pow[b*per+k]
 			}
 		}
-		db := 20*math.Log10(mx+1e-12) - s.noise - wfMinDb
+		db := mx - s.noise - wfMinDb
 		t := db / wfMaxDb
 		if t < 0 {
 			t = 0
