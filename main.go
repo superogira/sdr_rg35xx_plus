@@ -491,6 +491,8 @@ const (
 	menuAPRSFreq
 	menuAPRSCall
 	menuAPRSBeacon
+	menuAPRSIS
+	menuAPRSServer
 	menuAPRSPath
 	menuAPRSSym
 	menuAPRSCmt
@@ -511,7 +513,7 @@ var pageItems = [][]int{
 	{menuAF, menuNR, menuHP, menuLP, menuLocalMute},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
-	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSNow},
+	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSNow},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear, menuWefaxAuto, menuCWDec, menuCWClear},
 	{menuBM},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
@@ -539,7 +541,7 @@ func sendAPRSNow(r *radio.Radio, gpsRx *gps.Receiver, call, path string, sym str
 	i18nKey string
 	table   byte
 	sym     byte
-}, comment string, lvl int, pre float64, lastBeacon *time.Time, lastCourse *float64, setMsg func(string)) {
+}, comment string, lvl int, pre float64, isOn bool, iserver string, lastBeacon *time.Time, lastCourse *float64, setMsg func(string)) {
 	f := gpsRx.Snapshot()
 	if call == "" {
 		setMsg(i18n.T("aprs_nocall"))
@@ -549,12 +551,28 @@ func sendAPRSNow(r *radio.Radio, gpsRx *gps.Receiver, call, path string, sym str
 		setMsg(i18n.T("aprs_nogps"))
 		return
 	}
-	if body, ok := buildAPRSBeacon(f, call, path, sym, comment); ok {
+	if body, info, ok := buildAPRSBeacon(f, call, path, sym, comment); ok {
 		*lastBeacon = time.Now()
 		*lastCourse = f.CourseDeg
 		r.PlayBeacon(aprs.Modulate(body, float64(lvl)/100*0.9, aprsPreambleFlags(pre)))
 		setMsg(i18n.T("aprs_sent"))
+		postAPRSIS(isOn, iserver, call, path, info)
 	}
+}
+
+// postAPRSIS mirrors the beacon onto the APRS-IS network. Runs on its
+// own goroutine — the UI loop must never wait on the internet.
+func postAPRSIS(on bool, server, call, path, info string) {
+	if !on || call == "" {
+		return
+	}
+	go func() {
+		if err := aprs.PostIS(server, call, "APRS", path, info); err != nil {
+			fmt.Fprintf(os.Stderr, "aprs-is: %v"+string(rune(10)), err)
+		} else {
+			fmt.Fprintf(os.Stderr, "aprs-is: posted"+string(rune(10)))
+		}
+	}()
 }
 
 // aprsPreambleFlags converts the VOX preamble seconds to flag count
@@ -574,9 +592,9 @@ func buildAPRSBeacon(f gps.Fix, call, path string, sym struct {
 	i18nKey string
 	table   byte
 	sym     byte
-}, comment string) ([]byte, bool) {
+}, comment string) (body []byte, info string, ok bool) {
 	if !f.Valid || call == "" {
-		return nil, false
+		return nil, "", false
 	}
 	pos := aprs.Position{Table: sym.table, Sym: sym.sym}
 	pos.Lat, pos.Lon = f.Lat, f.Lon
@@ -586,7 +604,7 @@ func buildAPRSBeacon(f gps.Fix, call, path string, sym struct {
 	if f.Alt != 0 {
 		pos.AltFt, pos.HasAlt = int(math.Round(f.Alt*3.28084)), true
 	}
-	info := "!" + aprs.FormatPosition(pos, comment)
+	info = "!" + aprs.FormatPosition(pos, comment)
 	var digis []string
 	for _, d := range strings.Split(path, ",") {
 		d = strings.TrimSpace(d)
@@ -594,7 +612,7 @@ func buildAPRSBeacon(f gps.Fix, call, path string, sym struct {
 			digis = append(digis, d)
 		}
 	}
-	return aprs.EncodeUI(call, "APRS", digis, []byte(info)), true
+	return aprs.EncodeUI(call, "APRS", digis, []byte(info)), info, true
 }
 
 func main() {
@@ -921,6 +939,11 @@ func main() {
 	}
 	if v, ok := cfg["aprscmt"]; ok {
 		aprsCmt = v
+	}
+	aprsISOn := cfg["aprsis"] == "on"
+	aprsIServer := "rotate.aprs2.net:14580"
+	if v, ok := cfg["aprsiserver"]; ok && strings.Contains(v, ":") {
+		aprsIServer = v
 	}
 	aprsPre := 0.3 // VOX open time, seconds (0.1..2)
 	if v, ok := cfg["aprspre"]; ok {
@@ -1531,6 +1554,8 @@ func main() {
 			return i18n.T("m_aprscall")
 		case "aprspath":
 			return i18n.T("m_aprspath")
+		case "aprsiserver":
+			return i18n.T("m_aprsisrv")
 		case "aprscmt":
 			return i18n.T("m_aprscmt")
 		case "aprsfreq":
@@ -1983,6 +2008,14 @@ func main() {
 			hostText, kbTarget = aprsCall, "aprscall"
 			hostKbR, hostKbC = 0, 0
 			uiMode = uiHostEdit
+		case menuAPRSIS:
+			aprsISOn = !aprsISOn
+			cfg["aprsis"] = map[bool]string{true: "on", false: "off"}[aprsISOn]
+			saveNow()
+		case menuAPRSServer:
+			hostText, kbTarget = aprsIServer, "aprsiserver"
+			hostKbR, hostKbC = 0, 0
+			uiMode = uiHostEdit
 		case menuAPRSPath:
 			hostText, kbTarget = aprsPath, "aprspath"
 			hostKbR, hostKbC = 0, 0
@@ -1997,7 +2030,7 @@ func main() {
 			radarSel.ID = ""
 			uiMode = uiADSB
 		case menuAPRSNow:
-			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, aprsPre, &aprsLastBeacon, &aprsLastCourse, setMsg)
+			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, aprsPre, aprsISOn, aprsIServer, &aprsLastBeacon, &aprsLastCourse, setMsg)
 		case menuAISRF:
 			on := !r.AISRFEnabled()
 			r.SetAISRFEnabled(on)
@@ -2639,6 +2672,14 @@ func main() {
 					}
 					hostText = ""
 					uiMode, menuPage, menuSel = uiMenu, pageAPRS, menuRow(pageAPRS, menuAPRSCall)
+				case "aprsiserver":
+					if t := strings.TrimSpace(hostText); strings.Contains(t, ":") {
+						aprsIServer = t
+						cfg["aprsiserver"] = t
+						saveNow()
+					}
+					hostText = ""
+					uiMode, menuPage, menuSel = uiMenu, pageAPRS, menuRow(pageAPRS, menuAPRSServer)
 				case "aprspath":
 					aprsPath = strings.ToUpper(strings.TrimSpace(hostText))
 					if aprsPath == "" {
@@ -2888,9 +2929,10 @@ func main() {
 			if due && aprsCall != "" {
 				aprsLastBeacon = time.Now()
 				aprsLastCourse = f.CourseDeg
-				if body, ok := buildAPRSBeacon(f, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt); ok {
+				if body, info, ok := buildAPRSBeacon(f, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt); ok {
 					r.PlayBeacon(aprs.Modulate(body, float64(aprsLvl)/100*0.9, aprsPreambleFlags(aprsPre)))
 					setMsg(i18n.T("aprs_sent"))
+					postAPRSIS(aprsISOn, aprsIServer, aprsCall, aprsPath, info)
 				}
 			}
 		}
@@ -3506,6 +3548,8 @@ func main() {
 						}
 						return ui.MenuItem{Label: i18n.T("m_aprsbeacon"), Value: v}
 					}(),
+					ui.MenuItem{Label: i18n.T("m_aprsis"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[aprsISOn]},
+					ui.MenuItem{Label: i18n.T("m_aprsisrv"), Value: aprsIServer + " >"},
 					ui.MenuItem{Label: i18n.T("m_aprspath"), Value: aprsPath + " >"},
 					ui.MenuItem{Label: i18n.T("m_aprssym"), Value: i18n.T(aprsSymList[aprsSymIdx].i18nKey)},
 					ui.MenuItem{Label: i18n.T("m_aprscmt"), Value: aprsCmt + " >"},
@@ -4398,6 +4442,12 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["aprspre"]; ok {
 		fmt.Fprintf(f, "aprspre=%s\n", v)
+	}
+	if v, ok := cfg["aprsis"]; ok {
+		fmt.Fprintf(f, "aprsis=%s\n", v)
+	}
+	if v, ok := cfg["aprsiserver"]; ok {
+		fmt.Fprintf(f, "aprsiserver=%s\n", v)
 	}
 
 	if v, ok := cfg["gpstime"]; ok {

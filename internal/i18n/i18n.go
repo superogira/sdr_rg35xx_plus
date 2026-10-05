@@ -82,6 +82,8 @@ var strings = map[string][2]string{
 	"m_aprscmt":          {"ข้อความประกอบ", "Comment"},
 	"m_aprslvl":          {"ระดับเสียงส่ง AFSK", "AFSK audio level"},
 	"m_aprspre":          {"เวลารอ VOX (preamble)", "VOX open preamble"},
+	"m_aprsis":           {"โพสต์ APRS-IS (อินเทอร์เน็ต)", "Post to APRS-IS (internet)"},
+	"m_aprsisrv":         {"เซิร์ฟเวอร์ APRS-IS", "APRS-IS server"},
 	"m_aprsstat":         {"สถานีที่รับได้", "Stations heard"},
 	"m_aprsnow":          {"ส่งเดี๋ยวนี้ (ทดสอบ)", "Send now (test)"},
 	"aprs_every_min":     {"ทุก %s นาที", "every %s min"},
