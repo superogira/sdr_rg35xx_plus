@@ -267,6 +267,7 @@ func (r *Radio) Run(ctx context.Context) {
 			r.chain.SetAPRSMonitor(r.aprsDem)
 		}
 		r.mu.Unlock()
+		resumeFade := 0
 		dsp.RunDemo(ctx, func() *dsp.Chain {
 			r.mu.Lock()
 			defer r.mu.Unlock()
@@ -279,8 +280,19 @@ func (r *Radio) Run(ctx context.Context) {
 			beaconing := r.beaconOn
 			r.mu.Unlock()
 			if beaconing {
-				// beaconLoop owns the speaker
+				// beaconLoop owns the speaker; arm the release ramp
+				resumeFade = rate / 200
 			} else if r.out != nil && !muted {
+				if resumeFade > 0 {
+					total := float64(rate / 200)
+					for i := range audio {
+						if resumeFade == 0 {
+							break
+						}
+						audio[i] *= float32(1 - float64(resumeFade)/total)
+						resumeFade--
+					}
+				}
 				r.out.WriteAudio(audio)
 			}
 			if tap != nil && len(audio) > 0 {
@@ -474,6 +486,9 @@ func (r *Radio) session(ctx context.Context) error {
 
 	buf := make([]byte, readBufBytes)
 	var audioBuf []float32
+	// Samples left of the release ramp when the received audio resumes
+	// after a beacon (starting mid-waveform clicks).
+	resumeFade := 0
 	flatBlocks := 0
 	// Actual-rate watchdog: this server remembers its last-set rate across
 	// connections, so the stream may arrive at a different Msps than the
@@ -531,7 +546,19 @@ func (r *Radio) session(ctx context.Context) error {
 			if beaconing {
 				// The dedicated beacon loop owns the speaker while a
 				// beacon plays; duck the demod audio so they never mix.
+				// Arm the release ramp: resuming mid-waveform clicks.
+				resumeFade = rate / 200 // 5 ms at the audio rate
 			} else if r.out != nil && !muted {
+				if resumeFade > 0 {
+					total := float64(rate / 200)
+					for i := range audioBuf {
+						if resumeFade == 0 {
+							break
+						}
+						audioBuf[i] *= float32(1 - float64(resumeFade)/total)
+						resumeFade--
+					}
+				}
 				r.out.WriteAudio(audioBuf)
 			}
 			if tap != nil && len(audioBuf) > 0 {

@@ -84,6 +84,12 @@ func TestBeaconPlaysWithHostOff(t *testing.T) {
 			t.Fatalf("sample %d corrupted: %v vs %v", i, got[i], beacon[i])
 		}
 	}
+	idx := -1
+	for i, w := range sink.writes {
+		if len(w) == len(beacon) {
+			idx = i
+		}
+	}
 	// Rate swap: 48000 then back to the mode rate.
 	if len(sink.rates) < 2 || sink.rates[0] != 48000 {
 		t.Fatalf("rate sequence = %v, want [48000, ...]", sink.rates)
@@ -93,5 +99,21 @@ func TestBeaconPlaysWithHostOff(t *testing.T) {
 	}
 	if r.BeaconPlaying() {
 		t.Fatal("BeaconPlaying must clear once drained")
+	}
+	// The received audio must resume with a short ramp, not a click:
+	// the first post-beacon write starts near zero and reaches full
+	// scale within the ramp window.
+	for i := idx + 1; i < len(sink.writes); i++ {
+		w := sink.writes[i]
+		if len(w) < 80 {
+			continue
+		}
+		if math.Abs(float64(w[0])) > 0.1 {
+			t.Fatalf("resume write starts at %v — release ramp missing", w[0])
+		}
+		if math.Abs(float64(w[len(w)-1])) < 0.05 {
+			t.Fatal("resume write never reaches full scale")
+		}
+		break
 	}
 }
