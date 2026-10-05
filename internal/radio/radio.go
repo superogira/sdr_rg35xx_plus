@@ -244,6 +244,9 @@ func NewDemo(mode dsp.Mode, out *audio.Output) *Radio {
 
 // Run is the connection loop; it returns when ctx is done.
 func (r *Radio) Run(ctx context.Context) {
+	// The beacon player runs regardless of the receiver state — beacons
+	// must sound with the host off (viewer mode, GPS-only tracker).
+	go r.beaconLoop(ctx)
 	// Leaving the app (or dropping to another source) must release the
 	// dongle for other programs.
 	defer r.stopUSBSrv()
@@ -265,8 +268,11 @@ func (r *Radio) Run(ctx context.Context) {
 			tap := r.audioTap
 			rate := r.mode.AudioOutRate()
 			muted := r.localMute
+			beaconing := r.beacon != nil && r.beaconPos < len(r.beacon)
 			r.mu.Unlock()
-			if r.out != nil && !muted {
+			if beaconing {
+				// beaconLoop owns the speaker
+			} else if r.out != nil && !muted {
 				r.out.WriteAudio(audio)
 			}
 			if tap != nil && len(audio) > 0 {
@@ -512,53 +518,17 @@ func (r *Radio) session(ctx context.Context) error {
 			tap := r.audioTap
 			rate := r.mode.AudioOutRate()
 			muted := r.localMute
-			bc, bcPos := r.beacon, r.beaconPos
+			beaconing := r.beacon != nil && r.beaconPos < len(r.beacon)
 			r.mu.Unlock()
-			if bc != nil && bcPos < len(bc) {
-				// Beacon TX: the queued AFSK replaces the demod audio.
-				// It plays regardless of local-mute — the VOX radio
-				// hangs on the speaker output, that is the point.
-				end := bcPos + len(audioBuf)
-				if end > len(bc) {
-					end = len(bc)
-				}
-				aud := audioBuf[:0]
-				for _, v := range bc[bcPos:end] {
-					aud = append(aud, float32(v))
-				}
-				audioBuf = aud
-				r.mu.Lock()
-				r.beaconPos = end
-				if r.beaconRate == 0 && r.out != nil {
-					r.beaconRate = rate
-					r.out.SetInputRate(48000)
-				}
-				fin := end >= len(bc)
-				rest := r.beaconRate
-				r.mu.Unlock()
-				if fin {
-					r.mu.Lock()
-					r.beacon, r.beaconRate, rest = nil, 0, r.beaconRate
-					r.mu.Unlock()
-				}
-				if r.out != nil {
-					if fin && rest != 0 {
-						r.out.SetInputRate(rest)
-					}
-					r.out.WriteAudio(audioBuf)
-				}
-				if tap != nil && len(audioBuf) > 0 {
-					tap(audioBuf, 48000)
-				}
-				goto bytes
-			}
-			if r.out != nil && !muted {
+			if beaconing {
+				// The dedicated beacon loop owns the speaker while a
+				// beacon plays; duck the demod audio so they never mix.
+			} else if r.out != nil && !muted {
 				r.out.WriteAudio(audioBuf)
 			}
 			if tap != nil && len(audioBuf) > 0 {
 				tap(audioBuf, rate)
 			}
-		bytes:
 			r.mu.Lock()
 			r.bytesRx += uint64(n)
 			total := r.bytesRx
@@ -1194,6 +1164,64 @@ func (r *Radio) PlayBeacon(samples []float64) {
 	defer r.mu.Unlock()
 	r.beacon = samples
 	r.beaconPos = 0
+}
+
+// beaconLoop paces queued beacon audio out of the speaker in real time
+// (50 ms chunks) independently of the receive session — with the host
+// off there is no session loop to piggyback on, and a beacon must
+// still sound. The receive session ducks its own output while this
+// plays (BeaconPlaying).
+func (r *Radio) beaconLoop(ctx context.Context) {
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	const chunk = 48000 / 20
+	var scratch []float32
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		r.mu.Lock()
+		bc, pos := r.beacon, r.beaconPos
+		if bc == nil {
+			r.mu.Unlock()
+			continue
+		}
+		end := pos + chunk
+		if end > len(bc) {
+			end = len(bc)
+		}
+		if r.beaconRate == 0 && r.out != nil {
+			// First chunk: switch the output to the beacon's 48 kHz.
+			r.beaconRate = r.mode.AudioOutRate()
+			if r.beaconRate != 48000 {
+				r.out.SetInputRate(48000)
+			}
+		}
+		r.mu.Unlock()
+		scratch = scratch[:0]
+		for _, v := range bc[pos:end] {
+			scratch = append(scratch, float32(v))
+		}
+		if r.out != nil {
+			r.out.WriteAudio(scratch)
+		}
+		r.mu.Lock()
+		r.beaconPos = end
+		fin := end >= len(bc)
+		var rest int
+		if fin {
+			r.beacon = nil
+			rest = r.beaconRate
+			r.beaconRate = 0
+		}
+		out := r.out
+		r.mu.Unlock()
+		if fin && out != nil && rest != 0 && rest != 48000 {
+			out.SetInputRate(rest)
+		}
+	}
 }
 
 // BeaconPlaying reports whether beacon audio is still rolling out.
