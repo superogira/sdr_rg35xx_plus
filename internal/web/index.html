@@ -92,6 +92,8 @@ select, input { min-width:0; }
 .card { background:var(--panel); border:1px solid var(--card-border); border-radius:10px; padding:12px; }
 .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:2px; color:var(--dim); margin:0 0 10px; }
 button.nudge { padding:2px 7px; font-size:11px; line-height:1.4; flex:0 0 auto; }
+.tgt { background:none; border:none; }
+.tgt svg { display:block; filter:drop-shadow(0 0 3px rgba(0,0,0,.85)); transition:transform .6s linear; }
 .freq { font-size:34px; font-variant-numeric:tabular-nums; color:var(--acc); cursor:pointer; }
 .freq small { font-size:14px; color:var(--dim); }
 .row { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:8px 0; }
@@ -1253,6 +1255,12 @@ $('wgain').oninput = e => {
   if (player && player.kind === 'worklet') player.node.port.postMessage({ kind: 'gain', v: wgain });
 };
 
+// ---- target glyphs: real silhouettes, rotated to their heading ----
+const ICONS = {
+  plane: '<svg viewBox="0 0 24 24" width="26" height="26"><path d="M12 2l1.8 6.2L21 11v1.6l-7.2-1.4-.5 4.6 3 2.2v1.4l-4.3-1.2-4.3 1.2v-1.4l3-2.2-.5-4.6L3 12.6V11l7.2-2.8z" fill="var(--tgt-col,#ffd166)" stroke="#000" stroke-width=".7"/></svg>',
+  ship: '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M12 2l2.6 4.5h-5.2zM10.4 7.5h3.2v5h-3.2zM4 13.5h16l-2.6 6.5H6.6z" fill="var(--tgt-col,#35e08a)" stroke="#000" stroke-width=".7"/></svg>',
+  aprs: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 3l7 9-7 9-7-9z" fill="none" stroke="var(--tgt-col,#ff5aff)" stroke-width="2.2"/></svg>',
+};
 // ---- Leaflet map (phase 3) ----
 let map = null, mLayer = null, markers = {}, rxMark = null, layerIdx = 0, layers = [];
 async function initMap(st) {
@@ -1283,12 +1291,19 @@ async function mapPoll() {
     const col = t.kind === 'plane' ? '#ffd166' : t.kind === 'aprs' ? '#ff5aff' : '#35e08a';
     if (!t.hasPos) { if (m) { map.removeLayer(m); delete markers[t.kind + t.id]; } continue; }
     if (!m) {
-      m = markers[t.kind + t.id] = L.circleMarker(ll, { radius: 5, color: col, weight: 2, fillColor: col, fillOpacity: 0.5 }).addTo(map);
+      m = markers[t.kind + t.id] = L.marker(ll, {
+        icon: L.divIcon({ className: 'tgt', html: ICONS[t.kind] || ICONS.aprs, iconSize: [26, 26], iconAnchor: [13, 13] }),
+      }).addTo(map);
       m.bindTooltip(t.call, { direction: 'top' });
     } else {
       m.setLatLng(ll);
     }
-    m.setStyle({ color: col });
+    const el = m.getElement();
+    if (el) {
+      el.style.setProperty('--tgt-col', col);
+      // nose/bow along the true course (track deg, 0 = north)
+      el.firstElementChild.style.transform = 'rotate(' + (t.track || 0) + 'deg)';
+    }
   }
   for (const k in markers) if (!seen[k]) { map.removeLayer(markers[k]); delete markers[k]; }
 }
