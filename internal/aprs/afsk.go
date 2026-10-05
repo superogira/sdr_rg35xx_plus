@@ -58,7 +58,8 @@ func Modulate(body []byte, amp float64, preambleFlags int) []float64 {
 	}
 	pushFlag()
 
-	// NRZI + continuous-phase FSK.
+	// NRZI + continuous-phase FSK, with a 5 ms fade at both ends so the
+	// speaker (and any AGC downstream) is not kicked by a hard onset.
 	spb := float64(TXRate) / Baud
 	phase := 0.0
 	tone := float64(MarkHz)
@@ -77,18 +78,17 @@ func Modulate(body []byte, amp float64, preambleFlags int) []float64 {
 			phase += inc
 			out = append(out, amp*math.Sin(phase))
 		}
-		// keep exact bit timing across the fractional remainder
 		rem := spb - float64(n)
-		if rem > 0 {
-			extra := int(math.Round(rem))
-			for i := 0; i < extra; i++ {
-				phase += inc
-				out = append(out, amp*math.Sin(phase))
-			}
+		if rem > 0.5 {
+			phase += inc
+			out = append(out, amp*math.Sin(phase))
 		}
 	}
-	if phase > 2*math.Pi {
-		phase = math.Mod(phase, 2*math.Pi)
+	const fade = 240 // 5 ms at 48 kHz
+	for i := 0; i < fade && i < len(out)/4; i++ {
+		g := float64(i) / float64(fade)
+		out[i] *= g
+		out[len(out)-1-i] *= g
 	}
 	return out
 }

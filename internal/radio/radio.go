@@ -1166,16 +1166,17 @@ func (r *Radio) PlayBeacon(samples []float64) {
 	r.beaconPos = 0
 }
 
-// beaconLoop paces queued beacon audio out of the speaker in real time
-// (50 ms chunks) independently of the receive session — with the host
-// off there is no session loop to piggyback on, and a beacon must
-// still sound. The receive session ducks its own output while this
-// plays (BeaconPlaying).
+// beaconLoop plays queued beacon audio out of the speaker regardless
+// of the receive session — with the host off there is no session loop
+// to piggyback on, and a beacon must still sound. The WHOLE beacon is
+// handed to the output in one call: the aplay pipe's backpressure
+// paces it in real time, and there are no 50 ms chunk seams for the
+// phone-side decoder to trip over (chunked writes audibly chopped the
+// tones on a busy core). The receive session ducks its own output
+// while this plays (BeaconPlaying).
 func (r *Radio) beaconLoop(ctx context.Context) {
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
-	const chunk = 48000 / 20
-	var scratch []float32
 	for {
 		select {
 		case <-ctx.Done():
@@ -1183,44 +1184,33 @@ func (r *Radio) beaconLoop(ctx context.Context) {
 		case <-tick.C:
 		}
 		r.mu.Lock()
-		bc, pos := r.beacon, r.beaconPos
-		if bc == nil {
+		bc := r.beacon
+		if bc == nil || r.beaconPos != 0 {
 			r.mu.Unlock()
-			continue
+			continue // nothing queued / already playing
 		}
-		end := pos + chunk
-		if end > len(bc) {
-			end = len(bc)
-		}
-		if r.beaconRate == 0 && r.out != nil {
-			// First chunk: switch the output to the beacon's 48 kHz.
-			r.beaconRate = r.mode.AudioOutRate()
-			if r.beaconRate != 48000 {
-				r.out.SetInputRate(48000)
-			}
-		}
+		rate := r.mode.AudioOutRate()
 		r.mu.Unlock()
-		scratch = scratch[:0]
-		for _, v := range bc[pos:end] {
-			scratch = append(scratch, float32(v))
-		}
-		if r.out != nil {
-			r.out.WriteAudio(scratch)
+		aud := make([]float32, len(bc))
+		for i, v := range bc {
+			aud[i] = float32(v)
 		}
 		r.mu.Lock()
-		r.beaconPos = end
-		fin := end >= len(bc)
-		var rest int
-		if fin {
-			r.beacon = nil
-			rest = r.beaconRate
-			r.beaconRate = 0
-		}
 		out := r.out
+		r.beaconPos = len(bc) // claimed: playing
 		r.mu.Unlock()
-		if fin && out != nil && rest != 0 && rest != 48000 {
-			out.SetInputRate(rest)
+		if out != nil {
+			if rate != 48000 {
+				out.SetInputRate(48000)
+			}
+			out.WriteAudio(aud) // blocks on the pipe until consumed
+			if rate != 48000 {
+				out.SetInputRate(rate)
+			}
 		}
+		r.mu.Lock()
+		r.beacon = nil
+		r.mu.Unlock()
 	}
 }
 
