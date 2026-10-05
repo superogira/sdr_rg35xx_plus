@@ -1263,6 +1263,33 @@ func main() {
 		msgMu.Unlock()
 	}
 
+	if os.Getenv("SDR_ADSB_DEMO") != "" {
+		webSrv.SetExtraTargets(func() []web.Target {
+			now := time.Now()
+			var out []web.Target
+			for _, d := range []struct {
+				icao                    string
+				lat, lon                float64
+				alt, spd, trk           int
+			}{
+				{"A1B2C3", 13.72, 100.55, 31000, 460, 75},
+				{"D4E5F6", 13.60, 100.70, 9000, 240, 300},
+			} {
+				t := web.Target{Kind: "plane", ID: d.icao, Call: d.icao, Lat: d.lat, Lon: d.lon,
+					HasPos: true, AltFt: d.alt, Speed: float64(d.spd), Track: d.trk, AgeSec: 3}
+				// Breadcrumbs backwards along the track, climbing.
+				for k := 1; k <= 24; k++ {
+					de := math.Sin(float64(d.trk)*math.Pi/180) * 0.02 * float64(k)
+					dn := math.Cos(float64(d.trk)*math.Pi/180) * 0.02 * float64(k)
+					t.Trail = append(t.Trail, web.TrailPt{Lat: d.lat - dn, Lon: d.lon - de,
+						AltFt: d.alt - k*400, AgeSec: float64(k) * 10})
+				}
+				_ = now
+				out = append(out, t)
+			}
+			return out
+		})
+	}
 	webSrv.SetAPRSProvider(func() []web.APRSStation {
 		var out []web.APRSStation
 		if os.Getenv("SDR_ADSB_DEMO") != "" {

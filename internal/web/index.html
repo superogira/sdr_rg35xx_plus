@@ -1255,10 +1255,31 @@ $('wgain').oninput = e => {
   if (player && player.kind === 'worklet') player.node.port.postMessage({ kind: 'gain', v: wgain });
 };
 
+// altColor mirrors the handheld's altitude palette (ui.altitudeColor)
+// so web breadcrumbs and plane bodies read the same as the radar.
+function altColor(alt) {
+  if (alt < 0) alt = 0;
+  let h;
+  if (alt <= 2000) h = 20;
+  else if (alt <= 4000) h = 32.5 + 10.5 * (alt - 2000) / 2000;
+  else if (alt <= 6000) h = 43 + 11 * (alt - 4000) / 2000;
+  else if (alt <= 8000) h = 54 + 18 * (alt - 6000) / 2000;
+  else if (alt <= 9000) h = 72 + 13 * (alt - 8000) / 1000;
+  else if (alt <= 11000) h = 85 + 55 * (alt - 9000) / 2000;
+  else if (alt <= 40000) h = 140 + 160 * (alt - 11000) / 29000;
+  else if (alt <= 51000) h = 300 + 60 * (alt - 40000) / 11000;
+  else h = 360;
+  let l = 50;
+  if (h >= 200) l = 58; else if (h >= 100) l = 41; else if (h >= 80) l = 41;
+  else if (h >= 60) l = 43; else if (h >= 50) l = 46; else if (h >= 46) l = 51;
+  else if (h >= 40) l = 52; else if (h >= 32) l = 54; else if (h >= 20) l = 50; else l = 53;
+  return `hsl(${h.toFixed(1)},88%,${l}%)`;
+}
+const trailGroups = {};
 // ---- target glyphs: real silhouettes, rotated to their heading ----
 const ICONS = {
   plane: '<svg viewBox="0 0 24 24" width="26" height="26"><path d="M12 2l1.8 6.2L21 11v1.6l-7.2-1.4-.5 4.6 3 2.2v1.4l-4.3-1.2-4.3 1.2v-1.4l3-2.2-.5-4.6L3 12.6V11l7.2-2.8z" fill="var(--tgt-col,#ffd166)" stroke="#000" stroke-width=".7"/></svg>',
-  ship: '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M12 2l2.6 4.5h-5.2zM10.4 7.5h3.2v5h-3.2zM4 13.5h16l-2.6 6.5H6.6z" fill="var(--tgt-col,#35e08a)" stroke="#000" stroke-width=".7"/></svg>',
+  ship: '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M12 2.5L19.5 11v10.5h-15V11z" fill="var(--tgt-col,#35e08a)" stroke="#000" stroke-width=".8"/></svg>',
   aprs: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 3l7 9-7 9-7-9z" fill="none" stroke="var(--tgt-col,#ff5aff)" stroke-width="2.2"/></svg>',
 };
 // ---- Leaflet map (phase 3) ----
@@ -1288,7 +1309,7 @@ async function mapPoll() {
     seen[t.kind + t.id] = true;
     const ll = [t.lat, t.lon];
     let m = markers[t.kind + t.id];
-    const col = t.kind === 'plane' ? '#ffd166' : t.kind === 'aprs' ? '#ff5aff' : '#35e08a';
+    const col = t.kind === 'plane' ? altColor(t.altFt) : t.kind === 'aprs' ? '#ff5aff' : '#35e08a';
     if (!t.hasPos) { if (m) { map.removeLayer(m); delete markers[t.kind + t.id]; } continue; }
     if (!m) {
       m = markers[t.kind + t.id] = L.marker(ll, {
@@ -1304,8 +1325,25 @@ async function mapPoll() {
       // nose/bow along the true course (track deg, 0 = north)
       el.firstElementChild.style.transform = 'rotate(' + (t.track || 0) + 'deg)';
     }
+    // Flown path: altitude-coloured breadcrumbs, fading with age —
+    // the same convention as the handheld radar.
+    const key = t.kind + t.id;
+    if (t.kind === 'plane' && t.trail && t.trail.length) {
+      let g = trailGroups[key];
+      if (!g) { g = trailGroups[key] = L.layerGroup().addTo(map); }
+      g.clearLayers();
+      for (const d of t.trail) {
+        const c = altColor(d.altFt);
+        const op = d.ageSec > 150 ? 0.35 : d.ageSec > 60 ? 0.6 : 0.9;
+        L.circleMarker([d.lat, d.lon], { radius: 2.5, stroke: false, fillColor: c, fillOpacity: op }).addTo(g);
+      }
+    } else if (trailGroups[key]) {
+      trailGroups[key].clearLayers();
+      delete trailGroups[key];
+    }
   }
   for (const k in markers) if (!seen[k]) { map.removeLayer(markers[k]); delete markers[k]; }
+  for (const k in trailGroups) if (!seen[k]) { trailGroups[k].clearLayers(); delete trailGroups[k]; }
 }
 (async function specLoop() {
   for (;;) {

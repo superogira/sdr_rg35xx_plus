@@ -89,6 +89,7 @@ type Server struct {
 	aprsGet  func() []APRSStation
 	aprsCmd  func(action string, v int) string
 	aprsStat func() (rx bool, beac int, isOn bool, count int)
+	extraTgt func() []Target
 	panelSet func(state int)
 	panelGet func() int
 	wfSet    func(min, max float64)
@@ -165,6 +166,14 @@ type APRSStation struct {
 func (s *Server) SetAPRSProvider(f func() []APRSStation) {
 	s.mu.Lock()
 	s.aprsGet = f
+	s.mu.Unlock()
+}
+
+// SetExtraTargets lets main append synthetic targets (dev demo with
+// trails) to /api/targets.
+func (s *Server) SetExtraTargets(f func() []Target) {
+	s.mu.Lock()
+	s.extraTgt = f
 	s.mu.Unlock()
 }
 
@@ -647,42 +656,59 @@ func (s *Server) handleAIS(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-type target struct {
-	Kind   string  `json:"kind"` // "plane" | "ship"
-	ID     string  `json:"id"`
-	Call   string  `json:"call"`
+type Target struct {
+	Kind   string    `json:"kind"` // "plane" | "ship"
+	ID     string    `json:"id"`
+	Call   string    `json:"call"`
+	Lat    float64   `json:"lat"`
+	Lon    float64   `json:"lon"`
+	HasPos bool      `json:"hasPos"`
+	AltFt  int       `json:"altFt"`
+	Speed  float64   `json:"speed"`
+	Track  int       `json:"track"`
+	AgeSec float64   `json:"ageSec"`
+	Trail  []TrailPt `json:"trail,omitempty"`
+}
+
+// trailPt is one breadcrumb of a flown path (altitude-coloured dots).
+type TrailPt struct {
 	Lat    float64 `json:"lat"`
 	Lon    float64 `json:"lon"`
-	HasPos bool    `json:"hasPos"`
 	AltFt  int     `json:"altFt"`
-	Speed  float64 `json:"speed"`
-	Track  int     `json:"track"`
 	AgeSec float64 `json:"ageSec"`
 }
 
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
-	var out []target
+	var out []Target
 	now := time.Now()
 	for _, p := range s.adsb.Planes() {
 		call := p.Callsign
 		if call == "" {
 			call = p.ICAO
 		}
-		out = append(out, target{Kind: "plane", ID: p.ICAO, Call: call, Lat: p.Lat, Lon: p.Lon, HasPos: p.HasPos, AltFt: p.AltFt, Speed: float64(p.SpeedKt), Track: p.TrackDeg, AgeSec: now.Sub(p.LastSeen).Seconds()})
+		t := Target{Kind: "plane", ID: p.ICAO, Call: call, Lat: p.Lat, Lon: p.Lon, HasPos: p.HasPos, AltFt: p.AltFt, Speed: float64(p.SpeedKt), Track: p.TrackDeg, AgeSec: now.Sub(p.LastSeen).Seconds()}
+		for _, d := range p.Trail {
+			t.Trail = append(t.Trail, TrailPt{Lat: d.Lat, Lon: d.Lon, AltFt: d.AltFt, AgeSec: now.Sub(d.At).Seconds()})
+		}
+		out = append(out, t)
 	}
 	for _, sh := range s.ais.Ships() {
 		call := sh.Name
 		if call == "" {
 			call = sh.MMSI
 		}
-		out = append(out, target{Kind: "ship", ID: sh.MMSI, Call: call, Lat: sh.Lat, Lon: sh.Lon, HasPos: sh.HasPos, Speed: sh.SogKt, Track: int(sh.CogDeg), AgeSec: now.Sub(sh.LastSeen).Seconds()})
+		out = append(out, Target{Kind: "ship", ID: sh.MMSI, Call: call, Lat: sh.Lat, Lon: sh.Lon, HasPos: sh.HasPos, Speed: sh.SogKt, Track: int(sh.CogDeg), AgeSec: now.Sub(sh.LastSeen).Seconds()})
 	}
 	s.mu.Lock()
 	get := s.aprsGet
+	extra := s.extraTgt
 	s.mu.Unlock()
+	if extra != nil {
+		out = append(out, extra()...)
+	}
 	if get != nil {
 		for _, st := range get() {
-			out = append(out, target{Kind: "aprs", ID: st.Call, Call: st.Call, Lat: st.Lat, Lon: st.Lon, HasPos: true, Speed: st.SpeedKt, Track: int(st.Course), AltFt: st.AltFt, AgeSec: st.AgeSec})
+			out = append(out, Target{Kind: "aprs", ID: st.Call, Call: st.Call, Lat: st.Lat, Lon: st.Lon, HasPos: true, Speed: st.SpeedKt, Track: int(st.Course), AltFt: st.AltFt, AgeSec: st.AgeSec})
 		}
 	}
 	writeJSON(w, out)
