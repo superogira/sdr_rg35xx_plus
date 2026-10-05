@@ -67,6 +67,7 @@ func (u *UI) WefaxPreviewRows() int {
 	bottom := u.WaterfallRows - 4 - 100
 	return bottom - top - 18 - 16
 }
+
 // DrawWefaxGuides marks where the fax subcarrier must sit: the black
 // tone at +1500 Hz and the white tone at +2300 Hz from the dial (USB
 // with the dial 1.9 kHz below the assigned frequency). Tune until the

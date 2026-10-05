@@ -70,6 +70,7 @@ type RadarSel struct {
 type RadarBlip struct {
 	Vessel       bool    // true = ship (AIS), false = aircraft (ADS-B)
 	AtoN         bool    // AIS type 6/21 static aid: yellow rhombus
+	Aprs         bool    // APRS station (RF decode): magenta diamond
 	MercX, MercY float64 // Web-Mercator world pixels (see MercView)
 	Call         string
 	ICAO         string
@@ -328,6 +329,30 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			}
 		}
 
+		if b.Aprs {
+			// APRS station: magenta hollow diamond + callsign. Never
+			// reads as traffic (aircraft) or AIS shipping.
+			col := color.RGBA{255, 90, 255, 255}
+			for _, d := range [][2]int{{-4, 0}, {-3, -1}, {-3, 1}, {-2, -2}, {-2, 2}, {-1, -3}, {-1, 3}, {0, -4}, {0, 4}, {1, -3}, {1, 3}, {2, -2}, {2, 2}, {3, -1}, {3, 1}, {4, 0}} {
+				u.setPixel(x+d[0], y+d[1], col)
+			}
+			if labelMode != LabelNone {
+				label := b.Call
+				tx := x + 6
+				if x > u.W-120 {
+					tx = x - 6 - tf.TextWidth(label)
+				}
+				ty := y + 4
+				if y < 60 {
+					ty = y + 14
+				}
+				if labelMode == LabelFlagText {
+					u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+6, 13, 0, 0, 0, 170)
+					tf.DrawString(u.img, color.RGBA{255, 190, 255, 255}, tx, ty, label)
+				}
+			}
+			continue
+		}
 		if b.Vessel {
 			// Vessel: cyan square + name/MMSI + SOG. Static aids (AIS
 			// base stations, buoys, lighthouses — types 6/21) draw as a
@@ -586,6 +611,9 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 
 // blipID is the stable selection anchor of a drawn blip.
 func blipID(b RadarBlip) string {
+	if b.Aprs {
+		return "P" + b.Call
+	}
 	if b.Vessel {
 		return "V" + b.ICAO
 	}

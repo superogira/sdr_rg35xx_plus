@@ -5,7 +5,6 @@
 package web
 
 import (
-	"strings"
 	"context"
 	"embed"
 	"encoding/json"
@@ -17,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -83,12 +83,12 @@ type Server struct {
 	// Waterfall display range shared with the device menu (wfmin/
 	// wfmax ini): get returns the live values, set applies a change
 	// (device UI + cfg + saveNow). Nil until main wires them.
-	wfGet func() (float64, float64)
-	rxPos  func() (float64, float64)
-	gpsGet func() GPSInfo
+	wfGet    func() (float64, float64)
+	rxPos    func() (float64, float64)
+	gpsGet   func() GPSInfo
 	panelSet func(state int)
 	panelGet func() int
-	wfSet func(min, max float64)
+	wfSet    func(min, max float64)
 
 	// Spec scratch reused across /api/spec calls (FFT work arrays at
 	// specMaxFFT; per-call allocation would churn ~3 MB at 8 Hz).
@@ -628,8 +628,8 @@ type spec struct {
 	ListenHz int64   `json:"listenHz"`
 	BwHz     float64 `json:"bwHz"`
 	Wefax    bool    `json:"wefax"` // draw the fax tuning guides
-	PbLo     float64 `json:"pbLo"` // live passband edges vs listenHz
-	PbHi     float64 `json:"pbHi"` // (CW beat window, SSB band, FM ±bw/2)
+	PbLo     float64 `json:"pbLo"`  // live passband edges vs listenHz
+	PbHi     float64 `json:"pbHi"`  // (CW beat window, SSB band, FM ±bw/2)
 	Mode     string  `json:"mode"`
 	SigDb    float64 `json:"sigDb"`   // smoothed IF power, dBFS (S-meter)
 	SqlOpen  bool    `json:"sqlOpen"` // squelch gate state (NFM)
@@ -705,7 +705,7 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 	pow := s.specPow[:n]
 	for i := 0; i < n; i++ {
 		k := (i + n/2) % n
-		pow[i] = 20 * math.Log10(math.Hypot(re[k], im[k]) + 1e-12)
+		pow[i] = 20 * math.Log10(math.Hypot(re[k], im[k])+1e-12)
 	}
 	// Device-style mapping: dB relative to a tracked noise floor (25th
 	// percentile, EMA 0.05 — same recipe as ui.NewSpectrumRow), so the

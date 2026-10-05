@@ -254,7 +254,7 @@ func Maidenhead(lat, lon float64) string {
 	sub := int(lon / (2.0 / 24))
 	gr := int(lat / 10)
 	lat -= float64(gr) * 10
-	ss := int(lat)               // 1° grid square row
+	ss := int(lat) // 1° grid square row
 	lat -= float64(ss)
 	sub2 := int(lat / (1.0 / 24)) // 2.5' subsquare
 	return fmt.Sprintf("%c%c%d%d%c%c",

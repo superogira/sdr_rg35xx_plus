@@ -258,6 +258,7 @@ type Chain struct {
 	rtty     *RTTYDecoder  // RTTY monitor (fed alongside the FT8 branch)
 	wefax    *WefaxDecoder // WEFAX monitor (same 8 kHz branch)
 	cw       *CWDecoder    // Morse monitor (same branch)
+	aprs     APRSMonitor   // APRS AFSK monitor (same branch)
 
 	// Squelch + metering state.
 	sqlOpen  bool
@@ -579,7 +580,7 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 	// FT8/RTTY monitor: the dedicated branch below feeds the detectors
 	// in every mode; the SSB-8k path keeps its in-processSSB feed
 	// (identical band, avoids running the branch twice).
-	if (c.ft8 != nil || c.rtty != nil || c.wefax != nil || c.cw != nil) && !(c.mode.SSB && c.outRate == SSBRate) {
+	if (c.ft8 != nil || c.rtty != nil || c.wefax != nil || c.cw != nil || c.aprs != nil) && !(c.mode.SSB && c.outRate == SSBRate) {
 		c.feedMonitors()
 	}
 
@@ -745,6 +746,18 @@ func (c *Chain) feedMonitors() {
 	if c.cw != nil {
 		c.cw.Feed(buf)
 	}
+	if c.aprs != nil {
+		c.aprs.Feed(buf)
+	}
+}
+
+// SetAPRSMonitor attaches (nil detaches) the APRS AFSK monitor.
+func (c *Chain) SetAPRSMonitor(m APRSMonitor) { c.aprs = m }
+
+// APRSMonitor consumes monitor-branch audio at 8 kHz
+// (internal/aprs.Demodulator).
+type APRSMonitor interface {
+	Feed(x []float64)
 }
 
 // AISDemod consumes one channel-centred complex stream at 48 ks/s

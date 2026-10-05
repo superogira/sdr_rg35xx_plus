@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"sdr35/internal/ais"
+	"sdr35/internal/aprs"
 	"sdr35/internal/audio"
 	"sdr35/internal/dsp"
 	"sdr35/internal/i18n"
@@ -94,6 +95,11 @@ type Radio struct {
 	localMute  bool                           // speaker off; web tap still live
 	aisA, aisB *ais.ChannelDemod
 	aisPay     func(payload []byte, ch int, levelDb float64)
+	aprsDem    *aprs.Demodulator
+	aprsRFOn   bool
+	beacon     []float64 // pending beacon audio at 48k (nil = idle)
+	beaconPos  int
+	beaconRate int  // input rate to restore after the beacon
 	hfApplied  int  // direct-sampling mode currently set on the server
 	ppm        int  // tuner frequency correction, applied live and at every (re)connect
 	ppmOff     bool // true = leave the correction to the server's own setting
@@ -106,9 +112,9 @@ type Radio struct {
 	reconAt time.Time
 	bytesRx uint64
 
-	usbSrc  bool        // host == "usb": feed from the local dongle
-	usbProc *exec.Cmd   // our spawned rtl_tcp (Linux sidecar)
-	usbMu   sync.Mutex  // guards usbProc across ensure/stop
+	usbSrc  bool       // host == "usb": feed from the local dongle
+	usbProc *exec.Cmd  // our spawned rtl_tcp (Linux sidecar)
+	usbMu   sync.Mutex // guards usbProc across ensure/stop
 }
 
 const (
@@ -133,25 +139,27 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Ou
 		gainDb = 49.6
 	}
 	rttyDec := dsp.NewRTTYDecoder()
+	aprsDem := aprs.NewDemodulator()
 	r := &Radio{
-		rtty:   rttyDec,
-		wefax:  dsp.NewWefaxDecoder(),
-		cw:     dsp.NewCWDecoder(),
-		Host:   host,
-		tap:    dsp.NewSpectrumTap(),
-		rawTap: dsp.NewSpectrumTapN(dsp.RawTapLen),
-		out:    out,
-		freqHz: freqHz,
-		loHz:   freqHz,
-		mode:   mode,
-		gainDb: gainDb,
-		vol:    1,
-		sqlDb:  -40,
-		iqRate: 2_048_000,
-		agcOn:  true,
-		usbSrc: host == USBHost,
-		ft8:    dsp.NewFT8Detector(),
-		chain:  dsp.NewChain(mode, nil, nil),
+		rtty:    rttyDec,
+		aprsDem: aprsDem,
+		wefax:   dsp.NewWefaxDecoder(),
+		cw:      dsp.NewCWDecoder(),
+		Host:    host,
+		tap:     dsp.NewSpectrumTap(),
+		rawTap:  dsp.NewSpectrumTapN(dsp.RawTapLen),
+		out:     out,
+		freqHz:  freqHz,
+		loHz:    freqHz,
+		mode:    mode,
+		gainDb:  gainDb,
+		vol:     1,
+		sqlDb:   -40,
+		iqRate:  2_048_000,
+		agcOn:   true,
+		usbSrc:  host == USBHost,
+		ft8:     dsp.NewFT8Detector(),
+		chain:   dsp.NewChain(mode, nil, nil),
 	}
 	r.aisA = ais.NewChannelDemod(48000, 0, "A", func(p []byte, ch int, levelDb float64) {
 		if f := r.aisPay; f != nil {
@@ -244,6 +252,9 @@ func (r *Radio) Run(ctx context.Context) {
 		r.state = stateStreaming
 		r.chain = dsp.NewChain(r.mode, r.tap, r.rawTap)
 		r.chain.SetVolume(r.vol)
+		if r.aprsRFOn {
+			r.chain.SetAPRSMonitor(r.aprsDem)
+		}
 		r.mu.Unlock()
 		dsp.RunDemo(ctx, func() *dsp.Chain {
 			r.mu.Lock()
@@ -368,6 +379,9 @@ func (r *Radio) session(ctx context.Context) error {
 		}
 		if r.aisRFOn {
 			chain.SetAISDemods(r.aisA, r.aisB)
+		}
+		if r.aprsRFOn {
+			chain.SetAPRSMonitor(r.aprsDem)
 		}
 		r.chain = chain
 		r.state = stateStreaming
@@ -498,13 +512,53 @@ func (r *Radio) session(ctx context.Context) error {
 			tap := r.audioTap
 			rate := r.mode.AudioOutRate()
 			muted := r.localMute
+			bc, bcPos := r.beacon, r.beaconPos
 			r.mu.Unlock()
+			if bc != nil && bcPos < len(bc) {
+				// Beacon TX: the queued AFSK replaces the demod audio.
+				// It plays regardless of local-mute — the VOX radio
+				// hangs on the speaker output, that is the point.
+				end := bcPos + len(audioBuf)
+				if end > len(bc) {
+					end = len(bc)
+				}
+				aud := audioBuf[:0]
+				for _, v := range bc[bcPos:end] {
+					aud = append(aud, float32(v))
+				}
+				audioBuf = aud
+				r.mu.Lock()
+				r.beaconPos = end
+				if r.beaconRate == 0 && r.out != nil {
+					r.beaconRate = rate
+					r.out.SetInputRate(48000)
+				}
+				fin := end >= len(bc)
+				rest := r.beaconRate
+				r.mu.Unlock()
+				if fin {
+					r.mu.Lock()
+					r.beacon, r.beaconRate, rest = nil, 0, r.beaconRate
+					r.mu.Unlock()
+				}
+				if r.out != nil {
+					if fin && rest != 0 {
+						r.out.SetInputRate(rest)
+					}
+					r.out.WriteAudio(audioBuf)
+				}
+				if tap != nil && len(audioBuf) > 0 {
+					tap(audioBuf, 48000)
+				}
+				goto bytes
+			}
 			if r.out != nil && !muted {
 				r.out.WriteAudio(audioBuf)
 			}
 			if tap != nil && len(audioBuf) > 0 {
 				tap(audioBuf, rate)
 			}
+		bytes:
 			r.mu.Lock()
 			r.bytesRx += uint64(n)
 			total := r.bytesRx
@@ -797,6 +851,9 @@ func (r *Radio) SetMode(mode dsp.Mode) string {
 	}
 	if r.aisRFOn {
 		r.chain.SetAISDemods(r.aisA, r.aisB)
+	}
+	if r.aprsRFOn {
+		r.chain.SetAPRSMonitor(r.aprsDem)
 	}
 	// The fresh chain starts at offset 0 — restore the passband offset
 	// so switching modes mid-scroll keeps listening where the dial says.
@@ -1103,6 +1160,49 @@ func (r *Radio) SetAISRFEnabled(on bool) {
 	fmt.Fprintf(os.Stderr, "radio: AIS RF %v"+string(rune(10)), on)
 }
 
+// APRSEnabled reports whether the over-the-air APRS decoder runs.
+func (r *Radio) APRSEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.aprsRFOn
+}
+
+// APRSDemod exposes the AFSK demodulator (frame taking).
+func (r *Radio) APRSDemod() *aprs.Demodulator { return r.aprsDem }
+
+// SetAPRSEnabled attaches/detaches the APRS AFSK monitor on the 8 kHz
+// branch. No mode lock: the monitor branch decodes in any receive mode.
+func (r *Radio) SetAPRSEnabled(on bool) {
+	r.mu.Lock()
+	r.aprsRFOn = on
+	chain := r.chain
+	r.mu.Unlock()
+	if chain != nil {
+		if on {
+			chain.SetAPRSMonitor(r.aprsDem)
+		} else {
+			chain.SetAPRSMonitor(nil)
+		}
+	}
+	fmt.Fprintf(os.Stderr, "radio: APRS %v"+string(rune(10)), on)
+}
+
+// PlayBeacon queues AFSK audio (48 kHz) to play out of the speaker in
+// place of the received audio — the VOX-keyed radio path.
+func (r *Radio) PlayBeacon(samples []float64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.beacon = samples
+	r.beaconPos = 0
+}
+
+// BeaconPlaying reports whether beacon audio is still rolling out.
+func (r *Radio) BeaconPlaying() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.beacon != nil && r.beaconPos < len(r.beacon)
+}
+
 // SetLocalMute silences the handheld's own speaker while the web audio
 // tap keeps streaming the full demodulated signal.
 func (r *Radio) SetLocalMute(m bool) {
@@ -1335,6 +1435,9 @@ func (r *Radio) SetBandwidth(bw float64) {
 	}
 	r.mode = m
 	r.chain = dsp.NewChain(m, r.tap, r.rawTap)
+	if r.aprsRFOn {
+		r.chain.SetAPRSMonitor(r.aprsDem)
+	}
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
 	r.chain.SetAGCEnabled(r.agcOn)

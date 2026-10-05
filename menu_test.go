@@ -6,7 +6,7 @@ import "testing"
 // the root page exposes one row per subpage — the Audio page row once
 // went missing in a silent edit and the d-pad could never reach it.
 func TestPageItemsCoverEveryPage(t *testing.T) {
-	wantPages := []int{pageRoot, pageRx, pageFT8, pageSys, pageBM, pageAudio, pageADSB, pageGPS}
+	wantPages := []int{pageRoot, pageRx, pageFT8, pageSys, pageBM, pageAudio, pageADSB, pageGPS, pageAPRS}
 	if len(pageItems) != len(wantPages) {
 		t.Fatalf("pageItems has %d pages, want %d — a page id exists with no row list (rows become unreachable)", len(pageItems), len(wantPages))
 	}
@@ -36,6 +36,7 @@ func TestRootRowsOpenMatchingPages(t *testing.T) {
 		{menuAF, menuNR, menuHP, menuLP, menuLocalMute},
 		{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
 		{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
+		{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSLvl, menuAPRSStat, menuAPRSNow},
 		{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear, menuWefaxAuto, menuCWDec, menuCWClear},
 		{menuBM},
 		{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},

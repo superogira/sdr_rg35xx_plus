@@ -156,7 +156,7 @@ func TestWefaxManualContinuous(t *testing.T) {
 			s.tone(barAt(float64(i)/spl), 1)
 		}
 	}
-	s.apt(450, 4) // stop tone
+	s.apt(450, 4)        // stop tone
 	s.tone(1, WefaxRate) // inter-chart white
 	s.apt(300, 4)        // next chart starts
 	for l := 0; l < 30; l++ {
