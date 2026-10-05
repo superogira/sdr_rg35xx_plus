@@ -70,12 +70,9 @@ func TestBeaconPlaysWithHostOff(t *testing.T) {
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
 	var got []float32
-	other := 0
 	for _, w := range sink.writes {
 		if len(w) == len(beacon) {
 			got = w
-		} else {
-			other++
 		}
 	}
 	if got == nil {
@@ -85,24 +82,6 @@ func TestBeaconPlaysWithHostOff(t *testing.T) {
 	for i := 0; i < len(beacon); i += 997 {
 		if math.Abs(float64(got[i])-beacon[i]) > 1e-6 {
 			t.Fatalf("sample %d corrupted: %v vs %v", i, got[i], beacon[i])
-		}
-	}
-	// No interleaved audio during the beacon window: the demo path
-	// writes 8k-sized chunks; with ducking there must be none between
-	// the beacon write and the rate restore. We approximate: every
-	// non-beacon write must be AFTER the beacon write in order.
-	idx := -1
-	for i, w := range sink.writes {
-		if len(w) == len(beacon) {
-			idx = i
-		}
-	}
-	for i, w := range sink.writes {
-		if i < idx && len(w) != len(beacon) && i > 0 {
-			// writes before the beacon are fine (demo warm-up);
-			// between PlayBeacon and the beacon write there must be
-			// none — checked by the gap below.
-			_ = w
 		}
 	}
 	// Rate swap: 48000 then back to the mode rate.
@@ -115,5 +94,4 @@ func TestBeaconPlaysWithHostOff(t *testing.T) {
 	if r.BeaconPlaying() {
 		t.Fatal("BeaconPlaying must clear once drained")
 	}
-	_ = other
 }
