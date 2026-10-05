@@ -191,6 +191,14 @@ tr:hover td { background:var(--row-hover); }
         <span class="val" id="gpssum" style="color:var(--dim)">–</span>
       </div>
       <div class="row" style="margin-top:6px">
+        <label style="font-weight:600">📡 APRS</label>
+        <button id="aprsrx">RX</button>
+        <select id="aprsbeac" style="width:auto"></select>
+        <button id="aprsis">IS</button>
+        <button id="aprsnow" data-i18n-title="aprsNowTT">📤</button>
+        <span class="val" id="aprscount" style="color:var(--dim);min-width:24px;text-align:right">0</span>
+      </div>
+      <div class="row" style="margin-top:6px">
         <label data-i18n="panelLbl">หน้าจอ</label>
         <button id="pan-dim" data-i18n-title="ttPanDim">🔅 <span data-i18n="panelDim">ไฟหรี่</span></button>
         <button id="pan-off" data-i18n-title="ttPanOff">🌑 <span data-i18n="panelOff">ปิดจอ</span></button>
@@ -305,6 +313,7 @@ const STRINGS = {
     tuneHint: 'กดเพื่อตั้งความถี่',
     signal: 'สัญญาณ', smeterTT: 'มิเตอร์ความแรงสัญญาณ (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
+    aprsNowTT: 'ส่ง beacon เดี๋ยวนี้',
     listenOn: '🔊 ฟัง', listenOff: '🔇 ฟัง', compat: ' (compat)',
     devOn: '🔈 เครื่อง', devOff: '🔇 เครื่อง',
     connFail: '○ เว็บไม่ตอบ', connOff: '○ ไม่เชื่อมต่อ ', tuned: 'จูน → ', reset: ' · ดับเบิลคลิกรีเซ็ต',
@@ -341,6 +350,7 @@ const STRINGS = {
     tuneHint: 'Click to set frequency',
     signal: 'Signal', smeterTT: 'Signal strength meter (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
+    aprsNowTT: 'Send beacon now',
     listenOn: '🔊 Listen', listenOff: '🔇 Listen', compat: ' (compat)',
     devOn: '🔈 Device', devOff: '🔇 Device',
     connFail: '○ no response', connOff: '○ offline ', tuned: 'Tuned → ', reset: ' · dbl-click reset',
@@ -488,6 +498,10 @@ function renderState(s) {
   $('mem').textContent = s.mem.toFixed(0);
   $('bat').textContent = s.bat + (s.batCharging ? '⚡' : '');
   $('tgt').textContent = s.planes + '/' + s.ships;
+  $('aprsrx').className = s.aprsRx ? 'on' : '';
+  $('aprsis').className = s.aprsIs ? 'on' : '';
+  $('aprsbeac').value = String(s.aprsBeac);
+  $('aprscount').textContent = s.aprsCount;
   $('tcpu').textContent = s.cpuTemp ? s.cpuTemp.toFixed(0) : '–';
   $('tgpu').textContent = s.gpuTemp ? s.gpuTemp.toFixed(0) : '–';
   $('tddr').textContent = s.ddrTemp ? s.ddrTemp.toFixed(0) : '–';
@@ -551,6 +565,16 @@ function updateGPS(g) {
     '<tr><td style="color:var(--dim);padding:3px 8px 3px 0;white-space:nowrap">' + r[0] +
     '</td><td style="text-align:right;padding:3px 0;font-weight:600">' + r[1] + '</td></tr>').join('');
 }
+// ---- APRS: System-card controls ----
+(function initAprsCtl() {
+  const beac = $('aprsbeac');
+  const names = ['off', '1m', '2m', '5m', '10m', '30m', 'smart'];
+  names.forEach((n, i) => { const o = document.createElement('option'); o.value = i; o.textContent = n; beac.appendChild(o); });
+  beac.onchange = () => api('/api/cmd', { cmd: 'aprs', name: 'beacon', v: +beac.value }).catch(showErr);
+  $('aprsrx').onclick = () => api('/api/cmd', { cmd: 'aprs', name: 'rx', v: $('aprsrx').classList.contains('on') ? 0 : 1 }).catch(showErr);
+  $('aprsis').onclick = () => api('/api/cmd', { cmd: 'aprs', name: 'is', v: $('aprsis').classList.contains('on') ? 0 : 1 }).catch(showErr);
+  $('aprsnow').onclick = () => api('/api/cmd', { cmd: 'aprs', name: 'now', v: 0 }).catch(showErr);
+})();
 $('gpsrow').onclick = () => { $('gpsmodal').style.display = 'flex'; };
 $('gpsclose').onclick = () => { $('gpsmodal').style.display = 'none'; };
 $('gpsmodal').addEventListener('click', (e) => {
@@ -579,7 +603,7 @@ async function poll() {
     } else {
       const rows = await api('/api/targets');
       $('tgtb').innerHTML = rows.map(r =>
-        `<tr><td>${r.kind==='plane'?'✈':'⛵'}</td><td>${esc(r.call)}</td><td>${r.hasPos?r.lat.toFixed(4)+', '+r.lon.toFixed(4):'—'}</td><td>${r.kind==='plane'?r.altFt+' ft':r.speed.toFixed(1)+' kt'}</td><td>${r.track}°</td><td>${r.ageSec.toFixed(0)}s</td></tr>`).join('');
+        `<tr><td>${r.kind==='plane'?'✈':r.kind==='aprs'?'◆':'⛵'}</td><td>${esc(r.call)}</td><td>${r.hasPos?r.lat.toFixed(4)+', '+r.lon.toFixed(4):'—'}</td><td>${r.kind==='plane'?r.altFt+' ft':r.speed.toFixed(1)+' kt'}</td><td>${r.track}°</td><td>${r.ageSec.toFixed(0)}s</td></tr>`).join('');
     }
   } catch (e) {}
 }
@@ -1256,7 +1280,7 @@ async function mapPoll() {
     seen[t.kind + t.id] = true;
     const ll = [t.lat, t.lon];
     let m = markers[t.kind + t.id];
-    const col = t.kind === 'plane' ? '#ffd166' : '#35e08a';
+    const col = t.kind === 'plane' ? '#ffd166' : t.kind === 'aprs' ? '#ff5aff' : '#35e08a';
     if (!t.hasPos) { if (m) { map.removeLayer(m); delete markers[t.kind + t.id]; } continue; }
     if (!m) {
       m = markers[t.kind + t.id] = L.circleMarker(ll, { radius: 5, color: col, weight: 2, fillColor: col, fillOpacity: 0.5 }).addTo(map);

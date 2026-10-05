@@ -16,6 +16,7 @@ import (
 
 	"sdr35/internal/ais"
 	"sdr35/internal/aprs"
+	"sdr35/internal/audio"
 	"sdr35/internal/dsp"
 	"sdr35/internal/i18n"
 	"sdr35/internal/rtltcp"
@@ -138,6 +139,9 @@ const (
 // = AGC); it is sent as tenths-of-dB (the protocol path that needs no gain
 // table index at all — same recipe the user's rtl-sdr-web-monitor uses).
 func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out AudioSink) *Radio {
+	if o, ok := out.(*audio.Output); ok && o == nil {
+		out = nil // typed-nil must not read as a live sink
+	}
 	// Sanitize the startup frequency (a hand-edited or corrupted config
 	// must not reach the dongle).
 	if freqHz < 500_000 {
@@ -248,6 +252,9 @@ func (r *Radio) SetCaptureRate(hz int) {
 // instead of connecting anywhere (display/audio development without a
 // dongle).
 func NewDemo(mode dsp.Mode, out AudioSink) *Radio {
+	if o, ok := out.(*audio.Output); ok && o == nil {
+		out = nil
+	}
 	r := New(i18n.T("demo_host"), 145_500_000, mode, -1, out)
 	r.demo = true
 	return r

@@ -86,6 +86,9 @@ type Server struct {
 	wfGet    func() (float64, float64)
 	rxPos    func() (float64, float64)
 	gpsGet   func() GPSInfo
+	aprsGet  func() []APRSStation
+	aprsCmd  func(action string, v int) string
+	aprsStat func() (rx bool, beac int, isOn bool, count int)
 	panelSet func(state int)
 	panelGet func() int
 	wfSet    func(min, max float64)
@@ -146,6 +149,40 @@ type GPSInfo struct {
 
 // SetGPSProvider wires the live GPS snapshot for the System card and
 // the GPS detail window.
+// APRSStation is one decoded APRS station for the web map/table.
+type APRSStation struct {
+	Call    string  `json:"call"`
+	Lat     float64 `json:"lat"`
+	Lon     float64 `json:"lon"`
+	SpeedKt float64 `json:"speedKt"`
+	Course  float64 `json:"course"`
+	AltFt   int     `json:"altFt"`
+	Comment string  `json:"comment"`
+	AgeSec  float64 `json:"ageSec"`
+}
+
+// SetAPRSProvider hands the web server the live APRS station list.
+func (s *Server) SetAPRSProvider(f func() []APRSStation) {
+	s.mu.Lock()
+	s.aprsGet = f
+	s.mu.Unlock()
+}
+
+// SetAPRSState hands the web server the live APRS config snapshot.
+func (s *Server) SetAPRSState(f func() (rx bool, beac int, isOn bool, count int)) {
+	s.mu.Lock()
+	s.aprsStat = f
+	s.mu.Unlock()
+}
+
+// SetAPRSCmd hands the web server the APRS control entry point
+// (action: "rx"/"beacon"/"is"/"now"; v is the mode index or 0/1).
+func (s *Server) SetAPRSCmd(f func(action string, v int) string) {
+	s.mu.Lock()
+	s.aprsCmd = f
+	s.mu.Unlock()
+}
+
 func (s *Server) SetGPSProvider(f func() GPSInfo) {
 	s.mu.Lock()
 	s.gpsGet = f
@@ -300,6 +337,10 @@ type state struct {
 	AGC       bool      `json:"agc"`
 	Vol       float64   `json:"vol"`
 	SqlDb     float64   `json:"sqlDb"`
+	AprsRx    bool      `json:"aprsRx"`
+	AprsBeac  int       `json:"aprsBeac"` // 0 off, 1..5 minutes idx, 6 smart
+	AprsIS    bool      `json:"aprsIs"`
+	AprsCount int       `json:"aprsCount"`
 	BwHz      float64   `json:"bwHz"`
 	Bws       []float64 `json:"bws"`
 	Ppm       int       `json:"ppm"`
@@ -378,6 +419,13 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		RxLat: s.rx[0], RxLon: s.rx[1],
 		CPUTemp: sens.CPUTemp, GPUTemp: sens.GPUTemp, DDRTemp: sens.DDRTemp,
 		Updating: s.updateMsg(),
+	}
+	s.mu.Lock()
+	stat := s.aprsStat
+	s.mu.Unlock()
+	if stat != nil {
+		rx, beac, isOn, count := stat()
+		st.AprsRx, st.AprsBeac, st.AprsIS, st.AprsCount = rx, beac, isOn, count
 	}
 	for _, m := range dsp.ModeList {
 		st.Modes = append(st.Modes, m.Name)
@@ -532,6 +580,19 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 		if c.On != nil {
 			radio.SetLocalMute(*c.On)
 		}
+	case "aprs":
+		s.mu.Lock()
+		fn := s.aprsCmd
+		s.mu.Unlock()
+		if fn == nil {
+			writeJSON(w, map[string]any{"ok": false, "err": "aprs not wired"})
+			return
+		}
+		action := c.Name
+		v := int(c.V)
+		msg := fn(action, v)
+		writeJSON(w, map[string]any{"ok": true, "msg": msg})
+		return
 	case "panel":
 		// 0 = screen on, 1 = backlight dim, 2 = screen off (same states
 		// as the device power key).
@@ -615,6 +676,14 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 			call = sh.MMSI
 		}
 		out = append(out, target{Kind: "ship", ID: sh.MMSI, Call: call, Lat: sh.Lat, Lon: sh.Lon, HasPos: sh.HasPos, Speed: sh.SogKt, Track: int(sh.CogDeg), AgeSec: now.Sub(sh.LastSeen).Seconds()})
+	}
+	s.mu.Lock()
+	get := s.aprsGet
+	s.mu.Unlock()
+	if get != nil {
+		for _, st := range get() {
+			out = append(out, target{Kind: "aprs", ID: st.Call, Call: st.Call, Lat: st.Lat, Lon: st.Lon, HasPos: true, Speed: st.SpeedKt, Track: int(st.Course), AltFt: st.AltFt, AgeSec: st.AgeSec})
+		}
 	}
 	writeJSON(w, out)
 }

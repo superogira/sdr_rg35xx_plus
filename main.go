@@ -1262,6 +1262,48 @@ func main() {
 		capturedMsg, capturedAt = txt, time.Now()
 		msgMu.Unlock()
 	}
+
+	webSrv.SetAPRSProvider(func() []web.APRSStation {
+		var out []web.APRSStation
+		if os.Getenv("SDR_ADSB_DEMO") != "" {
+			now := time.Now()
+			out = append(out,
+				web.APRSStation{Call: "HS0ABC-9", Lat: 13.62, Lon: 100.59, SpeedKt: 32, Course: 90, Comment: "demo car", AgeSec: now.Sub(now.Add(-4 * time.Minute)).Seconds()},
+				web.APRSStation{Call: "E23AQ", Lat: 13.55, Lon: 100.50, Comment: "demo home", AgeSec: 120})
+		}
+		for _, st := range aprsStore.All() {
+			out = append(out, web.APRSStation{Call: st.Call, Lat: st.Lat, Lon: st.Lon,
+				SpeedKt: st.SpeedKt, Course: st.CourseDeg, AltFt: st.AltFt,
+				Comment: st.Comment, AgeSec: time.Since(st.LastHeard).Seconds()})
+		}
+		return out
+	})
+	webSrv.SetAPRSState(func() (bool, int, bool, int) {
+		return r.APRSEnabled(), aprsBeaconIdx, aprsISOn, aprsStore.Count()
+	})
+	webSrv.SetAPRSCmd(func(action string, v int) string {
+		switch action {
+		case "rx":
+			on := v != 0
+			r.SetAPRSEnabled(on)
+			cfg["aprs"] = map[bool]string{true: "on", false: "off"}[on]
+			saveNow()
+		case "beacon":
+			if v >= 0 && v <= 6 {
+				aprsBeaconIdx = v
+				cfg["aprsbeacon"] = []string{"off", "1", "2", "5", "10", "30", "smart"}[v]
+				saveNow()
+			}
+		case "is":
+			aprsISOn = v != 0
+			cfg["aprsis"] = map[bool]string{true: "on", false: "off"}[aprsISOn]
+			saveNow()
+		case "now":
+			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, aprsPre, aprsISOn, aprsIServer, &aprsLastBeacon, &aprsLastCourse, setMsg)
+			return i18n.T("aprs_sent")
+		}
+		return ""
+	})
 	// Web-triggered OTA uses the same single-flight updater as the menu.
 	webSrv.SetUpdater(upd.Msg, func() { runUpdate(upd, updateBase, true, saveNow) })
 	// Web WEFAX save: same file, same folder as the device's Y-save.
