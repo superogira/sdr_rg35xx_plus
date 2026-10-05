@@ -258,7 +258,18 @@ type Chain struct {
 	rtty     *RTTYDecoder  // RTTY monitor (fed alongside the FT8 branch)
 	wefax    *WefaxDecoder // WEFAX monitor (same 8 kHz branch)
 	cw       *CWDecoder    // Morse monitor (same branch)
-	aprs     APRSMonitor   // APRS AFSK monitor (same branch)
+	aprs     APRSMonitor   // APRS AFSK monitor (own FM branch)
+	// APRS FM branch state (see feedAPRS)
+	aprsOff     float64 // channel offset from LO, Hz (0 = at LO)
+	aprsNco     float64
+	aprsDecTaps []float64
+	aprsDecHist []complex128
+	aprsDecD    int
+	aprsCScr    []complex128
+	aprsPrev    complex128
+	aprsAudTaps []float64
+	aprsAudHist []float64
+	aprsAud     []float64
 
 	// Squelch + metering state.
 	sqlOpen  bool
@@ -552,6 +563,9 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 	if c.aisA != nil || c.aisB != nil {
 		c.feedAIS(c.fif2)
 	}
+	if c.aprs != nil {
+		c.feedAPRS()
+	}
 
 	// Passband tuning: rotate at the FULL IQ rate (before IF2
 	// decimation) so the demodulation window is limited only by the
@@ -580,7 +594,7 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 	// FT8/RTTY monitor: the dedicated branch below feeds the detectors
 	// in every mode; the SSB-8k path keeps its in-processSSB feed
 	// (identical band, avoids running the branch twice).
-	if (c.ft8 != nil || c.rtty != nil || c.wefax != nil || c.cw != nil || c.aprs != nil) && !(c.mode.SSB && c.outRate == SSBRate) {
+	if (c.ft8 != nil || c.rtty != nil || c.wefax != nil || c.cw != nil) && !(c.mode.SSB && c.outRate == SSBRate) {
 		c.feedMonitors()
 	}
 
@@ -746,13 +760,88 @@ func (c *Chain) feedMonitors() {
 	if c.cw != nil {
 		c.cw.Feed(buf)
 	}
-	if c.aprs != nil {
-		c.aprs.Feed(buf)
-	}
 }
 
-// SetAPRSMonitor attaches (nil detaches) the APRS AFSK monitor.
-func (c *Chain) SetAPRSMonitor(m APRSMonitor) { c.aprs = m }
+// SetAPRSMonitor attaches (nil detaches) the APRS AFSK monitor and
+// (re)builds its FM branch taps for the current IF2 rate.
+func (c *Chain) SetAPRSMonitor(m APRSMonitor) {
+	c.aprs = m
+	c.aprsDecD = 0
+	if m == nil {
+		return
+	}
+	// Complex decimation to 32 ks/s (must divide IF2Rate): carries the
+	// FM carrier ±deviation; 12 kHz cutoff covers ±5 kHz deviation with
+	// audio sidebands.
+	for _, d := range []int{IF2Rate / 32000, IF2Rate / 16000} {
+		if d >= 1 && IF2Rate%d == 0 {
+			c.aprsDecD = d
+			break
+		}
+	}
+	if c.aprsDecD < 1 {
+		c.aprs = nil // unsupported rate: branch stays silent
+		return
+	}
+	c.aprsDecTaps = DesignLowpass(63, 12000, float64(IF2Rate))
+	c.aprsDecHist = nil
+	// Audio anti-alias before the ×4 to 8k: 3.4 kHz cutoff at 32k.
+	c.aprsAudTaps = DesignLowpass(31, 3400, 32000)
+	c.aprsAudHist = nil
+}
+
+// SetAPRSOffset places the APRS channel at off Hz from the LO inside
+// the IF2 window, so an already-tuned receiver need not retune.
+func (c *Chain) SetAPRSOffset(off float64) { c.aprsOff = off }
+
+// feedAPRS FM-demodulates the APRS channel straight off the unrotated
+// IF2: NCO to baseband, complex decimate to 32k, phase discriminator,
+// audio lowpass + ×4 to the demodulator's 8k. APRS on VHF is FM — the
+// SSB-style monitor branch (real part of a bandpassed IQ) can never
+// carry its AFSK, which is why this branch exists.
+func (c *Chain) feedAPRS() {
+	if c.aprsDecD < 1 || len(c.fif2) == 0 {
+		return
+	}
+	shifted := c.aprsCScr[:0]
+	incr := -2 * math.Pi * c.aprsOff / float64(IF2Rate)
+	for _, z := range c.fif2 {
+		w := c.aprsNco
+		cw, sw := math.Cos(w), math.Sin(w)
+		shifted = append(shifted, complex(real(z)*cw-imag(z)*sw, real(z)*sw+imag(z)*cw))
+		c.aprsNco += incr
+		if c.aprsNco > 2*math.Pi {
+			c.aprsNco -= 2 * math.Pi
+		} else if c.aprsNco < -2*math.Pi {
+			c.aprsNco += 2 * math.Pi
+		}
+	}
+	c.aprsCScr = shifted
+	dec := make([]complex128, 0, len(shifted)/c.aprsDecD+2)
+	complexFIRDecim(c.aprsDecTaps, &c.aprsDecHist, c.aprsDecD, shifted, &dec)
+	dRate := float64(IF2Rate) / float64(c.aprsDecD)
+	aud := c.aprsAud[:0]
+	for _, z := range dec {
+		if c.aprsPrev != 0 {
+			prod := z * complex(real(c.aprsPrev), -imag(c.aprsPrev))
+			f := math.Atan2(imag(prod), real(prod)) * dRate / (2 * math.Pi)
+			aud = append(aud, f/1000)
+		}
+		c.aprsPrev = z
+	}
+	c.aprsAud = aud
+	if dRate == 32000 {
+		out := make([]float64, 0, len(aud)/4+2)
+		realFIRDecim(c.aprsAudTaps, &c.aprsAudHist, 4, aud, &out)
+		c.aprs.Feed(out)
+	} else {
+		out := make([]float64, 0, len(aud)/2+2)
+		for i := 0; i+1 < len(aud); i += 2 {
+			out = append(out, (aud[i]+aud[i+1])/2)
+		}
+		c.aprs.Feed(out)
+	}
+}
 
 // APRSMonitor consumes monitor-branch audio at 8 kHz
 // (internal/aprs.Demodulator).

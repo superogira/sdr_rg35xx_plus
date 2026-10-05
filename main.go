@@ -1042,6 +1042,7 @@ func main() {
 		}
 		aisLogMu.Unlock()
 	})
+	r.SetAPRSFreq(aprsFreq)
 	if cfg["aprs"] == "on" {
 		r.SetAPRSEnabled(true)
 	}
@@ -1997,9 +1998,7 @@ func main() {
 			r.SetAPRSEnabled(on)
 			cfg["aprs"] = map[bool]string{true: "on", false: "off"}[on]
 			saveNow()
-			if on && r.LO() != aprsFreq {
-				r.SetFreq(aprsFreq)
-			}
+			r.SetAPRSFreq(aprsFreq)
 		case menuAPRSFreq:
 			hostText, kbTarget = fmt.Sprintf("%.4f", float64(aprsFreq)/1e6), "aprsfreq"
 			hostKbR, hostKbC = 0, 0
@@ -2700,9 +2699,7 @@ func main() {
 						aprsFreq = int64(v * 1e6)
 						cfg["aprsfreq"] = fmt.Sprintf("%.4f", float64(aprsFreq)/1e6)
 						saveNow()
-						if r.APRSEnabled() {
-							r.SetFreq(aprsFreq)
-						}
+						r.SetAPRSFreq(aprsFreq)
 					}
 					hostText = ""
 					uiMode, menuPage, menuSel = uiMenu, pageAPRS, menuRow(pageAPRS, menuAPRSFreq)

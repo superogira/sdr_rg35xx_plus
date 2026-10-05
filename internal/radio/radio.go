@@ -104,6 +104,8 @@ type Radio struct {
 	aisPay     func(payload []byte, ch int, levelDb float64)
 	aprsDem    *aprs.Demodulator
 	aprsRFOn   bool
+	aprsFreqHz int64     // channel centre the RX branch tracks
+	aprsOff    float64   // current offset applied to the chain
 	beacon     []float64 // pending beacon audio at 48k (nil = idle)
 	beaconPos  int
 	beaconOn   bool // true while audio is actually flowing out
@@ -265,6 +267,7 @@ func (r *Radio) Run(ctx context.Context) {
 		r.chain.SetVolume(r.vol)
 		if r.aprsRFOn {
 			r.chain.SetAPRSMonitor(r.aprsDem)
+			r.chain.SetAPRSOffset(r.aprsOff)
 		}
 		r.mu.Unlock()
 		resumeFade := 0
@@ -408,6 +411,7 @@ func (r *Radio) session(ctx context.Context) error {
 		}
 		if r.aprsRFOn {
 			chain.SetAPRSMonitor(r.aprsDem)
+			chain.SetAPRSOffset(r.aprsOff)
 		}
 		r.chain = chain
 		r.state = stateStreaming
@@ -674,6 +678,7 @@ func (r *Radio) SetFreq(hz int64) {
 	if hz < 500_000 {
 		hz = 500_000 // RTL-SDR Blog V4 lower edge (HF direct sampling)
 	}
+	defer r.syncAPRSOffset()
 	if hz > 1_766_000_000 {
 		hz = 1_766_000_000
 	}
@@ -859,6 +864,7 @@ func (r *Radio) SetMode(mode dsp.Mode) string {
 	}
 	if r.aprsRFOn {
 		r.chain.SetAPRSMonitor(r.aprsDem)
+		r.chain.SetAPRSOffset(r.aprsOff)
 	}
 	// The fresh chain starts at offset 0 — restore the passband offset
 	// so switching modes mid-scroll keeps listening where the dial says.
@@ -1185,11 +1191,51 @@ func (r *Radio) SetAPRSEnabled(on bool) {
 	if chain != nil {
 		if on {
 			chain.SetAPRSMonitor(r.aprsDem)
+			r.syncAPRSOffset()
 		} else {
 			chain.SetAPRSMonitor(nil)
 		}
 	}
 	fmt.Fprintf(os.Stderr, "radio: APRS %v"+string(rune(10)), on)
+}
+
+// SetAPRSFreq sets the channel centre the RX branch tracks; the
+// offset policy is re-evaluated immediately.
+func (r *Radio) SetAPRSFreq(hz int64) {
+	r.mu.Lock()
+	r.aprsFreqHz = hz
+	r.mu.Unlock()
+	r.syncAPRSOffset()
+}
+
+// syncAPRSOffset keeps the APRS channel inside the receive window
+// WITHOUT retuning when possible: if the channel sits within the IF2
+// span of the current LO, the FM branch simply mixes to it (the user
+// keeps listening wherever they are); only when it falls outside does
+// the LO move to the channel.
+func (r *Radio) syncAPRSOffset() {
+	r.mu.Lock()
+	if !r.aprsRFOn || r.chain == nil || r.aprsFreqHz == 0 {
+		r.mu.Unlock()
+		return
+	}
+	off := r.aprsFreqHz - r.loHz
+	window := int64(float64(dsp.IF2Rate) * 0.45)
+	chain := r.chain
+	r.mu.Unlock()
+	if abs64(off) <= window {
+		r.mu.Lock()
+		r.aprsOff = float64(off)
+		r.mu.Unlock()
+		chain.SetAPRSOffset(float64(off))
+		return
+	}
+	// Outside the window: retune the LO to the channel.
+	r.SetFreq(r.aprsFreqHz)
+	r.mu.Lock()
+	r.aprsOff = 0
+	r.mu.Unlock()
+	chain.SetAPRSOffset(0)
 }
 
 // PlayBeacon queues AFSK audio (48 kHz) to play out of the speaker in
@@ -1494,6 +1540,7 @@ func (r *Radio) SetBandwidth(bw float64) {
 	r.chain = dsp.NewChain(m, r.tap, r.rawTap)
 	if r.aprsRFOn {
 		r.chain.SetAPRSMonitor(r.aprsDem)
+		r.chain.SetAPRSOffset(r.aprsOff)
 	}
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
