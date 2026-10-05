@@ -70,7 +70,8 @@ type RadarSel struct {
 type RadarBlip struct {
 	Vessel       bool    // true = ship (AIS), false = aircraft (ADS-B)
 	AtoN         bool    // AIS type 6/21 static aid: yellow rhombus
-	Aprs         bool    // APRS station (RF decode): magenta diamond
+	Aprs         bool    // APRS station (RF decode)
+	Sym          string  // APRS sender symbol char (drawn as the icon)
 	MercX, MercY float64 // Web-Mercator world pixels (see MercView)
 	Call         string
 	ICAO         string
@@ -104,6 +105,12 @@ type RadarBlip struct {
 
 // Radar label display modes (A cycles them).
 const (
+	// Target visibility bitmask for DrawRadar's targets argument.
+	TargetPlane = 1
+	TargetShip  = 2
+	TargetAPRS  = 4
+	TargetAll   = TargetPlane | TargetShip | TargetAPRS
+
 	LabelFlagText = 0 // flag + name/reg text (normal)
 	LabelFlagOnly = 1 // flag only, text hidden
 	LabelNone     = 2 // no flag, no text — bare targets
@@ -111,7 +118,7 @@ const (
 
 // DrawRadar renders the ADS-B radar. Targets beyond rangeKm are not
 // drawn at all — they appear when the user zooms out to their range.
-func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string, labelMode int, panX, panY int, mapOffX, mapOffY int, battPct int, battCharging bool, sel *RadarSel) int {
+func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connected bool, rxLat, rxLon float64, cpuPct float64, basemap *image.RGBA, mapName, mapAttr string, merc *MercView, flagDir string, targets int, labelMode int, panX, panY int, mapOffX, mapOffY int, battPct int, battCharging bool, sel *RadarSel) int {
 	// Phosphor palette.
 	bg := color.RGBA{2, 10, 4, 255}
 	dim := color.RGBA{0, 110, 55, 255}
@@ -276,9 +283,19 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 				continue
 			}
 		}
-		if b.Vessel {
+		if b.Aprs {
+			if targets&TargetAPRS == 0 {
+				continue
+			}
+		} else if b.Vessel {
+			if targets&TargetShip == 0 {
+				continue
+			}
 			drawnShips++
 		} else {
+			if targets&TargetPlane == 0 {
+				continue
+			}
 			drawnPlanes++
 		}
 		drawnList = append(drawnList, b)
@@ -330,25 +347,44 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 		}
 
 		if b.Aprs {
-			// APRS station: magenta hollow diamond + callsign. Never
-			// reads as traffic (aircraft) or AIS shipping.
+			// APRS station: the sender's own symbol char in magenta
+			// (the same convention APRS viewers use), never readable
+			// as aircraft or AIS shipping.
 			col := color.RGBA{255, 90, 255, 255}
-			for _, d := range [][2]int{{-4, 0}, {-3, -1}, {-3, 1}, {-2, -2}, {-2, 2}, {-1, -3}, {-1, 3}, {0, -4}, {0, 4}, {1, -3}, {1, 3}, {2, -2}, {2, 2}, {3, -1}, {3, 1}, {4, 0}} {
-				u.setPixel(x+d[0], y+d[1], col)
+			sym := b.Sym
+			if sym == "" {
+				sym = "?"
 			}
+			sf := Face(15, true)
+			sw := sf.TextWidth(sym)
+			sf.DrawString(u.img, col, x-sw/2, y+6, sym)
 			if labelMode != LabelNone {
 				label := b.Call
-				tx := x + 6
-				if x > u.W-120 {
-					tx = x - 6 - tf.TextWidth(label)
+				var flag image.Image
+				fw := 0
+				if b.Country != "" {
+					flag = GetFlag(b.Country, flagDir)
+					if flag != nil {
+						fw = flag.Bounds().Dx() + 3
+					}
+				}
+				tx := x + 10
+				if x > u.W-130 {
+					tx = x - 10 - tf.TextWidth(label) - fw
+				}
+				if flag != nil && labelMode != LabelFlagOnly {
+					tx += fw
 				}
 				ty := y + 4
 				if y < 60 {
 					ty = y + 14
 				}
 				if labelMode == LabelFlagText {
-					u.fillBlend(tx-3, ty-11, tf.TextWidth(label)+6, 13, 0, 0, 0, 170)
+					u.fillBlend(tx-3-fw, ty-11, tf.TextWidth(label)+fw+6, 13, 0, 0, 0, 170)
 					tf.DrawString(u.img, color.RGBA{255, 190, 255, 255}, tx, ty, label)
+				}
+				if flag != nil && labelMode != LabelFlagText || (flag != nil && labelMode == LabelFlagText) {
+					drawImage(u.img, flag, tx-fw, ty-10)
 				}
 			}
 			continue

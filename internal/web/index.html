@@ -93,6 +93,9 @@ select, input { min-width:0; }
 .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:2px; color:var(--dim); margin:0 0 10px; }
 button.nudge { padding:2px 7px; font-size:11px; line-height:1.4; flex:0 0 auto; }
 .tgt { background:none; border:none; }
+.tgtlbl { background:rgba(0,0,0,.65); border:none; color:#dfe; font-size:11px; padding:1px 5px; border-radius:4px; }
+body.maponly header, body.maponly .card:not(:has(#pane-map)) { display:none !important; }
+body.maponly #map { height:calc(100vh - 120px); }
 .tgt svg { display:block; filter:drop-shadow(0 0 3px rgba(0,0,0,.85)); transition:transform .6s linear; }
 .freq { font-size:34px; font-variant-numeric:tabular-nums; color:var(--acc); cursor:pointer; }
 .freq small { font-size:14px; color:var(--dim); }
@@ -252,11 +255,24 @@ tr:hover td { background:var(--row-hover); }
         <button id="tab-ft8" class="on">FT8</button>
         <button id="tab-ais">AIS</button>
         <button id="tab-tgt" data-i18n="targets">Targets</button>
-        <button id="tab-map" data-i18n="map">Map</button>
+        <button id="tab-map" data-i18n="map">Map</button><button id="tab-aprs">APRS</button>
       </div>
       <div id="pane-map" hidden><div id="map" style="height:420px;border-radius:8px;background:#0b1410"></div>
+        <div class="row" style="margin-top:6px">
+          <button id="tgPlane">✈</button><button id="tgShip">⛵</button><button id="tgAprs">◆</button>
+          <button id="tgLabel" data-i18n-title="ttLabel">🏷+🚩</button>
+          <span style="flex:1"></span>
+          <button id="mapPop" data-i18n-title="ttMapPop">⛶</button>
+        </div>
         <div class="row" style="margin-top:6px"><label data-i18n="mlayer">ชั้นแผนที่</label><select id="mlayer"></select>
           <span class="val" id="mattr" style="color:var(--dim);font-size:11px"></span></div>
+      </div>
+      <div id="pane-aprs" hidden>
+        <div style="max-height:170px;overflow-y:auto"><table><thead><tr><th data-i18n="aprsSt">สถานี</th><th data-i18n="pos">พิกัด</th><th data-i18n="altspd">สูง/เร็ว</th><th data-i18n="age">อายุ</th></tr></thead><tbody id="aprsSt"></tbody></table></div>
+        <h3 style="margin:8px 0 4px" data-i18n="aprsRxH">ประวัติรับ</h3>
+        <div style="max-height:150px;overflow-y:auto"><table><tbody id="aprsRx"></tbody></table></div>
+        <h3 style="margin:8px 0 4px" data-i18n="aprsTxH">ประวัติส่ง</h3>
+        <div style="max-height:150px;overflow-y:auto"><table><tbody id="aprsTx"></tbody></table></div>
       </div>
       <div id="pane-ft8"><table><thead><tr><th data-i18n="time">เวลา</th><th>SNR</th><th>Hz</th><th data-i18n="msg">ข้อความ</th><th data-i18n="ctry">ประเทศ/ระยะ</th></tr></thead><tbody id="ft8b"></tbody></table></div>
       <div id="pane-ais" hidden><table><thead><tr><th data-i18n="time">เวลา</th><th>ch</th><th>dB</th><th data-i18n="msg">ข้อความ</th></tr></thead><tbody id="aisb"></tbody></table></div>
@@ -315,7 +331,7 @@ const STRINGS = {
     tuneHint: 'กดเพื่อตั้งความถี่',
     signal: 'สัญญาณ', smeterTT: 'มิเตอร์ความแรงสัญญาณ (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
-    aprsNowTT: 'ส่ง beacon เดี๋ยวนี้',
+    aprsNowTT: 'ส่ง beacon เดี๋ยวนี้', ttLabel: 'ป้ายชื่อ/ธง', ttMapPop: 'เปิดแผนที่แท็บใหม่', aprsSt: 'สถานี', aprsRxH: 'ประวัติรับ', aprsTxH: 'ประวัติส่ง',
     listenOn: '🔊 ฟัง', listenOff: '🔇 ฟัง', compat: ' (compat)',
     devOn: '🔈 เครื่อง', devOff: '🔇 เครื่อง',
     connFail: '○ เว็บไม่ตอบ', connOff: '○ ไม่เชื่อมต่อ ', tuned: 'จูน → ', reset: ' · ดับเบิลคลิกรีเซ็ต',
@@ -352,7 +368,7 @@ const STRINGS = {
     tuneHint: 'Click to set frequency',
     signal: 'Signal', smeterTT: 'Signal strength meter (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
-    aprsNowTT: 'Send beacon now',
+    aprsNowTT: 'Send beacon now', ttLabel: 'labels/flags', ttMapPop: 'open map in new tab', aprsSt: 'Stations', aprsRxH: 'Receive log', aprsTxH: 'Transmit log',
     listenOn: '🔊 Listen', listenOff: '🔇 Listen', compat: ' (compat)',
     devOn: '🔈 Device', devOff: '🔇 Device',
     connFail: '○ no response', connOff: '○ offline ', tuned: 'Tuned → ', reset: ' · dbl-click reset',
@@ -439,6 +455,7 @@ const cmd = c => api('/api/cmd', c).catch(e => showErr(STRINGS[lang][e.message] 
 
 function renderState(s) {
   st = s;
+  if (tab === 'map' && !map) initMap(s);
   if (!langPinned && s.lang && s.lang !== lang) applyLang(s.lang, false);
   $('conn').textContent = s.connected ? '● ' + s.host : STRINGS[lang].connOff + s.host;
   $('conn').className = s.connected ? 'on' : '';
@@ -605,7 +622,7 @@ async function poll() {
     } else {
       const rows = await api('/api/targets');
       $('tgtb').innerHTML = rows.map(r =>
-        `<tr><td>${r.kind==='plane'?'✈':r.kind==='aprs'?'◆':'⛵'}</td><td>${esc(r.call)}</td><td>${r.hasPos?r.lat.toFixed(4)+', '+r.lon.toFixed(4):'—'}</td><td>${r.kind==='plane'?r.altFt+' ft':r.speed.toFixed(1)+' kt'}</td><td>${r.track}°</td><td>${r.ageSec.toFixed(0)}s</td></tr>`).join('');
+        `<tr><td>${r.kind==='plane'?'✈':r.kind==='aprs'?'◆':'⛵'}</td><td>${flagImg(r.country)} ${esc(r.call)}</td><td>${r.hasPos?r.lat.toFixed(4)+', '+r.lon.toFixed(4):'—'}</td><td>${r.kind==='plane'?r.altFt+' ft':r.speed.toFixed(1)+' kt'}</td><td>${r.track}°</td><td>${r.ageSec.toFixed(0)}s</td></tr>`).join('');
     }
   } catch (e) {}
 }
@@ -713,14 +730,15 @@ $('wfxsave').onclick = () => api('/api/cmd', {cmd:'wefaxsave'}).then(d => {
   const f = (d.path || '').split('\u005c').pop().split('/').pop();
   showErr(STRINGS[lang].wefax_saved + f);
 }).catch(e => showErr(STRINGS[lang][e.message] || e.message));
-for (const t of ['ft8','ais','tgt','map']) {
+for (const t of ['ft8','ais','tgt','map','aprs']) {
   $('tab-'+t).onclick = () => {
     tab = t;
-    for (const o of ['ft8','ais','tgt','map']) {
+    for (const o of ['ft8','ais','tgt','map','aprs']) {
       $('tab-'+o).className = o===t ? 'on' : '';
       $('pane-'+o).hidden = o!==t;
     }
     if (t === 'map' && st) initMap(st);
+    if (t === 'aprs') aprsPoll();
     if (t === 'map' && map) setTimeout(() => map.invalidateSize(), 60);
     poll();
   };
@@ -1301,23 +1319,71 @@ function setTiles() {
   mLayer = L.tileLayer(`/tiles/${layerIdx}/{z}/{x}/{y}`, { maxZoom: 18, attribution: layers[layerIdx].attr }).addTo(map);
   $('mattr').textContent = layers[layerIdx].attr;
 }
+const flagImg = cc => cc ? `<img src="/api/flag/${cc}" width="16" height="11" style="vertical-align:-1px" alt="${cc}">` : '';
+let showMask = +(localStorage.getItem('sdr-mask') ?? 7);
+let labelMode = +(localStorage.getItem('sdr-label') ?? 0); // 0 flag+text, 1 flag, 2 none, 3 text
+const kindBit = { plane: 1, ship: 2, aprs: 4 };
+function syncToggles() {
+  $('tgPlane').className = showMask & 1 ? 'on' : '';
+  $('tgShip').className = showMask & 2 ? 'on' : '';
+  $('tgAprs').className = showMask & 4 ? 'on' : '';
+  $('tgLabel').textContent = ['🏷+', '🚩', '∅', ''][labelMode];
+}
+for (const [id, bit] of [['tgPlane', 1], ['tgShip', 2], ['tgAprs', 4]]) {
+  $(id).onclick = () => { showMask ^= bit; localStorage.setItem('sdr-mask', showMask); syncToggles(); mapPoll(); };
+}
+$('tgLabel').onclick = () => { labelMode = (labelMode + 1) % 4; localStorage.setItem('sdr-label', labelMode); syncToggles(); mapPoll(); };
+$('mapPop').onclick = () => window.open(location.pathname + '?map=1', '_blank');
+syncToggles();
+if (new URLSearchParams(location.search).get('map') === '1') {
+  document.body.classList.add('maponly');
+  // show only the map pane + its controls
+  document.querySelectorAll('#tabs button').forEach(b => b.style.display = b.id === 'tab-map' ? '' : 'none');
+  document.querySelectorAll('main .card').forEach(c => { if (!c.querySelector('#pane-map')) c.style.display = 'none'; });
+  document.querySelectorAll('#pane-map ~ *').forEach(e => e.style.display = 'none');
+  $('tab-map').click();
+}
 async function mapPoll() {
   if (!map) return;
   const rows = await api('/api/targets');
   const seen = {};
   for (const t of rows) {
-    seen[t.kind + t.id] = true;
+    const key = t.kind + t.id;
+    if (!(showMask & kindBit[t.kind])) {
+      seen[key] = true; // suppress without cleanup below
+      if (markers[key]) { map.removeLayer(markers[key]); delete markers[key]; }
+      if (trailGroups[key]) { trailGroups[key].clearLayers(); delete trailGroups[key]; }
+      continue;
+    }
+    seen[key] = true;
     const ll = [t.lat, t.lon];
     let m = markers[t.kind + t.id];
     const col = t.kind === 'plane' ? altColor(t.altFt) : t.kind === 'aprs' ? '#ff5aff' : '#35e08a';
     if (!t.hasPos) { if (m) { map.removeLayer(m); delete markers[t.kind + t.id]; } continue; }
     if (!m) {
-      m = markers[t.kind + t.id] = L.marker(ll, {
+      m = markers[key] = L.marker(ll, {
         icon: L.divIcon({ className: 'tgt', html: ICONS[t.kind] || ICONS.aprs, iconSize: [26, 26], iconAnchor: [13, 13] }),
       }).addTo(map);
-      m.bindTooltip(t.call, { direction: 'top' });
+      m.bindTooltip('', { direction: 'top', permanent: true, className: 'tgtlbl', opacity: .9 });
+      m.on('click', () => {
+        const rows = [
+          `<b>${flagImg(t.country)} ${esc(t.call)}</b>`,
+          `${t.lat.toFixed(4)}, ${t.lon.toFixed(4)}`,
+        ];
+        if (t.kind === 'plane') rows.push(`${t.altFt} ft · ${t.speed.toFixed(0)} kt · ${t.track}°`);
+        if (t.kind === 'ship') rows.push(`${t.speed.toFixed(1)} kt · ${t.track}°`);
+        if (t.kind === 'aprs' && t.comment) rows.push(esc(t.comment));
+        rows.push(`${t.ageSec.toFixed(0)}s`);
+        m.bindPopup(rows.join('<br>')).openPopup();
+      });
     } else {
       m.setLatLng(ll);
+    }
+    // Label modes: flag+text / flag / none / text (like the handheld)
+    const tip = m.getTooltip();
+    if (tip) {
+      if (labelMode === 2) tip.setContent('');
+      else tip.setContent((labelMode !== 3 ? flagImg(t.country) + ' ' : '') + (labelMode !== 1 ? esc(t.call) : ''));
     }
     const el = m.getElement();
     if (el) {
@@ -1327,7 +1393,6 @@ async function mapPoll() {
     }
     // Flown path: altitude-coloured breadcrumbs, fading with age —
     // the same convention as the handheld radar.
-    const key = t.kind + t.id;
     if (t.kind === 'plane' && t.trail && t.trail.length) {
       let g = trailGroups[key];
       if (!g) { g = trailGroups[key] = L.layerGroup().addTo(map); }
@@ -1393,6 +1458,17 @@ document.querySelectorAll('input[type=range]').forEach(sl => {
     });
   }
 });
+async function aprsPoll() {
+  try {
+    const d = await api('/api/aprslog');
+    const stRow = s2 => `<tr><td>${flagImg(s2.country)} ${s2.sym ? '<span style="color:#ff5aff">' + esc(s2.sym) + '</span> ' : ''}${esc(s2.call)}</td><td>${s2.lat.toFixed(3)},${s2.lon.toFixed(3)}</td><td>${s2.altFt ? s2.altFt + 'ft ' : ''}${s2.speedKt ? s2.speedKt.toFixed(0) + 'kt' : ''}</td><td>${s2.ageSec < 60 ? s2.ageSec.toFixed(0) + 's' : (s2.ageSec / 60).toFixed(0) + 'm'}</td></tr>`;
+    $('aprsSt').innerHTML = (d.stations || []).map(stRow).join('') || '<tr><td colspan=4>· · ·</td></tr>';
+    const logRow = r => `<tr><td style="color:var(--dim)">${new Date(r.at * 1000).toLocaleTimeString()}</td><td>${flagImg(r.country || '')} ${esc(r.call)}</td><td>${esc(r.sym || '')} ${esc(r.pos)}</td><td style="color:var(--dim)">${esc((r.comment || '').slice(0, 24))}</td><td>${r.via}</td></tr>`;
+    $('aprsRx').innerHTML = (d.rx || []).slice(0, 40).map(logRow).join('') || '<tr><td>· · ·</td></tr>';
+    $('aprsTx').innerHTML = (d.tx || []).slice(0, 40).map(logRow).join('') || '<tr><td>· · ·</td></tr>';
+  } catch (e) {}
+}
+setInterval(aprsPoll, 5000);
 poll(); setInterval(poll, 1500);
 </script>
 </body>

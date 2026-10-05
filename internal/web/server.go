@@ -23,10 +23,12 @@ import (
 	"sdr35/internal/adsb"
 	"sdr35/internal/ais"
 	"sdr35/internal/dsp"
+	"sdr35/internal/geo"
 	"sdr35/internal/i18n"
 	"sdr35/internal/osm"
 	"sdr35/internal/radio"
 	"sdr35/internal/sysinfo"
+	"sdr35/internal/ui"
 )
 
 //go:embed index.html
@@ -90,6 +92,7 @@ type Server struct {
 	aprsCmd  func(action string, v int) string
 	aprsStat func() (rx bool, beac int, isOn bool, count int)
 	extraTgt func() []Target
+	aprsLog  func() APRSLog
 	panelSet func(state int)
 	panelGet func() int
 	wfSet    func(min, max float64)
@@ -160,12 +163,42 @@ type APRSStation struct {
 	AltFt   int     `json:"altFt"`
 	Comment string  `json:"comment"`
 	AgeSec  float64 `json:"ageSec"`
+	Country string  `json:"country"` // ISO-2 for the flag
+	Sym     string  `json:"sym"`     // emoji per the sender's symbol
+	SymChar string  `json:"symChar"` // raw APRS symbol char
+}
+
+// APRSLog bundles the three APRS histories for the web tab.
+type APRSLog struct {
+	Stations []APRSStation `json:"stations"`
+	Rx       []APRSLogRow  `json:"rx"`
+	Tx       []APRSLogRow  `json:"tx"`
+}
+
+// APRSLogRow is one history entry.
+type APRSLogRow struct {
+	At      int64   `json:"at"` // unix seconds
+	Call    string  `json:"call"`
+	Lat     float64 `json:"lat"`
+	Lon     float64 `json:"lon"`
+	SpeedKt float64 `json:"speedKt"`
+	AltFt   int     `json:"altFt"`
+	Comment string  `json:"comment"`
+	Info    string  `json:"info"`
+	Via     string  `json:"via"`
 }
 
 // SetAPRSProvider hands the web server the live APRS station list.
 func (s *Server) SetAPRSProvider(f func() []APRSStation) {
 	s.mu.Lock()
 	s.aprsGet = f
+	s.mu.Unlock()
+}
+
+// SetAPRSLog hands the web server the APRS histories.
+func (s *Server) SetAPRSLog(f func() APRSLog) {
+	s.mu.Lock()
+	s.aprsLog = f
 	s.mu.Unlock()
 }
 
@@ -302,6 +335,8 @@ func (s *Server) startLocked() {
 	mux.HandleFunc("/api/ft8", s.handleFT8)
 	mux.HandleFunc("/api/ais", s.handleAIS)
 	mux.HandleFunc("/api/targets", s.handleTargets)
+	mux.HandleFunc("/api/aprslog", s.handleAPRSLog)
+	mux.HandleFunc("/api/flag/", s.handleFlag)
 	mux.HandleFunc("/api/spec", s.handleSpec)
 	mux.HandleFunc("/api/wefaximg", s.handleWefaxImg)
 	mux.HandleFunc("/api/layers", s.handleLayers)
@@ -657,17 +692,18 @@ func (s *Server) handleAIS(w http.ResponseWriter, r *http.Request) {
 }
 
 type Target struct {
-	Kind   string    `json:"kind"` // "plane" | "ship"
-	ID     string    `json:"id"`
-	Call   string    `json:"call"`
-	Lat    float64   `json:"lat"`
-	Lon    float64   `json:"lon"`
-	HasPos bool      `json:"hasPos"`
-	AltFt  int       `json:"altFt"`
-	Speed  float64   `json:"speed"`
-	Track  int       `json:"track"`
-	AgeSec float64   `json:"ageSec"`
-	Trail  []TrailPt `json:"trail,omitempty"`
+	Kind    string    `json:"kind"` // "plane" | "ship"
+	ID      string    `json:"id"`
+	Call    string    `json:"call"`
+	Lat     float64   `json:"lat"`
+	Lon     float64   `json:"lon"`
+	HasPos  bool      `json:"hasPos"`
+	AltFt   int       `json:"altFt"`
+	Speed   float64   `json:"speed"`
+	Track   int       `json:"track"`
+	AgeSec  float64   `json:"ageSec"`
+	Country string    `json:"country"`
+	Trail   []TrailPt `json:"trail,omitempty"`
 }
 
 // trailPt is one breadcrumb of a flown path (altitude-coloured dots).
@@ -686,7 +722,7 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 		if call == "" {
 			call = p.ICAO
 		}
-		t := Target{Kind: "plane", ID: p.ICAO, Call: call, Lat: p.Lat, Lon: p.Lon, HasPos: p.HasPos, AltFt: p.AltFt, Speed: float64(p.SpeedKt), Track: p.TrackDeg, AgeSec: now.Sub(p.LastSeen).Seconds()}
+		t := Target{Kind: "plane", ID: p.ICAO, Call: call, Lat: p.Lat, Lon: p.Lon, HasPos: p.HasPos, AltFt: p.AltFt, Speed: float64(p.SpeedKt), Track: p.TrackDeg, AgeSec: now.Sub(p.LastSeen).Seconds(), Country: geo.ICAOCountry(p.ICAO)}
 		for _, d := range p.Trail {
 			t.Trail = append(t.Trail, TrailPt{Lat: d.Lat, Lon: d.Lon, AltFt: d.AltFt, AgeSec: now.Sub(d.At).Seconds()})
 		}
@@ -697,7 +733,7 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 		if call == "" {
 			call = sh.MMSI
 		}
-		out = append(out, Target{Kind: "ship", ID: sh.MMSI, Call: call, Lat: sh.Lat, Lon: sh.Lon, HasPos: sh.HasPos, Speed: sh.SogKt, Track: int(sh.CogDeg), AgeSec: now.Sub(sh.LastSeen).Seconds()})
+		out = append(out, Target{Kind: "ship", ID: sh.MMSI, Call: call, Lat: sh.Lat, Lon: sh.Lon, HasPos: sh.HasPos, Speed: sh.SogKt, Track: int(sh.CogDeg), AgeSec: now.Sub(sh.LastSeen).Seconds(), Country: geo.MMSICountry(sh.MMSI)})
 	}
 	s.mu.Lock()
 	get := s.aprsGet
@@ -712,6 +748,29 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, out)
+}
+
+func (s *Server) handleFlag(w http.ResponseWriter, r *http.Request) {
+	cc := strings.TrimPrefix(r.URL.Path, "/api/flag/")
+	data := ui.FlagPNG(strings.ToUpper(cc))
+	if data == nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "max-age=86400")
+	w.Write(data)
+}
+
+func (s *Server) handleAPRSLog(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	f := s.aprsLog
+	s.mu.Unlock()
+	if f == nil {
+		writeJSON(w, APRSLog{})
+		return
+	}
+	writeJSON(w, f())
 }
 
 // spec is one FFT frame of the full IF2 window (centred on the LO),

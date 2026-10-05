@@ -25,18 +25,76 @@ type Station struct {
 	LastHeard time.Time
 }
 
-// Store keeps the newest report per callsign.
+// LogEntry is one received or transmitted packet (for the history
+// screens on device and web).
+type LogEntry struct {
+	At       time.Time
+	Call     string
+	Lat, Lon float64
+	SpeedKt  float64
+	Course   float64
+	AltFt    int
+	Comment  string
+	Info     string // raw information field
+	Via      string // "RF" or "IS"
+	Sym      string // sender symbol char
+}
+
+// Store keeps the newest report per callsign plus receive/transmit
+// histories.
 type Store struct {
 	mu sync.Mutex
 	m  map[string]*Station
+	rx []LogEntry
+	tx []LogEntry
 }
 
+const logCap = 60
+
 func NewStore() *Store { return &Store{m: map[string]*Station{}} }
+
+// LogRX records a decoded packet (newest first, capped).
+func (s *Store) LogRX(e LogEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rx = append([]LogEntry{e}, s.rx...)
+	if len(s.rx) > logCap {
+		s.rx = s.rx[:logCap]
+	}
+}
+
+// LogTX records a transmitted beacon (newest first, capped).
+func (s *Store) LogTX(e LogEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tx = append([]LogEntry{e}, s.tx...)
+	if len(s.tx) > logCap {
+		s.tx = s.tx[:logCap]
+	}
+}
+
+// RxLog / TxLog return copies of the histories.
+func (s *Store) RxLog() []LogEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]LogEntry(nil), s.rx...)
+}
+func (s *Store) TxLog() []LogEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]LogEntry(nil), s.tx...)
+}
 
 // ProcessFrame decodes one validated frame body and, when it carries a
 // position, records the station. Returns the station so callers can
 // toast "heard XXXX".
 func (s *Store) ProcessFrame(body []byte) *Station {
+	// Callers may pass the frame with or without its FCS (the
+	// demodulator strips it; raw captures keep it) — strip when valid
+	// so the two trailing bytes never leak into the information field.
+	if len(body) >= 2 && ValidFCS(body) {
+		body = body[:len(body)-2]
+	}
 	f := DecodeFrame(body)
 	if f == nil || len(f.Info) == 0 {
 		return nil
@@ -57,6 +115,9 @@ func (s *Store) ProcessFrame(body []byte) *Station {
 	s.mu.Lock()
 	s.m[st.Call] = st
 	s.mu.Unlock()
+	s.LogRX(LogEntry{At: st.LastHeard, Call: st.Call, Lat: st.Lat, Lon: st.Lon,
+		SpeedKt: st.SpeedKt, Course: st.CourseDeg, AltFt: st.AltFt,
+		Comment: st.Comment, Info: string(f.Info), Via: "RF", Sym: string(st.Sym)})
 	return st
 }
 

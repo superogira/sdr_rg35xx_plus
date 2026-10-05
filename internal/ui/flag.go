@@ -34,6 +34,18 @@ var (
 	flagClient  = &http.Client{Timeout: 10 * time.Second}
 )
 
+// FlagPNG returns the embedded flag PNG bytes for an ISO alpha-2
+// code (for the web panel; empty when unknown).
+func FlagPNG(cc string) []byte {
+	if cc == "" || len(cc) != 2 {
+		return nil
+	}
+	if data, err := flagEmbedded.ReadFile("flagicons/" + cc + ".png"); err == nil {
+		return data
+	}
+	return nil
+}
+
 // GetFlag returns a 16×11 PNG flag icon for the given ISO 3166-1 alpha-2
 // country code. Returns nil if unknown or still loading. Caches on disk
 // under flagDir (e.g., ~/.../flags/TH.png).

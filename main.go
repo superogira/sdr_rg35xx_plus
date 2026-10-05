@@ -499,6 +499,7 @@ const (
 	menuAPRSPre
 	menuAPRSLvl
 	menuAPRSStat
+	menuAPRSLog
 	menuAPRSNow
 	menuExit
 )
@@ -513,7 +514,7 @@ var pageItems = [][]int{
 	{menuAF, menuNR, menuHP, menuLP, menuLocalMute},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
-	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSNow},
+	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSNow},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear, menuWefaxAuto, menuCWDec, menuCWClear},
 	{menuBM},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
@@ -541,7 +542,7 @@ func sendAPRSNow(r *radio.Radio, gpsRx *gps.Receiver, call, path string, sym str
 	i18nKey string
 	table   byte
 	sym     byte
-}, comment string, lvl int, pre float64, isOn bool, iserver string, lastBeacon *time.Time, lastCourse *float64, setMsg func(string)) {
+}, comment string, lvl int, pre float64, isOn bool, iserver string, store *aprs.Store, lastBeacon *time.Time, lastCourse *float64, setMsg func(string)) {
 	f := gpsRx.Snapshot()
 	if call == "" {
 		setMsg(i18n.T("aprs_nocall"))
@@ -556,6 +557,12 @@ func sendAPRSNow(r *radio.Radio, gpsRx *gps.Receiver, call, path string, sym str
 		*lastCourse = f.CourseDeg
 		r.PlayBeacon(aprs.Modulate(body, float64(lvl)/100*0.9, aprsPreambleFlags(pre)))
 		setMsg(i18n.T("aprs_sent"))
+		store.LogTX(aprs.LogEntry{At: time.Now(), Call: call, Lat: f.Lat, Lon: f.Lon,
+			SpeedKt: f.SpeedKt, AltFt: int(f.Alt * 3.28084), Comment: comment, Info: info, Via: "RF", Sym: string(sym.sym)})
+		if isOn {
+			store.LogTX(aprs.LogEntry{At: time.Now(), Call: call, Lat: f.Lat, Lon: f.Lon,
+				SpeedKt: f.SpeedKt, AltFt: int(f.Alt * 3.28084), Comment: comment, Info: info, Via: "IS", Sym: string(sym.sym)})
+		}
 		postAPRSIS(isOn, iserver, call, path, info)
 	}
 }
@@ -824,10 +831,21 @@ func main() {
 			radarLabelMode = n
 		}
 	}
-	radarTargets := 0 // 0 = planes+ships, 1 = planes, 2 = ships
+	radarTargetsMask := 7 // bitmask: 1 planes, 2 ships, 4 APRS (7 = all)
 	if v, ok := cfg["radartargets"]; ok {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 2 {
-			radarTargets = n
+		if n, err := strconv.Atoi(v); err == nil {
+			switch n {
+			case 0:
+				radarTargetsMask = 3 // legacy "both"
+			case 1:
+				radarTargetsMask = 1
+			case 2:
+				radarTargetsMask = 2
+			default:
+				if n >= 1 && n <= 7 {
+					radarTargetsMask = n
+				}
+			}
 		}
 	}
 	for i := range adsbMosaic {
@@ -891,6 +909,20 @@ func main() {
 	// APRS: RF decode onto the radar + AFSK position beacons from the
 	// GPS fix, played out of the speaker for a VOX-keyed radio.
 	aprsStore := aprs.NewStore()
+	if os.Getenv("SDR_ADSB_DEMO") != "" {
+		for _, d := range []struct {
+			call, info string
+			lat, lon   float64
+		}{
+			{"HS0ABC-9", "!1337.20N/10035.40E>032/028 demo car /A=000040", 13.62, 100.59},
+			{"E23AQ", "=1333.00N/10030.00E- home qth", 13.55, 100.50},
+		} {
+			body := aprs.EncodeUI(d.call, "APRS", []string{"WIDE1-1"}, []byte(d.info))
+			lo, hi := aprs.FCSBytes(body)
+			aprsStore.ProcessFrame(append(append(body, lo), hi))
+		}
+		aprsStore.LogTX(aprs.LogEntry{At: time.Now().Add(-2 * time.Minute), Call: "DEMO-1", Lat: 13.60, Lon: 100.55, SpeedKt: 12, Comment: "test beacon", Via: "RF", Sym: ">"})
+	}
 	aprsSymList := []struct {
 		i18nKey string
 		table   byte
@@ -956,6 +988,8 @@ func main() {
 	}
 	aprsLastBeacon := time.Now().Add(-time.Hour)
 	aprsLastCourse := -1.0
+	aprsLogTab := 0
+	aprsLogScroll := 0
 	// LAN web control (opt-in via System menu; ini web=on/webport=N).
 	webPort := 8080
 	if v, ok := cfg["webport"]; ok {
@@ -1268,9 +1302,9 @@ func main() {
 			now := time.Now()
 			var out []web.Target
 			for _, d := range []struct {
-				icao                    string
-				lat, lon                float64
-				alt, spd, trk           int
+				icao          string
+				lat, lon      float64
+				alt, spd, trk int
 			}{
 				{"A1B2C3", 13.72, 100.55, 31000, 460, 75},
 				{"D4E5F6", 13.60, 100.70, 9000, 240, 300},
@@ -1301,9 +1335,29 @@ func main() {
 		for _, st := range aprsStore.All() {
 			out = append(out, web.APRSStation{Call: st.Call, Lat: st.Lat, Lon: st.Lon,
 				SpeedKt: st.SpeedKt, Course: st.CourseDeg, AltFt: st.AltFt,
-				Comment: st.Comment, AgeSec: time.Since(st.LastHeard).Seconds()})
+				Comment: st.Comment, AgeSec: time.Since(st.LastHeard).Seconds(),
+				Country: geo.CountryISO(st.Call), Sym: aprs.Emoji(st.Table, st.Sym), SymChar: string(st.Sym)})
 		}
 		return out
+	})
+	webSrv.SetAPRSLog(func() web.APRSLog {
+		lg := web.APRSLog{}
+		for _, st := range aprsStore.All() {
+			lg.Stations = append(lg.Stations, web.APRSStation{Call: st.Call, Lat: st.Lat, Lon: st.Lon,
+				SpeedKt: st.SpeedKt, Course: st.CourseDeg, AltFt: st.AltFt, Comment: st.Comment,
+				AgeSec: time.Since(st.LastHeard).Seconds(), Country: geo.CountryISO(st.Call),
+				Sym: aprs.Emoji(st.Table, st.Sym), SymChar: string(st.Sym)})
+		}
+		mk := func(es []aprs.LogEntry) []web.APRSLogRow {
+			var rows []web.APRSLogRow
+			for _, e := range es {
+				rows = append(rows, web.APRSLogRow{At: e.At.Unix(), Call: e.Call, Lat: e.Lat, Lon: e.Lon,
+					SpeedKt: e.SpeedKt, AltFt: e.AltFt, Comment: e.Comment, Info: e.Info, Via: e.Via})
+			}
+			return rows
+		}
+		lg.Rx, lg.Tx = mk(aprsStore.RxLog()), mk(aprsStore.TxLog())
+		return lg
 	})
 	webSrv.SetAPRSState(func() (bool, int, bool, int) {
 		return r.APRSEnabled(), aprsBeaconIdx, aprsISOn, aprsStore.Count()
@@ -1326,7 +1380,7 @@ func main() {
 			cfg["aprsis"] = map[bool]string{true: "on", false: "off"}[aprsISOn]
 			saveNow()
 		case "now":
-			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, aprsPre, aprsISOn, aprsIServer, &aprsLastBeacon, &aprsLastCourse, setMsg)
+			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, aprsPre, aprsISOn, aprsIServer, aprsStore, &aprsLastBeacon, &aprsLastCourse, setMsg)
 			return i18n.T("aprs_sent")
 		}
 		return ""
@@ -1469,6 +1523,7 @@ func main() {
 		uiHostEdit
 		uiHostList
 		uiAISLog
+		uiAPRSLog
 		uiBeastList
 		uiAISList
 		uiFT8Log
@@ -1512,6 +1567,8 @@ func main() {
 	case "aprspage":
 		uiMode, menuPage = uiMenu, pageAPRS
 		r.SetAPRSEnabled(true)
+	case "aprslog":
+		uiMode = uiAPRSLog
 	case "syspage":
 		uiMode, menuPage = uiMenu, pageSys
 	case "rtty":
@@ -2097,8 +2154,11 @@ func main() {
 			radarSel.On = false
 			radarSel.ID = ""
 			uiMode = uiADSB
+		case menuAPRSLog:
+			aprsLogScroll = 0
+			uiMode = uiAPRSLog
 		case menuAPRSNow:
-			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, aprsPre, aprsISOn, aprsIServer, &aprsLastBeacon, &aprsLastCourse, setMsg)
+			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, aprsPre, aprsISOn, aprsIServer, aprsStore, &aprsLastBeacon, &aprsLastCourse, setMsg)
 		case menuAISRF:
 			on := !r.AISRFEnabled()
 			r.SetAISRFEnabled(on)
@@ -2481,9 +2541,18 @@ func main() {
 				radarLabelMode = (radarLabelMode + 1) % 3
 				cfg["radarlabel"] = fmt.Sprintf("%d", radarLabelMode)
 			case input.X:
-				// Both → planes only → ships only.
-				radarTargets = (radarTargets + 1) % 3
-				cfg["radartargets"] = fmt.Sprintf("%d", radarTargets)
+				// Cycle the visibility bitmask: all → planes+ships →
+				// planes → ships → APRS → planes+APRS → ships+APRS.
+				order := []int{7, 3, 1, 2, 4, 5, 6}
+				i := 0
+				for k, v := range order {
+					if v == radarTargetsMask {
+						i = k
+						break
+					}
+				}
+				radarTargetsMask = order[(i+1)%len(order)]
+				cfg["radartargets"] = fmt.Sprintf("%d", radarTargetsMask)
 			case input.Y:
 				// Ship name↔MMSI / aircraft callsign↔registration.
 				aisShowName = !aisShowName
@@ -2617,6 +2686,21 @@ func main() {
 				aisScroll--
 			case input.B, input.Start, input.Select:
 				uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuAISLog)
+			}
+		case uiAPRSLog:
+			switch b {
+			case input.Up:
+				aprsLogScroll++
+			case input.Down:
+				aprsLogScroll--
+			case input.L1, input.Left:
+				aprsLogTab = (aprsLogTab + 2) % 3
+				aprsLogScroll = 0
+			case input.R1, input.Right:
+				aprsLogTab = (aprsLogTab + 1) % 3
+				aprsLogScroll = 0
+			case input.B, input.Start, input.Select:
+				uiMode, menuPage, menuSel = uiMenu, pageAPRS, menuRow(pageAPRS, menuAPRSLog)
 			}
 		case uiBeastList, uiAISList:
 			// Same rows/select/edit/delete mechanics as the radio host
@@ -2998,6 +3082,12 @@ func main() {
 				if body, info, ok := buildAPRSBeacon(f, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt); ok {
 					r.PlayBeacon(aprs.Modulate(body, float64(aprsLvl)/100*0.9, aprsPreambleFlags(aprsPre)))
 					setMsg(i18n.T("aprs_sent"))
+					aprsStore.LogTX(aprs.LogEntry{At: time.Now(), Call: aprsCall, Lat: f.Lat, Lon: f.Lon,
+						SpeedKt: f.SpeedKt, AltFt: int(f.Alt * 3.28084), Comment: aprsCmt, Info: info, Via: "RF", Sym: string(aprsSymList[aprsSymIdx].sym)})
+					if aprsISOn {
+						aprsStore.LogTX(aprs.LogEntry{At: time.Now(), Call: aprsCall, Lat: f.Lat, Lon: f.Lon,
+							SpeedKt: f.SpeedKt, AltFt: int(f.Alt * 3.28084), Comment: aprsCmt, Info: info, Via: "IS", Sym: string(aprsSymList[aprsSymIdx].sym)})
+					}
 					postAPRSIS(aprsISOn, aprsIServer, aprsCall, aprsPath, info)
 				}
 			}
@@ -3622,6 +3712,7 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_aprspre"), Value: fmt.Sprintf("%.1fs", aprsPre)},
 					ui.MenuItem{Label: i18n.T("m_aprslvl"), Value: fmt.Sprintf("%d%%", aprsLvl)},
 					ui.MenuItem{Label: i18n.T("m_aprsstat"), Value: fmt.Sprintf("%d", aprsStore.Count())},
+					ui.MenuItem{Label: i18n.T("m_aprslog"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_aprsnow"), Value: i18n.T("press_a")},
 				)
 			case pageGPS:
@@ -3795,6 +3886,27 @@ func main() {
 			u.DrawBookmarkList(labels, bmSel, active, r.Mode().Name)
 		} else if uiMode == uiFT8Log {
 			u.DrawFT8LogFull(ft8Log, ft8Scroll, flagDir)
+		} else if uiMode == uiAPRSLog {
+			var stations []ui.APRSStationUI
+			for _, st := range aprsStore.All() {
+				stations = append(stations, ui.APRSStationUI{Call: st.Call, Country: geo.CountryISO(st.Call),
+					Sym: string(st.Sym), Lat: st.Lat, Lon: st.Lon, SpeedKt: st.SpeedKt,
+					AltFt: st.AltFt, Comment: st.Comment, AgeSec: time.Since(st.LastHeard).Seconds()})
+			}
+			mk := func(es []aprs.LogEntry) []ui.APRSLogUI {
+				var out []ui.APRSLogUI
+				for _, e := range es {
+					extra := e.Comment
+					if e.SpeedKt > 0.5 {
+						extra = fmt.Sprintf("%.0fkt ", e.SpeedKt) + extra
+					}
+					out = append(out, ui.APRSLogUI{Time: e.At.Format("15:04:05"), Call: e.Call,
+						Country: geo.CountryISO(e.Call), Sym: e.Sym, Pos: fmt.Sprintf("%.4f,%.4f", e.Lat, e.Lon),
+						Extra: extra, Via: e.Via})
+				}
+				return out
+			}
+			u.DrawAPRSLog(aprsLogTab, stations, mk(aprsStore.RxLog()), mk(aprsStore.TxLog()), aprsLogScroll, flagDir)
 		} else if uiMode == uiAISLog {
 			aisLogMu.Lock()
 			view := make([]ui.AISEntry, len(aisLog))
@@ -4133,7 +4245,8 @@ func main() {
 			for _, st := range aprsStore.All() {
 				d, br := geo.DistanceBearingKm(adsbLat, adsbLon, st.Lat, st.Lon)
 				mx, my := mercPos(st.Lat, st.Lon)
-				blips = append(blips, ui.RadarBlip{Aprs: true, Call: st.Call, BrngDeg: br, DistKm: d,
+				blips = append(blips, ui.RadarBlip{Aprs: true, Call: st.Call, Sym: string(st.Sym), Country: geo.CountryISO(st.Call),
+					BrngDeg: br, DistKm: d,
 					HasPos: true, MercX: mx, MercY: my, Seen: st.LastHeard,
 					SogKt: st.SpeedKt, TrackDeg: int(st.CourseDeg), Lat: st.Lat, Lon: st.Lon})
 			}
@@ -4146,7 +4259,7 @@ func main() {
 				}{{"HS0ABC-9", 13.62, 100.59}, {"E23AQ", 13.55, 100.50}} {
 					d, br := geo.DistanceBearingKm(adsbLat, adsbLon, st.lat, st.lon)
 					mx, my := mercPos(st.lat, st.lon)
-					blips = append(blips, ui.RadarBlip{Aprs: true, Call: st.call, BrngDeg: br, DistKm: d,
+					blips = append(blips, ui.RadarBlip{Aprs: true, Call: st.call, Sym: ">", Country: "TH", BrngDeg: br, DistKm: d,
 						HasPos: true, MercX: mx, MercY: my, Seen: time.Now(), Lat: st.lat, Lon: st.lon})
 				}
 			}
@@ -4213,28 +4326,11 @@ func main() {
 			if adsbMosaic[L][z] != nil {
 				mercArg = merc
 			}
-			if radarTargets == 1 { // planes only
-				keep := blips[:0]
-				for _, b := range blips {
-					if !b.Vessel {
-						keep = append(keep, b)
-					}
-				}
-				blips = keep
-			} else if radarTargets == 2 { // ships only
-				keep := blips[:0]
-				for _, b := range blips {
-					if b.Vessel {
-						keep = append(keep, b)
-					}
-				}
-				blips = keep
-			}
 			hostLbl := adsbHost
 			if hostLbl == "" {
 				hostLbl = "(" + i18n.T("off") + ")"
 			}
-			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarLabelMode, panX, panY, mapOffX, mapOffY, sysinfo.SensorSnapshot().BattPct, strings.Contains(sysinfo.SensorSnapshot().BattStatus, "harg"), radarSel)
+			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarTargetsMask, radarLabelMode, panX, panY, mapOffX, mapOffY, sysinfo.SensorSnapshot().BattPct, strings.Contains(sysinfo.SensorSnapshot().BattStatus, "harg"), radarSel)
 		}
 		if r.FT8Enabled() && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)

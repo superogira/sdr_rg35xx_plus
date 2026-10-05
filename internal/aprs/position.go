@@ -146,6 +146,7 @@ func parseTail(rest []byte, p *Position) {
 	if i := strings.Index(s, "/A="); i >= 0 && len(s)-i >= 3+6 {
 		if ft, err := strconv.Atoi(s[i+3 : i+9]); err == nil {
 			p.AltFt, p.HasAlt = ft, true
+			s = s[:i] + s[i+9:] // keep the altitude out of the comment
 		}
 	}
 	p.Comment = strings.TrimSpace(s)
