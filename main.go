@@ -494,6 +494,7 @@ const (
 	menuAPRSPath
 	menuAPRSSym
 	menuAPRSCmt
+	menuAPRSPre
 	menuAPRSLvl
 	menuAPRSStat
 	menuAPRSNow
@@ -510,7 +511,7 @@ var pageItems = [][]int{
 	{menuAF, menuNR, menuHP, menuLP, menuLocalMute},
 	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
-	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSLvl, menuAPRSStat, menuAPRSNow},
+	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSNow},
 	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear, menuWefaxAuto, menuCWDec, menuCWClear},
 	{menuBM},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
@@ -538,7 +539,7 @@ func sendAPRSNow(r *radio.Radio, gpsRx *gps.Receiver, call, path string, sym str
 	i18nKey string
 	table   byte
 	sym     byte
-}, comment string, lvl int, lastBeacon *time.Time, lastCourse *float64, setMsg func(string)) {
+}, comment string, lvl int, pre float64, lastBeacon *time.Time, lastCourse *float64, setMsg func(string)) {
 	f := gpsRx.Snapshot()
 	if call == "" {
 		setMsg(i18n.T("aprs_nocall"))
@@ -551,9 +552,19 @@ func sendAPRSNow(r *radio.Radio, gpsRx *gps.Receiver, call, path string, sym str
 	if body, ok := buildAPRSBeacon(f, call, path, sym, comment); ok {
 		*lastBeacon = time.Now()
 		*lastCourse = f.CourseDeg
-		r.PlayBeacon(aprs.Modulate(body, float64(lvl)/100*0.9, 40))
+		r.PlayBeacon(aprs.Modulate(body, float64(lvl)/100*0.9, aprsPreambleFlags(pre)))
 		setMsg(i18n.T("aprs_sent"))
 	}
+}
+
+// aprsPreambleFlags converts the VOX preamble seconds to flag count
+// (8 bits per flag at 1200 baud).
+func aprsPreambleFlags(seconds float64) int {
+	n := int(math.Round(seconds * 150))
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
 // buildAPRSBeacon renders the UI frame body for a position beacon from
@@ -910,6 +921,12 @@ func main() {
 	}
 	if v, ok := cfg["aprscmt"]; ok {
 		aprsCmt = v
+	}
+	aprsPre := 0.3 // VOX open time, seconds (0.1..2)
+	if v, ok := cfg["aprspre"]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0.1 && f <= 2.0 {
+			aprsPre = f
+		}
 	}
 	if aprsCall == "" {
 		aprsCall = cfg["call"] // default to the FT8 callsign (SSID optional)
@@ -1836,6 +1853,16 @@ func main() {
 			e := aprsSymList[aprsSymIdx]
 			cfg["aprssym"] = fmt.Sprintf("%c%c", e.table, e.sym)
 			saveNow()
+		case menuAPRSPre:
+			aprsPre = math.Round((aprsPre+float64(dir)*0.1)*10) / 10
+			if aprsPre < 0.1 {
+				aprsPre = 0.1
+			}
+			if aprsPre > 2.0 {
+				aprsPre = 2.0
+			}
+			cfg["aprspre"] = fmt.Sprintf("%.1f", aprsPre)
+			saveNow()
 		case menuAPRSLvl:
 			aprsLvl += dir * 10
 			if aprsLvl < 0 {
@@ -1970,7 +1997,7 @@ func main() {
 			radarSel.ID = ""
 			uiMode = uiADSB
 		case menuAPRSNow:
-			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, &aprsLastBeacon, &aprsLastCourse, setMsg)
+			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, aprsPre, &aprsLastBeacon, &aprsLastCourse, setMsg)
 		case menuAISRF:
 			on := !r.AISRFEnabled()
 			r.SetAISRFEnabled(on)
@@ -2862,7 +2889,7 @@ func main() {
 				aprsLastBeacon = time.Now()
 				aprsLastCourse = f.CourseDeg
 				if body, ok := buildAPRSBeacon(f, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt); ok {
-					r.PlayBeacon(aprs.Modulate(body, float64(aprsLvl)/100*0.9, 40))
+					r.PlayBeacon(aprs.Modulate(body, float64(aprsLvl)/100*0.9, aprsPreambleFlags(aprsPre)))
 					setMsg(i18n.T("aprs_sent"))
 				}
 			}
@@ -3482,6 +3509,7 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_aprspath"), Value: aprsPath + " >"},
 					ui.MenuItem{Label: i18n.T("m_aprssym"), Value: i18n.T(aprsSymList[aprsSymIdx].i18nKey)},
 					ui.MenuItem{Label: i18n.T("m_aprscmt"), Value: aprsCmt + " >"},
+					ui.MenuItem{Label: i18n.T("m_aprspre"), Value: fmt.Sprintf("%.1fs", aprsPre)},
 					ui.MenuItem{Label: i18n.T("m_aprslvl"), Value: fmt.Sprintf("%d%%", aprsLvl)},
 					ui.MenuItem{Label: i18n.T("m_aprsstat"), Value: fmt.Sprintf("%d", aprsStore.Count())},
 					ui.MenuItem{Label: i18n.T("m_aprsnow"), Value: i18n.T("press_a")},
@@ -4367,6 +4395,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["aprslvl"]; ok {
 		fmt.Fprintf(f, "aprslvl=%s\n", v)
+	}
+	if v, ok := cfg["aprspre"]; ok {
+		fmt.Fprintf(f, "aprspre=%s\n", v)
 	}
 
 	if v, ok := cfg["gpstime"]; ok {
