@@ -16,7 +16,6 @@ import (
 
 	"sdr35/internal/ais"
 	"sdr35/internal/aprs"
-	"sdr35/internal/audio"
 	"sdr35/internal/dsp"
 	"sdr35/internal/i18n"
 	"sdr35/internal/rtltcp"
@@ -60,13 +59,21 @@ const (
 
 // Radio is safe for concurrent use: the UI thread calls the setters and
 // Snapshot while the Run goroutine streams.
+// AudioSink is the final audio destination (internal/audio.Output on
+// the device; tests substitute a recorder).
+type AudioSink interface {
+	WriteAudio(mono []float32)
+	SetInputRate(rate int)
+	Silence(ms int)
+}
+
 type Radio struct {
 	Host string
 	demo bool
 
 	tap    *dsp.SpectrumTap
 	rawTap *dsp.SpectrumTap // full-rate tap for wide waterfall spans
-	out    *audio.Output    // nil = waterfall only
+	out    AudioSink        // nil = waterfall only
 	name   string           // audio backend name for status
 
 	mu         sync.Mutex
@@ -99,6 +106,7 @@ type Radio struct {
 	aprsRFOn   bool
 	beacon     []float64 // pending beacon audio at 48k (nil = idle)
 	beaconPos  int
+	beaconOn   bool // true while audio is actually flowing out
 	beaconRate int  // input rate to restore after the beacon
 	hfApplied  int  // direct-sampling mode currently set on the server
 	ppm        int  // tuner frequency correction, applied live and at every (re)connect
@@ -126,7 +134,7 @@ const (
 // New builds a radio. gainDb is the tuner gain in dB at connect (negative
 // = AGC); it is sent as tenths-of-dB (the protocol path that needs no gain
 // table index at all — same recipe the user's rtl-sdr-web-monitor uses).
-func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out *audio.Output) *Radio {
+func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out AudioSink) *Radio {
 	// Sanitize the startup frequency (a hand-edited or corrupted config
 	// must not reach the dongle).
 	if freqHz < 500_000 {
@@ -236,7 +244,7 @@ func (r *Radio) SetCaptureRate(hz int) {
 // NewDemo builds a Radio whose Run generates a synthetic signal in-process
 // instead of connecting anywhere (display/audio development without a
 // dongle).
-func NewDemo(mode dsp.Mode, out *audio.Output) *Radio {
+func NewDemo(mode dsp.Mode, out AudioSink) *Radio {
 	r := New(i18n.T("demo_host"), 145_500_000, mode, -1, out)
 	r.demo = true
 	return r
@@ -268,7 +276,7 @@ func (r *Radio) Run(ctx context.Context) {
 			tap := r.audioTap
 			rate := r.mode.AudioOutRate()
 			muted := r.localMute
-			beaconing := r.beacon != nil && r.beaconPos < len(r.beacon)
+			beaconing := r.beaconOn
 			r.mu.Unlock()
 			if beaconing {
 				// beaconLoop owns the speaker
@@ -518,7 +526,7 @@ func (r *Radio) session(ctx context.Context) error {
 			tap := r.audioTap
 			rate := r.mode.AudioOutRate()
 			muted := r.localMute
-			beaconing := r.beacon != nil && r.beaconPos < len(r.beacon)
+			beaconing := r.beaconOn
 			r.mu.Unlock()
 			if beaconing {
 				// The dedicated beacon loop owns the speaker while a
@@ -1185,11 +1193,12 @@ func (r *Radio) beaconLoop(ctx context.Context) {
 		}
 		r.mu.Lock()
 		bc := r.beacon
-		if bc == nil || r.beaconPos != 0 {
+		if bc == nil || r.beaconOn {
 			r.mu.Unlock()
 			continue // nothing queued / already playing
 		}
 		rate := r.mode.AudioOutRate()
+		r.beaconOn = true
 		r.mu.Unlock()
 		aud := make([]float32, len(bc))
 		for i, v := range bc {
@@ -1210,6 +1219,7 @@ func (r *Radio) beaconLoop(ctx context.Context) {
 		}
 		r.mu.Lock()
 		r.beacon = nil
+		r.beaconOn = false
 		r.mu.Unlock()
 	}
 }
@@ -1218,7 +1228,9 @@ func (r *Radio) beaconLoop(ctx context.Context) {
 func (r *Radio) BeaconPlaying() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.beacon != nil && r.beaconPos < len(r.beacon)
+	// Queued OR flowing: the receive path must duck from the moment a
+	// beacon is queued, not only once audio starts.
+	return r.beacon != nil || r.beaconOn
 }
 
 // SetLocalMute silences the handheld's own speaker while the web audio

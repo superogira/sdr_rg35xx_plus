@@ -84,12 +84,16 @@ func Modulate(body []byte, amp float64, preambleFlags int) []float64 {
 			out = append(out, amp*math.Sin(phase))
 		}
 	}
+	// Fade IN only (5 ms): protects the VOX onset and any downstream
+	// AGC from a hard kick. There must be NO fade-out — the closing
+	// flag has to leave at full amplitude or receivers cannot close
+	// the frame (this is exactly what broke APRSdroid). A 100 ms
+	// silent tail lets the speaker and any codec settle instead.
 	const fade = 240 // 5 ms at 48 kHz
 	for i := 0; i < fade && i < len(out)/4; i++ {
-		g := float64(i) / float64(fade)
-		out[i] *= g
-		out[len(out)-1-i] *= g
+		out[i] *= float64(i) / float64(fade)
 	}
+	out = append(out, make([]float64, 4800)...)
 	return out
 }
 
