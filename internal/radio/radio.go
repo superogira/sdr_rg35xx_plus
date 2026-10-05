@@ -109,6 +109,7 @@ type Radio struct {
 	beacon     []float64 // pending beacon audio at 48k (nil = idle)
 	beaconPos  int
 	beaconOn   bool // true while audio is actually flowing out
+	relArm     bool // release ramp pending for the receive path
 	beaconRate int  // input rate to restore after the beacon
 	hfApplied  int  // direct-sampling mode currently set on the server
 	ppm        int  // tuner frequency correction, applied live and at every (re)connect
@@ -280,8 +281,13 @@ func (r *Radio) Run(ctx context.Context) {
 			tap := r.audioTap
 			rate := r.mode.AudioOutRate()
 			muted := r.localMute
-			beaconing := r.beaconOn
+			beaconing := r.beacon != nil || r.beaconOn // duck from queue time
+			rel := r.relArm
+			r.relArm = false
 			r.mu.Unlock()
+			if rel && !beaconing && resumeFade == 0 {
+				resumeFade = rate / 200
+			}
 			if beaconing {
 				// beaconLoop owns the speaker; arm the release ramp
 				resumeFade = rate / 200
@@ -545,8 +551,13 @@ func (r *Radio) session(ctx context.Context) error {
 			tap := r.audioTap
 			rate := r.mode.AudioOutRate()
 			muted := r.localMute
-			beaconing := r.beaconOn
+			beaconing := r.beacon != nil || r.beaconOn // duck from queue time
+			rel := r.relArm
+			r.relArm = false
 			r.mu.Unlock()
+			if rel && !beaconing && resumeFade == 0 {
+				resumeFade = rate / 200
+			}
 			if beaconing {
 				// The dedicated beacon loop owns the speaker while a
 				// beacon plays; duck the demod audio so they never mix.
@@ -1293,6 +1304,7 @@ func (r *Radio) beaconLoop(ctx context.Context) {
 		r.mu.Lock()
 		r.beacon = nil
 		r.beaconOn = false
+		r.relArm = true // receive audio resumes with a ramp
 		r.mu.Unlock()
 	}
 }
