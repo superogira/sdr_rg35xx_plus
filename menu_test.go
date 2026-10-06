@@ -59,3 +59,30 @@ func TestRootRowsOpenMatchingPages(t *testing.T) {
 		}
 	}
 }
+
+// The root row mapping must stay exact: rows 0-7 open pages 1-8,
+// row 8 is Bookmarks, row 9 is System, row 10 is Exit. An off-by-one
+// here swapped System/Bookmarks and indexed a page that does not
+// exist (index out of range crash).
+func TestRootRowMapping(t *testing.T) {
+	for sel := 0; sel < 8; sel++ {
+		if got := rootRowPage(sel); got != sel+1 {
+			t.Fatalf("row %d opens page %d, want %d", sel, got, sel+1)
+		}
+		if a := rootRowAction(sel, 0); a != rootPage {
+			t.Fatalf("row %d action = %v, want rootPage", sel, a)
+		}
+	}
+	if got := rootRowPage(9); got != pageSys {
+		t.Fatalf("System row opens page %d, want pageSys", got)
+	}
+	if a := rootRowAction(8, menuBM); a != rootBookmarks {
+		t.Fatal("bookmarks row must open the bookmark list")
+	}
+	if a := rootRowAction(10, menuExit); a != rootExit {
+		t.Fatal("last row must exit")
+	}
+	if len(pageItems[pageRoot]) != 11 {
+		t.Fatalf("root rows = %d, want 11", len(pageItems[pageRoot]))
+	}
+}

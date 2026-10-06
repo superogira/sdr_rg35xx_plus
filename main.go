@@ -603,6 +603,37 @@ func aprsPreambleFlags(seconds float64) int {
 // provider.
 var gridCache map[string]string
 
+// Root-row dispatch helpers: the root list mixes positional subpage
+// rows with two special rows (Bookmarks between Station and System,
+// Exit last). Keeping the mapping in one place lets menu_test pin it
+// — an off-by-one here once opened System when Bookmarks was pressed
+// and indexed page 10 (crash) when System was pressed.
+type rootAction int
+
+const (
+	rootPage rootAction = iota
+	rootBookmarks
+	rootExit
+)
+
+func rootRowAction(sel, idx int) rootAction {
+	if idx == menuExit {
+		return rootExit
+	}
+	if idx == menuBM {
+		return rootBookmarks
+	}
+	_ = sel
+	return rootPage
+}
+
+func rootRowPage(sel int) int {
+	if sel < 8 {
+		return sel + 1
+	}
+	return pageSys
+}
+
 // buildAPRSBeacon renders the UI frame body for a position beacon from
 // a live GPS fix (uncompressed format: table+symbol, course/speed when
 // moving, altitude).
@@ -2132,17 +2163,20 @@ func main() {
 		}
 	}
 	activateItem := func(idx int) {
-		if menuPage == pageRoot && idx == menuExit {
-			// The root Exit row quits — not a subpage, so it must
-			// be handled BEFORE the positional page dispatch.
-			close(exitMenu)
-			return
-		}
 		if menuPage == pageRoot {
-			// Root rows open subpages by position.
-			menuPage = menuSel + 1
-			menuSel = 0
-			return
+			switch rootRowAction(menuSel, idx) {
+			case rootExit:
+				close(exitMenu)
+				return
+			case rootBookmarks:
+				bmSel = 0
+				uiMode = uiBmList
+				return
+			case rootPage:
+				menuPage = rootRowPage(menuSel)
+				menuSel = 0
+				return
+			}
 		}
 		switch idx {
 		case menuFT8:
