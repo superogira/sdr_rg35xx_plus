@@ -6,7 +6,7 @@ import "testing"
 // the root page exposes one row per subpage — the Audio page row once
 // went missing in a silent edit and the d-pad could never reach it.
 func TestPageItemsCoverEveryPage(t *testing.T) {
-	wantPages := []int{pageRoot, pageRx, pageFT8, pageSys, pageBM, pageAudio, pageADSB, pageGPS, pageAPRS}
+	wantPages := []int{pageRoot, pageRx, pageAudio, pageDisp, pageADSB, pageGPS, pageAPRS, pageFT8, pageStation, pageSys}
 	if len(pageItems) != len(wantPages) {
 		t.Fatalf("pageItems has %d pages, want %d — a page id exists with no row list (rows become unreachable)", len(pageItems), len(wantPages))
 	}
@@ -32,14 +32,15 @@ func TestPageItemsCoverEveryPage(t *testing.T) {
 // swaps whole subpages (Audio↔FT8 was a real bug).
 func TestRootRowsOpenMatchingPages(t *testing.T) {
 	want := [][]int{
-		{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
-		{menuAF, menuNR, menuHP, menuLP, menuLocalMute},
-		{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
+		{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC},
+		{menuAF, menuNR, menuHP, menuLP, menuLocalMute, menuVolume},
+		{menuSpan, menuStep, menuWFMin, menuWFMax},
+		{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 		{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 		{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSNow},
-		{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear, menuWefaxAuto, menuCWDec, menuCWClear},
-		{menuBM},
-		{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
+		{menuFT8, menuRTTY, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuBands},
+		{menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTYLog, menuBM},
+		{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuShot, menuUpdate},
 	}
 	for i, w := range want {
 		got := pageItems[pageRoot+1+i]

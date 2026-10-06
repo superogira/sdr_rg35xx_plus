@@ -509,15 +509,16 @@ const (
 // root page at four rows while a fifth page existed — the Audio row
 // was unreachable from the d-pad.
 var pageItems = [][]int{
-	{0, 0, 0, 0, 0, 0, 0, 0, menuExit}, // rows 0-7 open subpages by position; the last row is Exit
-	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC, menuSpan, menuStep, menuWFMin, menuWFMax},
-	{menuAF, menuNR, menuHP, menuLP, menuLocalMute},
-	{menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuADSBRadar, menuClearMap},
+	{0, 0, 0, 0, 0, 0, 0, 0, 0, menuExit}, // rows 0-8 open subpages by position; the last row is Exit
+	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC},
+	{menuAF, menuNR, menuHP, menuLP, menuLocalMute, menuVolume},
+	{menuSpan, menuStep, menuWFMin, menuWFMax},
+	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSNow},
-	{menuFT8, menuBands, menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTY, menuRTTYLog, menuWefax, menuWefaxClear, menuWefaxAuto, menuCWDec, menuCWClear},
-	{menuBM},
-	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuVolume, menuShot, menuUpdate},
+	{menuFT8, menuRTTY, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuBands},
+	{menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTYLog, menuBM},
+	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuShot, menuUpdate},
 }
 
 // The flat 16-row menu outgrew the screen, so it is now subpages
@@ -529,11 +530,12 @@ const (
 	pageRoot = iota
 	pageRx
 	pageAudio
+	pageDisp
 	pageADSB
 	pageGPS
 	pageAPRS
 	pageFT8
-	pageBM
+	pageStation
 	pageSys
 )
 
@@ -2566,11 +2568,11 @@ func main() {
 					mapSel = -1
 				} else {
 					mapSel, mapDetail = -1, false
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuMap)
+					uiMode, menuPage, menuSel = uiMenu, pageStation, menuRow(pageStation, menuMap)
 				}
 			case input.Start, input.Select:
 				mapSel, mapDetail = -1, false
-				uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuMap)
+				uiMode, menuPage, menuSel = uiMenu, pageStation, menuRow(pageStation, menuMap)
 			}
 		case uiADSB:
 			// Radar: L2/R2 cycle the map layer, L1/R1 the range
@@ -2679,7 +2681,7 @@ func main() {
 				rttyLines = nil
 				rttyScroll = 0
 			case input.B, input.Start, input.Select:
-				uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuRTTYLog)
+				uiMode, menuPage, menuSel = uiMenu, pageStation, menuRow(pageStation, menuRTTYLog)
 			}
 			if rttyScroll > 500 {
 				rttyScroll = 500
@@ -2955,7 +2957,7 @@ func main() {
 						psk.SetStation(myCall, myGrid, myAnt, myRig)
 					}
 					hostText = ""
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuCall)
+					uiMode, menuPage, menuSel = uiMenu, pageStation, menuRow(pageStation, menuCall)
 				case "grid":
 					if hostText != "" {
 						myGrid = strings.ToUpper(hostText)
@@ -2963,19 +2965,19 @@ func main() {
 						psk.SetStation(myCall, myGrid, myAnt, myRig)
 					}
 					hostText = ""
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuGrid)
+					uiMode, menuPage, menuSel = uiMenu, pageStation, menuRow(pageStation, menuGrid)
 				case "ant":
 					myAnt = hostText
 					cfg["antenna"] = myAnt
 					psk.SetStation(myCall, myGrid, myAnt, myRig)
 					hostText = ""
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuAnt)
+					uiMode, menuPage, menuSel = uiMenu, pageStation, menuRow(pageStation, menuAnt)
 				case "rig":
 					myRig = hostText
 					cfg["rig"] = myRig
 					psk.SetStation(myCall, myGrid, myAnt, myRig)
 					hostText = ""
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuRig)
+					uiMode, menuPage, menuSel = uiMenu, pageStation, menuRow(pageStation, menuRig)
 				case "bm":
 					if bmSel < len(bookmarks) {
 						bookmarks[bmSel].label = hostText
@@ -3663,16 +3665,21 @@ func main() {
 				sq = fmt.Sprintf("%.0f dB", v)
 			}
 			items := []ui.MenuItem{}
+			pskVal := i18n.T("off")
+			if pskOn {
+				pskVal = i18n.T("on")
+			}
 			switch menuPage {
 			case pageRoot:
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_rxpage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_audiopage"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_disppage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_adsbpage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_gpspage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_aprspage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
-					ui.MenuItem{Label: i18n.T("m_bm"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_stationpage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_exit"), Value: i18n.T("press_a")})
 			case pageRx:
@@ -3710,32 +3717,33 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_sql"), Value: sq},
 					ui.MenuItem{Label: i18n.T("m_bw"), Value: bwLabel(r.Bandwidth())},
 					ui.MenuItem{Label: i18n.T("m_ds"), Value: r.DirectSamplingLabel()},
-					ui.MenuItem{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())},
+					ui.MenuItem{Label: i18n.T("m_agc"), Value: agcLabel(r.AGCEnabled())})
+			case pageDisp:
+				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
 					ui.MenuItem{Label: i18n.T("m_step"), Value: stepLabel(stepHz)},
 					ui.MenuItem{Label: i18n.T("m_wfmin"), Value: fmt.Sprintf("+%.0f dB", wfMin)},
 					ui.MenuItem{Label: i18n.T("m_wfmax"), Value: fmt.Sprintf("%.0f dB", wfMax)})
 			case pageFT8:
-				pskVal := i18n.T("off")
-				if pskOn {
-					pskVal = i18n.T("on")
-				}
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_ft8"), Value: ft8Label(r.FT8Enabled())},
-					ui.MenuItem{Label: i18n.T("m_bands"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_rtty"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.RTTYEnabled()]},
+					ui.MenuItem{Label: i18n.T("m_wefax"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxEnabled()]},
+					ui.MenuItem{Label: i18n.T("m_wefaxauto"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxAutoSave()]},
+					ui.MenuItem{Label: i18n.T("m_wefaxclear"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_cwdec"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.CWDecodeEnabled()]},
+					ui.MenuItem{Label: i18n.T("m_cwclear"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_bands"), Value: i18n.T("press_a")})
+			case pageStation:
+				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_call"), Value: myCall},
 					ui.MenuItem{Label: i18n.T("m_grid"), Value: myGrid},
 					ui.MenuItem{Label: i18n.T("m_ant"), Value: myAnt},
 					ui.MenuItem{Label: i18n.T("m_rig"), Value: myRig},
 					ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal},
 					ui.MenuItem{Label: i18n.T("m_map"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_rtty"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.RTTYEnabled()]},
 					ui.MenuItem{Label: i18n.T("m_rttylog"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_wefax"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxEnabled()]},
-					ui.MenuItem{Label: i18n.T("m_wefaxclear"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_wefaxauto"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxAutoSave()]},
-					ui.MenuItem{Label: i18n.T("m_cwdec"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.CWDecodeEnabled()]},
-					ui.MenuItem{Label: i18n.T("m_cwclear"), Value: i18n.T("press_a")})
+					ui.MenuItem{Label: i18n.T("m_bm"), Value: i18n.T("press_a")})
 			case pageAudio:
 				nrVal := i18n.T("off")
 				if lv := r.NoiseReduction(); lv > 0 {
@@ -3758,9 +3766,11 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_nr"), Value: nrVal},
 					ui.MenuItem{Label: i18n.T("m_hp"), Value: hpVal},
 					ui.MenuItem{Label: i18n.T("m_lp"), Value: lpVal},
-					ui.MenuItem{Label: i18n.T("m_lmute"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.LocalMuted()]})
+					ui.MenuItem{Label: i18n.T("m_lmute"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.LocalMuted()]},
+					ui.MenuItem{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)})
 			case pageADSB:
 				items = append(items,
+					ui.MenuItem{Label: i18n.T("m_adsbradar"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_adsblat"), Value: fmt.Sprintf("%.5f", adsbLat)},
 					ui.MenuItem{Label: i18n.T("m_adsblon"), Value: fmt.Sprintf("%.5f", adsbLon)},
 					func() ui.MenuItem {
@@ -3779,7 +3789,6 @@ func main() {
 					}(),
 					ui.MenuItem{Label: i18n.T("m_aisrf"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.AISRFEnabled()]},
 					ui.MenuItem{Label: i18n.T("m_aislog"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_adsbradar"), Value: i18n.T("press_a")},
 					func() ui.MenuItem {
 						v := i18n.T("press_a")
 						if time.Since(mapCacheClearedAt) < 10*time.Second {
@@ -3912,7 +3921,6 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_lang"), Value: langLabel()},
 					ui.MenuItem{Label: i18n.T("m_sysmon"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_logs"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)},
 					ui.MenuItem{Label: i18n.T("m_shot"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_update"), Value: i18n.T("press_a")})
 			}
