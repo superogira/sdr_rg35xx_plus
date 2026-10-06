@@ -10,11 +10,16 @@ func TestPageItemsCoverEveryPage(t *testing.T) {
 	if len(pageItems) != len(wantPages) {
 		t.Fatalf("pageItems has %d pages, want %d — a page id exists with no row list (rows become unreachable)", len(pageItems), len(wantPages))
 	}
-	// Root: N subpages + the Exit row; row i opens page i+1, the last
-	// row is Exit (handled before the positional dispatch).
+	// Root: N subpages + the Bookmarks row + the Exit row; subpage
+	// rows open pages by position (the bookmarks row between Station
+	// and System is handled before the positional dispatch), and the
+	// last row is Exit.
 	subpages := len(wantPages) - 1
-	if got := len(pageItems[pageRoot]); got != subpages+1 {
-		t.Fatalf("root page has %d rows, want %d (subpages + Exit)", got, subpages+1)
+	if got := len(pageItems[pageRoot]); got != subpages+2 {
+		t.Fatalf("root page has %d rows, want %d (subpages + Bookmarks + Exit)", got, subpages+2)
+	}
+	if pageItems[pageRoot][subpages-1] != menuBM {
+		t.Fatal("the row between Station and System must be Bookmarks")
 	}
 	if pageItems[pageRoot][len(pageItems[pageRoot])-1] != menuExit {
 		t.Fatal("root page last row must be Exit")
@@ -38,8 +43,8 @@ func TestRootRowsOpenMatchingPages(t *testing.T) {
 		{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 		{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 		{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSNow},
-		{menuFT8, menuRTTY, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuBands},
-		{menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTYLog, menuBM},
+		{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear},
+		{menuCall, menuGrid, menuAnt, menuRig, menuPSK},
 		{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuShot, menuUpdate},
 	}
 	for i, w := range want {

@@ -509,15 +509,15 @@ const (
 // root page at four rows while a fifth page existed — the Audio row
 // was unreachable from the d-pad.
 var pageItems = [][]int{
-	{0, 0, 0, 0, 0, 0, 0, 0, 0, menuExit}, // rows 0-8 open subpages by position; the last row is Exit
+	{0, 0, 0, 0, 0, 0, 0, 0, menuBM, 0, menuExit}, // rows open subpages by position (bookmarks row handled first); last row is Exit
 	{menuHost, menuSample, menuFreq, menuStep, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC},
 	{menuAF, menuNR, menuHP, menuLP, menuLocalMute, menuVolume},
 	{menuSpan, menuWFMin, menuWFMax},
 	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSNow},
-	{menuFT8, menuRTTY, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuBands},
-	{menuCall, menuGrid, menuAnt, menuRig, menuPSK, menuMap, menuRTTYLog, menuBM},
+	{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear},
+	{menuCall, menuGrid, menuAnt, menuRig, menuPSK},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuShot, menuUpdate},
 }
 
@@ -1660,6 +1660,10 @@ func main() {
 		uiMode, menuPage = uiMenu, pageGPS
 	case "rxpage":
 		uiMode, menuPage = uiMenu, pageRx
+	case "ft8page":
+		uiMode, menuPage = uiMenu, pageFT8
+	case "stationpage":
+		uiMode, menuPage = uiMenu, pageStation
 	case "aprspage":
 		uiMode, menuPage = uiMenu, pageAPRS
 		r.SetAPRSEnabled(true)
@@ -2505,7 +2509,7 @@ func main() {
 					saveBookmarks()
 				}
 			case input.B, input.Start:
-				uiMode, menuPage, menuSel = uiMenu, pageRoot, 3
+				uiMode, menuPage, menuSel = uiMenu, pageRoot, 8
 			}
 		case uiLogs:
 			// d-pad scrolls (line/page), close keys back to the menu.
@@ -3682,6 +3686,7 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_aprspage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_ft8page"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_stationpage"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_bm"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_syspage"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_exit"), Value: i18n.T("press_a")})
 			case pageRx:
@@ -3728,24 +3733,23 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_wfmax"), Value: fmt.Sprintf("%.0f dB", wfMax)})
 			case pageFT8:
 				items = append(items,
+					ui.MenuItem{Label: i18n.T("m_map"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_ft8"), Value: ft8Label(r.FT8Enabled())},
+					ui.MenuItem{Label: i18n.T("m_bands"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_rtty"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.RTTYEnabled()]},
+					ui.MenuItem{Label: i18n.T("m_rttylog"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_wefax"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxEnabled()]},
 					ui.MenuItem{Label: i18n.T("m_wefaxauto"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxAutoSave()]},
 					ui.MenuItem{Label: i18n.T("m_wefaxclear"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_cwdec"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.CWDecodeEnabled()]},
-					ui.MenuItem{Label: i18n.T("m_cwclear"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_bands"), Value: i18n.T("press_a")})
+					ui.MenuItem{Label: i18n.T("m_cwclear"), Value: i18n.T("press_a")})
 			case pageStation:
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_call"), Value: myCall},
 					ui.MenuItem{Label: i18n.T("m_grid"), Value: myGrid},
 					ui.MenuItem{Label: i18n.T("m_ant"), Value: myAnt},
 					ui.MenuItem{Label: i18n.T("m_rig"), Value: myRig},
-					ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal},
-					ui.MenuItem{Label: i18n.T("m_map"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_rttylog"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_bm"), Value: i18n.T("press_a")})
+					ui.MenuItem{Label: i18n.T("m_psk"), Value: pskVal})
 			case pageAudio:
 				nrVal := i18n.T("off")
 				if lv := r.NoiseReduction(); lv > 0 {
