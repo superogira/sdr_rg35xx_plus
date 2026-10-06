@@ -3433,6 +3433,24 @@ func main() {
 							}
 							r.SetVolume(v)
 						}
+					case input.L1, input.R1:
+						if held[input.Menu] && r.WefaxEnabled() {
+							// MENU+L1/R1 = nudge the WEFAX raster line
+							// start (the decoder's Shift existed but was
+							// never wired to any control).
+							d := 5
+							if ev.Button == input.L1 {
+								d = -5
+							}
+							r.Wefax().Shift(float64(d) / 100)
+							menuInCombo = true
+							brightComboUntil = time.Now().Add(400 * time.Millisecond)
+							menuDownAt = time.Now()
+							capturedMsg = fmt.Sprintf(i18n.T("wfx_shift"), d)
+							capturedAt = time.Now()
+						} else {
+							handlePress(ev.Button)
+						}
 					default:
 						handlePress(ev.Button)
 					}

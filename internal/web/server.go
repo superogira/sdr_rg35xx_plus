@@ -656,6 +656,14 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 		msg := fn(action, v)
 		writeJSON(w, map[string]any{"ok": true, "msg": msg})
 		return
+	case "wfxshift":
+		if s.radio != nil && s.radio.WefaxEnabled() {
+			s.radio.Wefax().Shift(float64(int(c.V)) / 100)
+			writeJSON(w, map[string]any{"ok": true})
+			return
+		}
+		writeJSON(w, map[string]any{"ok": false, "err": "wefax off"})
+		return
 	case "panel":
 		// 0 = screen on, 1 = backlight dim, 2 = screen off (same states
 		// as the device power key).

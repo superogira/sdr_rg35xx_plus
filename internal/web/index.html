@@ -259,6 +259,9 @@ tr:hover td { background:var(--row-hover); }
           <button id="wfxsave" data-i18n="wefaxSave">บันทึก</button>
           <button id="wfxauto" data-i18n="wefaxAuto">เซฟอัตโนมัติ</button>
           <button id="wfxclear" data-i18n="wefaxClear">ล้าง</button>
+          <span style="flex:1"></span>
+          <button id="wfxl" data-i18n-title="ttWfxShift">⇤</button>
+          <button id="wfxr" data-i18n-title="ttWfxShift">⇥</button>
         </div>
         <img id="wfximg" alt="WEFAX" style="display:block;width:100%;max-height:280px;object-fit:contain;image-rendering:pixelated;background:#000;border-radius:6px;border:1px solid var(--card-border)">
       </div>
@@ -352,7 +355,7 @@ const STRINGS = {
     tuneHint: 'กดเพื่อตั้งความถี่',
     signal: 'สัญญาณ', smeterTT: 'มิเตอร์ความแรงสัญญาณ (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
-    aprsNowTT: 'ส่ง beacon เดี๋ยวนี้', ttIGate: 'iGate: ส่งต่อสถานีที่รับจาก RF ขึ้น APRS-IS', ttLabel: 'ป้ายชื่อ/ธง', ttMapPop: 'เปิดแผนที่แท็บใหม่', aprsSt: 'สถานี', aprsRxH: 'ประวัติรับ', aprsTxH: 'ประวัติส่ง',
+    ttWfxShift: 'ขยับจุดเริ่มแถวภาพ FAX ±5%', aprsNowTT: 'ส่ง beacon เดี๋ยวนี้', ttIGate: 'iGate: ส่งต่อสถานีที่รับจาก RF ขึ้น APRS-IS', ttLabel: 'ป้ายชื่อ/ธง', ttMapPop: 'เปิดแผนที่แท็บใหม่', aprsSt: 'สถานี', aprsRxH: 'ประวัติรับ', aprsTxH: 'ประวัติส่ง',
     listenOn: '🔊 ฟัง', listenOff: '🔇 ฟัง', compat: ' (compat)',
     devOn: '🔈 เครื่อง', devOff: '🔇 เครื่อง',
     connFail: '○ เว็บไม่ตอบ', connOff: '○ ไม่เชื่อมต่อ ', tuned: 'จูน → ', reset: ' · ดับเบิลคลิกรีเซ็ต',
@@ -389,7 +392,7 @@ const STRINGS = {
     tuneHint: 'Click to set frequency',
     signal: 'Signal', smeterTT: 'Signal strength meter (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
-    aprsNowTT: 'Send beacon now', ttIGate: 'iGate: forward RF-heard stations to APRS-IS', ttLabel: 'labels/flags', ttMapPop: 'open map in new tab', aprsSt: 'Stations', aprsRxH: 'Receive log', aprsTxH: 'Transmit log',
+    ttWfxShift: 'nudge FAX line start ±5%', aprsNowTT: 'Send beacon now', ttIGate: 'iGate: forward RF-heard stations to APRS-IS', ttLabel: 'labels/flags', ttMapPop: 'open map in new tab', aprsSt: 'Stations', aprsRxH: 'Receive log', aprsTxH: 'Transmit log',
     listenOn: '🔊 Listen', listenOff: '🔇 Listen', compat: ' (compat)',
     devOn: '🔈 Device', devOff: '🔇 Device',
     connFail: '○ no response', connOff: '○ offline ', tuned: 'Tuned → ', reset: ' · dbl-click reset',
@@ -749,6 +752,8 @@ $('afm').onclick = () => { cmd({cmd:'hp', v: 300}); cmd({cmd:'lp', v: 2400}); };
 $('afw').onclick = () => { cmd({cmd:'hp', v: 100}); cmd({cmd:'lp', v: 3000}); };
 $('wfxauto').onclick = () => cmd({cmd:'wefaxauto', on: !st.wefaxAuto});
 $('wfxclear').onclick = () => cmd({cmd:'wefaxclear'});
+  $('wfxl').onclick = () => api('/api/cmd', { cmd: 'wfxshift', v: -5 }).catch(showErr);
+  $('wfxr').onclick = () => api('/api/cmd', { cmd: 'wfxshift', v: 5 }).catch(showErr);
 $('wfxsave').onclick = () => api('/api/cmd', {cmd:'wefaxsave'}).then(d => {
   const f = (d.path || '').split('\u005c').pop().split('/').pop();
   showErr(STRINGS[lang].wefax_saved + f);
