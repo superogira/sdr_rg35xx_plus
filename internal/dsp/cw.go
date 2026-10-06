@@ -19,7 +19,6 @@ import (
 
 const (
 	cwBeatHz   = 700.0
-	cwWinBw    = 60.0 // analysis bandwidth around the beat note
 	cwMaxChars = 160
 )
 
@@ -54,6 +53,15 @@ type CWDecoder struct {
 	text      []rune
 	lastElemN int // test hook: last committed element length
 	drain     []rune
+}
+
+// cwProsigns are multi-character sequences sent as one element run
+// (no inter-element gap); real CW text uses them constantly.
+var cwProsigns = map[string]string{
+	".-...":  "<AS>", // wait
+	"...-.-": "<SK>", // end of contact
+	"-.-.--": "<KN>", // over (specific station)
+	"-....-": "-",    // hyphen
 }
 
 var cwMorse = map[string]rune{
@@ -254,14 +262,19 @@ func (d *CWDecoder) commitElement() {
 	switch {
 	case r < 0.35:
 		// too short to be real — ignore
-	case r < 2.0:
-		// dit and dah are 1× and 3× the dot — split the middle at 2×.
-		// (A boundary at 1.0 flipped the SAME-length element between
-		// dit/dah as the learned dot drifted by ±0.5 sample.)
+	case r < 1.6:
+		// Unambiguous dit: trust it for the speed estimate.
 		d.cur.WriteByte('.')
 		d.learn(d.elemN)
+	case r < 2.4:
+		// Ambiguous (the estimate is off by ~2× — e.g. a dah-led
+		// first character against the 20 wpm default). Classify as
+		// dit but DO NOT learn: learning from a mis-scaled element
+		// poisoned the estimate and garbled everything after it.
+		d.cur.WriteByte('.')
 	default:
 		d.cur.WriteByte('-')
+		d.learn(d.elemN / 3) // unambiguous dah: a third of it is a dit
 	}
 	d.elemN = 0
 }
@@ -285,6 +298,12 @@ func (d *CWDecoder) flushChar() {
 	s := d.cur.String()
 	d.cur.Reset()
 	if s == "" {
+		return
+	}
+	if p, ok := cwProsigns[s]; ok {
+		for _, r := range p {
+			d.push(r)
+		}
 		return
 	}
 	if r, ok := cwMorse[s]; ok {

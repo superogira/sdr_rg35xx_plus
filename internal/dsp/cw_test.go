@@ -59,7 +59,10 @@ func cwSynthText(text string, wpm float64, amp, noise float64) []float64 {
 }
 
 func TestCWDecodesBeacon(t *testing.T) {
-	for _, wpm := range []float64{12, 20, 30} {
+	// Labels are true PARIS speeds: the generator dot is 4800/wpm
+	// samples = half the PARIS dot, so the old 12/20/30 labels were
+	// really 24/40/60 wpm - the decoder handled all of them.
+	for _, wpm := range []float64{24, 40, 60} {
 		text := "VVV DE HS0Z 8NIS"
 		sig := cwSynthText(text, wpm, 0.5, 0.02)
 		d := NewCWDecoder()
