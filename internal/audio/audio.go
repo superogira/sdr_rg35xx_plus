@@ -46,11 +46,12 @@ type Output struct {
 	userClosed bool
 
 	// resampler state between WriteAudio calls.
-	prevIn float32
-	pos    float64 // input-step position of the next output sample
-	inRate float64 // DSP-side audio rate feeding the pipe
-	step   float64 // input steps per output sample = inRate/SampleRate
-	closed bool
+	prevIn  float32
+	pos     float64 // input-step position of the next output sample
+	inRate  float64 // DSP-side audio rate feeding the pipe
+	step    float64 // input steps per output sample = inRate/SampleRate
+	closed  bool
+	healing bool // one healer goroutine at a time
 
 	die chan struct{}
 }
@@ -158,21 +159,46 @@ func (o *Output) selfHeal(reason error) {
 	if o.userClosed || reason == nil {
 		return
 	}
+	o.mu.Lock()
+	if o.healing {
+		o.mu.Unlock()
+		return // exactly one healer chain, ever
+	}
+	o.healing = true
+	o.mu.Unlock()
 	go func() {
-		for delay := 3 * time.Second; ; delay *= 2 {
-			if delay > 15*time.Second {
-				delay = 15 * time.Second
-			}
+		defer func() {
+			o.mu.Lock()
+			o.healing = false
+			o.mu.Unlock()
+		}()
+		// Persistent backoff: every death used to restart the chain at
+		// 3 s, so a device held busy forever (the launcher menu owns
+		// the speaker) spun a spawn-die cycle every few seconds for
+		// the whole session - a CPU sink that starved the UI.
+		delay := 3 * time.Second
+		tries := 0
+		for {
 			time.Sleep(delay)
 			o.mu.Lock()
-			if o.userClosed || !o.closed {
-				o.mu.Unlock()
+			stop := o.userClosed || !o.closed
+			o.mu.Unlock()
+			if stop {
 				return
 			}
-			o.mu.Unlock()
 			if err := o.reopen(); err == nil {
 				fmt.Fprintf(os.Stderr, "audio: %s recovered\n", o.backend)
 				return
+			}
+			tries++
+			if tries == 8 {
+				// ~7 minutes of doubling and still busy: the device is
+				// not coming back soon. Go silent (beacons included)
+				// and retry slowly instead of burning the core.
+				fmt.Fprintf(os.Stderr, "audio: %s busy after %d tries - running silent, slow retry\n", o.backend, tries)
+				delay = 60 * time.Second
+			} else if delay < 30*time.Second {
+				delay *= 2
 			}
 		}
 	}()
