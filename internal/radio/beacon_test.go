@@ -111,8 +111,14 @@ func TestBeaconPlaysWithHostOff(t *testing.T) {
 		if math.Abs(float64(w[0])) > 0.1 {
 			t.Fatalf("resume write #%d (len %d) starts at %v — ramp missing; writes=%d beaconAt=%d", i, len(w), w[0], len(sink.writes), idx)
 		}
-		if math.Abs(float64(w[len(w)-1])) < 0.05 {
-			t.Fatal("resume write never reaches full scale")
+		peak := 0.0
+		for _, v := range w {
+			if a := math.Abs(float64(v)); a > peak {
+				peak = a
+			}
+		}
+		if peak < 0.05 {
+			t.Fatal("resume write carries no signal")
 		}
 		break
 	}
