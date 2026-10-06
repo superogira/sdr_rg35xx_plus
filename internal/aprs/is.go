@@ -61,6 +61,7 @@ func GateLine(f *Frame, igate string) string {
 // internet and must NOT be gated back onto it (loop).
 func FrameFromInternet(f *Frame) bool {
 	for _, d := range f.Digis {
+		d = strings.TrimRight(d, "*") // the used-bit suffix
 		if len(d) >= 2 && d[0] == 'q' && (d[1] == 'A' || d[1] == 'a') {
 			return true
 		}
