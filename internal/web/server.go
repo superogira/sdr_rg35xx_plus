@@ -90,7 +90,7 @@ type Server struct {
 	gpsGet   func() GPSInfo
 	aprsGet  func() []APRSStation
 	aprsCmd  func(action string, v int) string
-	aprsStat func() (rx bool, beac int, isOn bool, count int)
+	aprsStat func() (rx bool, beac int, isOn bool, igate bool, count int)
 	extraTgt func() []Target
 	aprsLog  func() APRSLog
 	ft8Grid  func([]FT8Line) []FT8MapEntry
@@ -221,7 +221,7 @@ func (s *Server) SetExtraTargets(f func() []Target) {
 }
 
 // SetAPRSState hands the web server the live APRS config snapshot.
-func (s *Server) SetAPRSState(f func() (rx bool, beac int, isOn bool, count int)) {
+func (s *Server) SetAPRSState(f func() (rx bool, beac int, isOn bool, igate bool, count int)) {
 	s.mu.Lock()
 	s.aprsStat = f
 	s.mu.Unlock()
@@ -402,6 +402,7 @@ type state struct {
 	AprsRx    bool      `json:"aprsRx"`
 	AprsBeac  int       `json:"aprsBeac"` // 0 off, 1..5 minutes idx, 6 smart
 	AprsIS    bool      `json:"aprsIs"`
+	AprsIgate bool      `json:"aprsIgate"`
 	AprsCount int       `json:"aprsCount"`
 	BwHz      float64   `json:"bwHz"`
 	Bws       []float64 `json:"bws"`
@@ -486,8 +487,8 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	stat := s.aprsStat
 	s.mu.Unlock()
 	if stat != nil {
-		rx, beac, isOn, count := stat()
-		st.AprsRx, st.AprsBeac, st.AprsIS, st.AprsCount = rx, beac, isOn, count
+		rx, beac, isOn, igate, count := stat()
+		st.AprsRx, st.AprsBeac, st.AprsIS, st.AprsIgate, st.AprsCount = rx, beac, isOn, igate, count
 	}
 	for _, m := range dsp.ModeList {
 		st.Modes = append(st.Modes, m.Name)

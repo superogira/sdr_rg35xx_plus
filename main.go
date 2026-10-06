@@ -500,6 +500,8 @@ const (
 	menuAPRSLvl
 	menuAPRSStat
 	menuAPRSLog
+	menuAPRSIgate
+	menuAPRSGateLim
 	menuAPRSNow
 	menuExit
 )
@@ -515,7 +517,7 @@ var pageItems = [][]int{
 	{menuSpan, menuWFMin, menuWFMax},
 	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
-	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSNow},
+	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSIgate, menuAPRSGateLim, menuAPRSNow},
 	{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear},
 	{menuCall, menuGrid, menuAnt, menuRig, menuPSK},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuShot, menuUpdate},
@@ -1016,6 +1018,17 @@ func main() {
 		aprsCmt = v
 	}
 	aprsISOn := cfg["aprsis"] == "on"
+	aprsIgateOn := cfg["aprsigate"] == "on"
+	aprsGateLim := 10 // max gated packets per minute
+	if v, ok := cfg["aprsigatelimit"]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 60 {
+			aprsGateLim = n
+		}
+	}
+	var gateMu sync.Mutex
+	gateMinute := time.Time{}
+	gateCount := 0
+	gateLast := map[string]time.Time{}
 	aprsIServer := "rotate.aprs2.net:14580"
 	if v, ok := cfg["aprsiserver"]; ok && strings.Contains(v, ":") {
 		aprsIServer = v
@@ -1465,6 +1478,51 @@ func main() {
 		}
 		return out
 	})
+	aprsStore.SetOnFrame(func(f *aprs.Frame) {
+		if !aprsIgateOn || aprsCall == "" {
+			return
+		}
+		// Never gate what came off the internet (loop) or our own
+		// transmissions (they are posted as first-party beacons).
+		if aprs.FrameFromInternet(f) {
+			return
+		}
+		base := f.Src
+		if i := strings.IndexByte(base, '-'); i >= 0 {
+			base = base[:i]
+		}
+		own := aprsCall
+		if i := strings.IndexByte(own, '-'); i >= 0 {
+			own = own[:i]
+		}
+		if base == own {
+			return
+		}
+		gateMu.Lock()
+		now := time.Now()
+		if last, ok := gateLast[f.Src]; ok && now.Sub(last) < 30*time.Second {
+			gateMu.Unlock()
+			return // per-station flood guard
+		}
+		if now.Sub(gateMinute) >= time.Minute {
+			gateMinute, gateCount = now, 0
+		}
+		if gateCount >= aprsGateLim {
+			gateMu.Unlock()
+			return // minute budget exhausted
+		}
+		gateCount++
+		gateLast[f.Src] = now
+		gateMu.Unlock()
+		line := aprs.GateLine(f, aprsCall)
+		go func() {
+			if err := aprs.PostRawIS(aprsIServer, aprsCall, line); err != nil {
+				fmt.Fprintf(os.Stderr, "aprs-gate: %v"+string(rune(10)), err)
+			} else {
+				aprsStore.LogTX(aprs.LogEntry{At: time.Now(), Call: f.Src, Comment: "gated", Info: line, Via: "GATE"})
+			}
+		}()
+	})
 	webSrv.SetAPRSLog(func() web.APRSLog {
 		lg := web.APRSLog{}
 		for _, st := range aprsStore.All() {
@@ -1484,8 +1542,8 @@ func main() {
 		lg.Rx, lg.Tx = mk(aprsStore.RxLog()), mk(aprsStore.TxLog())
 		return lg
 	})
-	webSrv.SetAPRSState(func() (bool, int, bool, int) {
-		return r.APRSEnabled(), aprsBeaconIdx, aprsISOn, aprsStore.Count()
+	webSrv.SetAPRSState(func() (bool, int, bool, bool, int) {
+		return r.APRSEnabled(), aprsBeaconIdx, aprsISOn, aprsIgateOn, aprsStore.Count()
 	})
 	webSrv.SetAPRSCmd(func(action string, v int) string {
 		switch action {
@@ -1500,6 +1558,10 @@ func main() {
 				cfg["aprsbeacon"] = []string{"off", "1", "2", "5", "10", "30", "smart"}[v]
 				saveNow()
 			}
+		case "igate":
+			aprsIgateOn = v != 0
+			cfg["aprsigate"] = map[bool]string{true: "on", false: "off"}[aprsIgateOn]
+			saveNow()
 		case "is":
 			aprsISOn = v != 0
 			cfg["aprsis"] = map[bool]string{true: "on", false: "off"}[aprsISOn]
@@ -2146,6 +2208,16 @@ func main() {
 			}
 			cfg["aprspre"] = fmt.Sprintf("%.1f", aprsPre)
 			saveNow()
+		case menuAPRSGateLim:
+			aprsGateLim += dir
+			if aprsGateLim < 1 {
+				aprsGateLim = 1
+			}
+			if aprsGateLim > 60 {
+				aprsGateLim = 60
+			}
+			cfg["aprsigatelimit"] = fmt.Sprintf("%d", aprsGateLim)
+			saveNow()
 		case menuAPRSLvl:
 			aprsLvl += dir * 10
 			if aprsLvl < 0 {
@@ -2291,6 +2363,10 @@ func main() {
 		case menuAPRSLog:
 			aprsLogScroll = 0
 			uiMode = uiAPRSLog
+		case menuAPRSIgate:
+			aprsIgateOn = !aprsIgateOn
+			cfg["aprsigate"] = map[bool]string{true: "on", false: "off"}[aprsIgateOn]
+			saveNow()
 		case menuAPRSNow:
 			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, aprsPre, aprsISOn, aprsIServer, aprsStore, &aprsLastBeacon, &aprsLastCourse, setMsg)
 		case menuAISRF:
@@ -3858,6 +3934,8 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_aprslvl"), Value: fmt.Sprintf("%d%%", aprsLvl)},
 					ui.MenuItem{Label: i18n.T("m_aprsstat"), Value: fmt.Sprintf("%d", aprsStore.Count())},
 					ui.MenuItem{Label: i18n.T("m_aprslog"), Value: ">"},
+					ui.MenuItem{Label: i18n.T("m_aprsigate"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[aprsIgateOn]},
+					ui.MenuItem{Label: i18n.T("m_aprsgatelimit"), Value: fmt.Sprintf("%d/min", aprsGateLim)},
 					ui.MenuItem{Label: i18n.T("m_aprsnow"), Value: i18n.T("press_a")},
 				)
 			case pageGPS:
@@ -4749,6 +4827,13 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	if v, ok := cfg["aprspre"]; ok {
 		fmt.Fprintf(f, "aprspre=%s\n", v)
 	}
+	if v, ok := cfg["aprsigate"]; ok {
+		fmt.Fprintf(f, "aprsigate=%s\n", v)
+	}
+	if v, ok := cfg["aprsigatelimit"]; ok {
+		fmt.Fprintf(f, "aprsigatelimit=%s\n", v)
+	}
+
 	if v, ok := cfg["aprsis"]; ok {
 		fmt.Fprintf(f, "aprsis=%s\n", v)
 	}

@@ -220,6 +220,7 @@ tr:hover td { background:var(--row-hover); }
         <button id="aprsrx">RX</button>
         <select id="aprsbeac" style="width:auto"></select>
         <button id="aprsis">IS</button>
+        <button id="aprsig" data-i18n-title="ttIGate">IG</button>
         <button id="aprsnow" data-i18n-title="aprsNowTT">📤</button>
         <span class="val" id="aprscount" style="color:var(--dim);min-width:24px;text-align:right">0</span>
       </div>
@@ -351,7 +352,7 @@ const STRINGS = {
     tuneHint: 'กดเพื่อตั้งความถี่',
     signal: 'สัญญาณ', smeterTT: 'มิเตอร์ความแรงสัญญาณ (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
-    aprsNowTT: 'ส่ง beacon เดี๋ยวนี้', ttLabel: 'ป้ายชื่อ/ธง', ttMapPop: 'เปิดแผนที่แท็บใหม่', aprsSt: 'สถานี', aprsRxH: 'ประวัติรับ', aprsTxH: 'ประวัติส่ง',
+    aprsNowTT: 'ส่ง beacon เดี๋ยวนี้', ttIGate: 'iGate: ส่งต่อสถานีที่รับจาก RF ขึ้น APRS-IS', ttLabel: 'ป้ายชื่อ/ธง', ttMapPop: 'เปิดแผนที่แท็บใหม่', aprsSt: 'สถานี', aprsRxH: 'ประวัติรับ', aprsTxH: 'ประวัติส่ง',
     listenOn: '🔊 ฟัง', listenOff: '🔇 ฟัง', compat: ' (compat)',
     devOn: '🔈 เครื่อง', devOff: '🔇 เครื่อง',
     connFail: '○ เว็บไม่ตอบ', connOff: '○ ไม่เชื่อมต่อ ', tuned: 'จูน → ', reset: ' · ดับเบิลคลิกรีเซ็ต',
@@ -388,7 +389,7 @@ const STRINGS = {
     tuneHint: 'Click to set frequency',
     signal: 'Signal', smeterTT: 'Signal strength meter (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
-    aprsNowTT: 'Send beacon now', ttLabel: 'labels/flags', ttMapPop: 'open map in new tab', aprsSt: 'Stations', aprsRxH: 'Receive log', aprsTxH: 'Transmit log',
+    aprsNowTT: 'Send beacon now', ttIGate: 'iGate: forward RF-heard stations to APRS-IS', ttLabel: 'labels/flags', ttMapPop: 'open map in new tab', aprsSt: 'Stations', aprsRxH: 'Receive log', aprsTxH: 'Transmit log',
     listenOn: '🔊 Listen', listenOff: '🔇 Listen', compat: ' (compat)',
     devOn: '🔈 Device', devOff: '🔇 Device',
     connFail: '○ no response', connOff: '○ offline ', tuned: 'Tuned → ', reset: ' · dbl-click reset',
@@ -539,6 +540,7 @@ function renderState(s) {
   $('tgt').textContent = s.planes + '/' + s.ships;
   $('aprsrx').className = s.aprsRx ? 'on' : '';
   $('aprsis').className = s.aprsIs ? 'on' : '';
+  $('aprsig').className = s.aprsIgate ? 'on' : '';
   $('aprsbeac').value = String(s.aprsBeac);
   $('aprscount').textContent = s.aprsCount;
   $('tcpu').textContent = s.cpuTemp ? s.cpuTemp.toFixed(0) : '–';
@@ -612,6 +614,7 @@ function updateGPS(g) {
   beac.onchange = () => api('/api/cmd', { cmd: 'aprs', name: 'beacon', v: +beac.value }).catch(showErr);
   $('aprsrx').onclick = () => api('/api/cmd', { cmd: 'aprs', name: 'rx', v: $('aprsrx').classList.contains('on') ? 0 : 1 }).catch(showErr);
   $('aprsis').onclick = () => api('/api/cmd', { cmd: 'aprs', name: 'is', v: $('aprsis').classList.contains('on') ? 0 : 1 }).catch(showErr);
+  $('aprsig').onclick = () => api('/api/cmd', { cmd: 'aprs', name: 'igate', v: $('aprsig').classList.contains('on') ? 0 : 1 }).catch(showErr);
   $('aprsnow').onclick = () => api('/api/cmd', { cmd: 'aprs', name: 'now', v: 0 }).catch(showErr);
 })();
 $('gpsrow').onclick = () => { $('gpsmodal').style.display = 'flex'; };

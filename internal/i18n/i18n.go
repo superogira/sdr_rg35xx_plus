@@ -87,6 +87,8 @@ var strings = map[string][2]string{
 	"m_aprsstat":         {"สถานีที่รับได้", "Stations heard"},
 	"m_aprsnow":          {"ส่งเดี๋ยวนี้ (ทดสอบ)", "Send now (test)"},
 	"m_aprslog":          {"ประวัติ APRS", "APRS log"},
+	"m_aprsigate":        {"iGate (RF→IS)", "iGate (RF→IS)"},
+	"m_aprsgatelimit":    {"จำกัดเกตต่อนาที", "Gate limit /min"},
 	"aprs_every_min":     {"ทุก %s นาที", "every %s min"},
 	"aprs_sent":          {"APRS: ส่งแล้ว (เปิด VOX วิทยุ)", "APRS: sent (radio VOX on)"},
 	"aprs_nogps":         {"APRS: รอพิกัด GPS", "APRS: waiting for GPS fix"},

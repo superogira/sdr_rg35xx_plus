@@ -44,11 +44,20 @@ type LogEntry struct {
 // Store keeps the newest report per callsign plus receive/transmit
 // histories.
 type Store struct {
-	mu  sync.Mutex
-	m   map[string]*Station
-	own *Station // our last transmitted position (shown on the radar)
-	rx  []LogEntry
-	tx  []LogEntry
+	mu      sync.Mutex
+	m       map[string]*Station
+	own     *Station // our last transmitted position (shown on the radar)
+	onFrame func(*Frame)
+	rx      []LogEntry
+	tx      []LogEntry
+}
+
+// SetOnFrame installs a callback invoked with every decoded frame
+// (after station bookkeeping) — the IGate path uses it.
+func (s *Store) SetOnFrame(f func(*Frame)) {
+	s.mu.Lock()
+	s.onFrame = f
+	s.mu.Unlock()
 }
 
 const logCap = 60
@@ -115,8 +124,12 @@ func (s *Store) ProcessFrame(body []byte) *Station {
 		LastHeard: time.Now(),
 	}
 	s.mu.Lock()
+	hook := s.onFrame
 	s.m[st.Call] = st
 	s.mu.Unlock()
+	if hook != nil {
+		hook(f)
+	}
 	s.LogRX(LogEntry{At: st.LastHeard, Call: st.Call, Lat: st.Lat, Lon: st.Lon,
 		SpeedKt: st.SpeedKt, Course: st.CourseDeg, AltFt: st.AltFt,
 		Comment: st.Comment, Info: string(f.Info), Via: "RF", Sym: string(st.Sym)})

@@ -65,3 +65,26 @@ func TestPostISFakeServer(t *testing.T) {
 		t.Errorf("packet = %q", r.packet)
 	}
 }
+
+// The IGate must never forward internet-origin frames (loop) and must
+// render the qAR construct with the heard path intact.
+func TestGateLineAndInternetGuard(t *testing.T) {
+	f := &Frame{Src: "HS1ABC-9", Dest: "APRS", Digis: []string{"WIDE1-1*", "WIDE2-1"},
+		Info: []byte("!1357.33N/10033.71E>")}
+	line := GateLine(f, "E25WOP-8")
+	want := "HS1ABC-9>APRS,WIDE1-1*,WIDE2-1,qAR,E25WOP-8:!1357.33N/10033.71E>"
+	if line != want {
+		t.Fatalf("GateLine = %q want %q", line, want)
+	}
+	if FrameFromInternet(f) {
+		t.Fatal("fresh RF frame flagged as internet")
+	}
+	f2 := &Frame{Src: "X", Dest: "APRS", Digis: []string{"qAR,SOMEGATE"}}
+	if !FrameFromInternet(f2) {
+		t.Fatal("qAR frame must be rejected")
+	}
+	f3 := &Frame{Src: "X", Dest: "APRS", Digis: []string{"TCPIP*"}}
+	if !FrameFromInternet(f3) {
+		t.Fatal("TCPIP frame must be rejected")
+	}
+}
