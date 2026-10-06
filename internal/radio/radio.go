@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"sort"
 	"sync"
 	"time"
 
@@ -515,6 +516,13 @@ func (r *Radio) session(ctx context.Context) error {
 	var rateT0 time.Time
 	var rateB0 uint64
 	rateDone := false
+	// Rate watchdog state: per-second byte deltas (median-based, so a
+	// stalled second is an outlier instead of the verdict) and a
+	// two-window agreement requirement before any re-dimension.
+	var rateSamples []float64
+	var rateLastSec time.Time
+	var rateLastTotal uint64
+	var ratePendingSnap int
 	// Cumulative drop monitor: nominal bytes vs received over the whole
 	// session. A deficit means the SERVER dropped samples (WiFi jitter
 	// on its side) — heard on SSB/CW as a momentary pitch slide.
@@ -594,8 +602,28 @@ func (r *Radio) session(ctx context.Context) error {
 				if rateT0.IsZero() && total >= 512*1024 {
 					rateT0 = time.Now()
 					rateB0 = total
-				} else if !rateT0.IsZero() && time.Since(rateT0) >= 6*time.Second {
-					actual := float64(total-rateB0) / time.Since(rateT0).Seconds() / 2
+					rateLastSec = time.Now()
+					rateLastTotal = total
+				} else if !rateT0.IsZero() {
+					// One sample per second of stream.
+					if time.Since(rateLastSec) >= time.Second {
+						dt := time.Since(rateLastSec).Seconds()
+						rateSamples = append(rateSamples, float64(total-rateLastTotal)/dt/2)
+						rateLastSec, rateLastTotal = time.Now(), total
+						if len(rateSamples) > 40 {
+							rateSamples = rateSamples[len(rateSamples)-40:]
+						}
+					}
+				}
+				if !rateT0.IsZero() && len(rateSamples) >= 6 {
+					// Median of the per-second deltas: a stalled second
+					// (USB hiccup, beacon, CPU spike) is an outlier the
+					// median ignores — the old single 6-second window let
+					// it pick the wrong rate and slide the whole
+					// waterfall until the next reconnect re-measured.
+					sorted := append([]float64(nil), rateSamples...)
+					sort.Float64s(sorted)
+					actual := sorted[len(sorted)/2]
 					// Snap only to rates the server actually supports.
 					// Quantizing one burst measurement to an arbitrary
 					// 32 kHz multiple once re-dimensioned the DSP to
@@ -615,16 +643,28 @@ func (r *Radio) session(ctx context.Context) error {
 						// connect already requested a supported rate — and
 						// never kill the session over one bad measurement.
 						fmt.Fprintf(os.Stderr, "radio: measured %.3f Msps matches no supported rate — keeping %d Hz\n", actual/1e6, dsp.IQRate)
+						rateDone = true
 					} else if snap != dsp.IQRate {
-						fmt.Fprintf(os.Stderr, "radio: stream measures %.3f Msps — re-dimensioning DSP from %d to %d Hz\n", actual/1e6, dsp.IQRate, snap)
-						dsp.SetIQRate(snap)
-						r.SetMode(r.Mode()) // rebuilds the chain + resampler rate
+						// Re-dimensioning slides every waterfall: demand
+						// two consecutive windows that agree first.
+						if ratePendingSnap == snap && len(rateSamples) >= 12 {
+							fmt.Fprintf(os.Stderr, "radio: stream measures %.3f Msps in two windows — re-dimensioning DSP from %d to %d Hz\n", actual/1e6, dsp.IQRate, snap)
+							dsp.SetIQRate(snap)
+							r.SetMode(r.Mode()) // rebuilds the chain + resampler rate
+							rateDone = true
+						} else if ratePendingSnap != snap {
+							ratePendingSnap = snap
+							rateSamples = rateSamples[len(rateSamples)/2:]
+							fmt.Fprintf(os.Stderr, "radio: first window measures %.3f Msps (%d) — confirming\n", actual/1e6, snap)
+						}
 					} else {
 						fmt.Fprintf(os.Stderr, "radio: stream rate confirmed %d Hz (%.3f Msps measured)\n", snap, actual/1e6)
+						rateDone = true
 					}
-					rateDone = true
-					sessT0 = rateT0
-					lastDropChk = time.Now()
+					if rateDone {
+						sessT0 = rateT0
+						lastDropChk = time.Now()
+					}
 				}
 			}
 			if rateDone && time.Since(lastDropChk) >= 10*time.Second {
