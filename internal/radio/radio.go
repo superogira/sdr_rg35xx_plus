@@ -503,6 +503,7 @@ func (r *Radio) session(ctx context.Context) error {
 	}
 
 	buf := make([]byte, readBufBytes)
+	rdT0 := time.Now()
 	var audioBuf []float32
 	// Samples left of the release ramp when the received audio resumes
 	// after a beacon (starting mid-waveform clicks).
@@ -557,6 +558,13 @@ func (r *Radio) session(ctx context.Context) error {
 			} else {
 				flatBlocks = 0
 			}
+			// Evidence trail: a stalled read is a hole in the audio
+			// timeline — FT8 payloads spanning one lose their symbol
+			// alignment and fail CRC no matter how strong the signal.
+			if rdGap := time.Since(rdT0); rdGap > 150*time.Millisecond {
+				fmt.Fprintf(os.Stderr, "radio: read gap %v (%d bytes)\n", rdGap.Round(time.Millisecond), n)
+			}
+			rdT0 = time.Now()
 			r.mu.Lock()
 			chain := r.chain
 			r.mu.Unlock()
