@@ -273,6 +273,13 @@ func New(r *radio.Radio, adsbStore *adsb.Store, aisStore *ais.Store, port int, t
 	return srv
 }
 
+// ResetFT8 clears the web FT8 log (demo seeding rebuilds it fresh).
+func (s *Server) ResetFT8() {
+	s.logMu.Lock()
+	s.ft8Log = nil
+	s.logMu.Unlock()
+}
+
 // AddFT8 mirrors one decode into the web log (called from the DSP
 // callback goroutine; mutex-guarded unlike the on-device window list).
 func (s *Server) AddFT8(l FT8Line) {

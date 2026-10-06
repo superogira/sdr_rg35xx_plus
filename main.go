@@ -1351,15 +1351,30 @@ func main() {
 		return out
 	})
 	if os.Getenv("SDR_MAP_DEMO") != "" || os.Getenv("SDR_ADSB_DEMO") != "" {
-		now := time.Now()
-		for i, m := range []struct{ t, text string }{
-			{now.Add(-20 * time.Second).Format("15:04:05"), "CQ HS0JR KO85"},
-			{now.Add(-70 * time.Second).Format("15:04:05"), "CQ 9M2XYZ OJ02"},
-			{now.Add(-3 * time.Minute).Format("15:04:05"), "HS0JR DU1XXX PK04"},
-			{now.Add(-5 * time.Minute).Format("15:04:05"), "CQ E21ABC OK03"},
-		} {
-			webSrv.AddFT8(web.FT8Line{Time: m.t, SNR: -float64(i), Hz: 500 + float64(i*37), Text: m.text})
+		// Dev aid: rolling FT8 traffic so the web map's FT8 layer always
+		// has fresh entries inside the 10-minute window (a one-shot seed
+		// ages out and the layer goes blank after a few minutes).
+		seedFT8 := func() {
+			now := time.Now()
+			webSrv.ResetFT8()
+			for i, m := range []struct {
+				dt   time.Duration
+				text string
+			}{
+				{-20 * time.Second, "CQ HS0JR KO85"},
+				{-70 * time.Second, "CQ 9M2XYZ OJ02"},
+				{-3 * time.Minute, "HS0JR DU1XXX PK04"},
+				{-5 * time.Minute, "CQ E21ABC OK03"},
+			} {
+				webSrv.AddFT8(web.FT8Line{Time: now.Add(m.dt).Format("15:04:05"), SNR: -float64(i), Hz: 500 + float64(i*37), Text: m.text})
+			}
 		}
+		seedFT8()
+		go func() {
+			for range time.Tick(30 * time.Second) {
+				seedFT8()
+			}
+		}()
 	}
 	webSrv.SetFT8Grid(func(log []web.FT8Line) []web.FT8MapEntry {
 		now := time.Now()
