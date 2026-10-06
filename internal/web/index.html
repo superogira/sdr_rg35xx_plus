@@ -96,9 +96,14 @@ button.nudge { padding:2px 7px; font-size:11px; line-height:1.4; flex:0 0 auto; 
 .ownmark { outline:2px solid #fff; outline-offset:2px; border-radius:50%; }
 .tgtlbl { background:rgba(0,0,0,.65); border:none; color:#dfe; font-size:11px; padding:1px 5px; border-radius:4px; }
 body.maponly header, body.maponly .card:not(:has(#pane-map)) { display:none !important; }
+body.maponly #tabs { display:none !important; }
 body.maponly main { grid-template-columns:1fr; padding:0; gap:0; }
-body.maponly .card:has(#pane-map) { margin:0; border:none; border-radius:0; padding:6px; }
-body.maponly #map { height:calc(100vh - 92px) !important; }
+body.maponly .card:has(#pane-map) { margin:0; border:none; border-radius:0; padding:4px 6px; }
+body.maponly { overflow:hidden; height:100vh; }
+body.maponly main { padding:0; height:100vh; overflow:hidden; align-items:start; }
+body.maponly main .card:has(#pane-map) { display:flex; flex-direction:column; height:calc(100vh - 8px); box-sizing:border-box; }
+body.maponly #pane-map { display:flex; flex-direction:column; flex:1; min-height:0; }
+body.maponly #pane-map #map { flex:1; height:auto !important; min-height:0; }
 .tgt svg { display:block; filter:drop-shadow(0 0 3px rgba(0,0,0,.85)); transition:transform .6s linear; }
 .freq { font-size:34px; font-variant-numeric:tabular-nums; color:var(--acc); cursor:pointer; }
 .freq small { font-size:14px; color:var(--dim); }
