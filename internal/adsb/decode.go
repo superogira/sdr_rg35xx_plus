@@ -29,6 +29,20 @@ var cprBoundaries = []float64{
 }
 
 // cprNL returns the number of longitude zones at a latitude.
+// impliedKt is the great-circle ground speed between two fixes.
+func impliedKt(la1, lo1, la2, lo2 float64, dt time.Duration) float64 {
+	if dt <= 0 {
+		return 0
+	}
+	const R = 6371.0
+	p1, p2 := la1*math.Pi/180, la2*math.Pi/180
+	dp := p2 - p1
+	dl := (lo2 - lo1) * math.Pi / 180
+	a := math.Sin(dp/2)*math.Sin(dp/2) + math.Cos(p1)*math.Cos(p2)*math.Sin(dl/2)*math.Sin(dl/2)
+	km := 2 * R * math.Asin(math.Sqrt(a))
+	return km / (dt.Hours() * 1.852)
+}
+
 func cprNL(lat float64) int {
 	a := math.Abs(lat)
 	for i, b := range cprBoundaries {
@@ -66,6 +80,7 @@ type Plane struct {
 	Trail    []TrailPt // last minute of flown positions
 
 	even, odd *cprPos
+	posAt     time.Time // when the last ACCEPTED position fix landed
 }
 
 // Store holds aircraft by ICAO, pruned by TTL.
@@ -192,6 +207,13 @@ func (s *Store) globalDecode(p *Plane, latestOdd bool) {
 	if p.even == nil || p.odd == nil {
 		return
 	}
+	// Pairing window (the dump1090 rule): a global decode from an
+	// even/odd pair seconds apart is still exact, but pairing frames
+	// tens of seconds apart yields a position a full CPR zone off —
+	// the "plane teleports 300 km" glitch. Wait for a fresh pair.
+	if d := p.even.at.Sub(p.odd.at); d > 10*time.Second || d < -10*time.Second {
+		return
+	}
 	const nz = 15
 	dlat0 := 360.0 / (4 * nz)
 	dlat1 := 360.0 / (4*nz - 1)
@@ -221,7 +243,22 @@ func (s *Store) globalDecode(p *Plane, latestOdd bool) {
 	for lon < -180 {
 		lon += 360
 	}
+	// Plausibility: if this fix implies an impossible ground speed
+	// (>1200 kt over the time since the last ACCEPTED fix), the pair
+	// was subtly corrupted — keep the old position and drop the older
+	// frame so the next squitter re-pairs cleanly.
+	if p.HasPos {
+		if kt := impliedKt(p.Lat, p.Lon, lat, lon, time.Since(p.posAt)); kt > 1200 {
+			if p.even.at.Before(p.odd.at) {
+				p.even = nil
+			} else {
+				p.odd = nil
+			}
+			return
+		}
+	}
 	p.Lat, p.Lon, p.HasPos = lat, lon, true
+	p.posAt = time.Now()
 	// Breadcrumbs: one dot every 5 s of flight within a five-minute
 	// window (~60 dots). Position fixes arrive ~1/s — laying a dot on
 	// every fix made a dense 1-px smear that was invisible on the

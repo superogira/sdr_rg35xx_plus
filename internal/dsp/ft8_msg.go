@@ -271,7 +271,14 @@ func ft8Unpack77(b []int) string {
 		}
 		return fmt.Sprintf("%s%s %s %s%s %s", prefix, call1, call2, r, rpt, field)
 	}
-	return fmt.Sprintf("<i3=%d n3=%d>", i3, n3)
+	// i3=6/7 carry non-standard calls as 22-bit hashes — resolving
+	// them needs a running hash table of previously-heard calls, which
+	// we do not keep. They are VALID protocol messages, but showing
+	// "<i3=6 n3=1>" in the log reads as a decoder bug, so they are
+	// dropped from the visible stream (Text "" = filtered).
+	_ = i3
+	_ = n3
+	return ""
 }
 
 // ft8DecodeCodeword runs LDPC + CRC over the 174 soft LLRs and returns
@@ -286,7 +293,10 @@ func ft8DecodeCodeword(llr []float64) (*FT8Message, string) {
 		// route for the last fraction of a dB).
 		if bits := ft8OSD(llr, ft8OSDOrder); bits != nil {
 			if ft8VerifyCRC(bits) {
-				return &FT8Message{Text: ft8Unpack77(bits[:77]), Valid: true}, "osd"
+				if t := ft8Unpack77(bits[:77]); t != "" {
+					return &FT8Message{Text: t, Valid: true}, "osd"
+				}
+				return nil, "typed-msg"
 			}
 			return nil, fmt.Sprintf("ldpc=%d osd-crc", errs)
 		}
@@ -295,7 +305,10 @@ func ft8DecodeCodeword(llr []float64) (*FT8Message, string) {
 	if !ft8VerifyCRC(plain) {
 		// BP converged to the wrong codeword — OSD gets another shot.
 		if bits := ft8OSD(llr, ft8OSDOrder); bits != nil && ft8VerifyCRC(bits) {
-			return &FT8Message{Text: ft8Unpack77(bits[:77]), Valid: true}, "osd"
+			if t := ft8Unpack77(bits[:77]); t != "" {
+				return &FT8Message{Text: t, Valid: true}, "osd"
+			}
+			return nil, "typed-msg"
 		}
 		var a91 [12]byte
 		ft8PackBits(plain, 91, a91[:])
@@ -305,5 +318,8 @@ func ft8DecodeCodeword(llr []float64) (*FT8Message, string) {
 		calculated := ft8CRC14(a91[:], 96-14)
 		return nil, fmt.Sprintf("crc:%04x!=%04x", extracted, calculated)
 	}
-	return &FT8Message{Text: ft8Unpack77(plain[:77]), Valid: true}, ""
+	if t := ft8Unpack77(plain[:77]); t != "" {
+		return &FT8Message{Text: t, Valid: true}, ""
+	}
+	return nil, "typed-msg"
 }
