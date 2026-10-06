@@ -536,7 +536,12 @@ func (u *UI) drawArc(x1, y1, x2, y2 int, fade, phase float64) {
 	for _, p := range pts {
 		dist += math.Hypot(float64(p.X)-px, float64(p.Y)-py)
 		px, py = float64(p.X), float64(p.Y)
-		m := math.Mod(dist+phase, 24)
+		// Dashes advance TOWARDS the receiver (larger arc length), like
+		// the web map: the boundary of a dash sits where dist-phase is
+		// constant, so growing phase pushes it forward. +24 keeps the
+		// argument non-negative for dist < phase (math.Mod of a
+		// negative painted a solid bar over the first stretch).
+		m := math.Mod(dist-phase+24, 24)
 		switch {
 		case m < 6:
 			u.setPixel(p.X, p.Y, yellow)

@@ -1406,22 +1406,17 @@ function arcPath(la1, lo1, la2, lo2, n = 24, peak = 0.22) {
 // dash updates would fight Leaflet's own repaint and jank low-end
 // machines; the colour attribute flips only twice a second, and empty
 // layers cost nothing.
-let flowPaths = [], flowPhase = 0, flowLastTs = 0, flowColAt = -1, mapMoving = 0, flowRafOn = false;
+let flowPaths = [], flowPhase = 0, flowLastTs = 0, mapMoving = 0, flowRafOn = false;
 function flowAnim(ts) {
   requestAnimationFrame(flowAnim);
   if (!flowPaths.length || document.hidden || mapMoving > 0) { flowLastTs = ts; return; }
   if (ts - flowLastTs < 33) return; // ~30 fps cap
   flowPhase = (flowPhase + (ts - flowLastTs) * 0.045) % 26;
   flowLastTs = ts;
-  const slot = Math.floor(ts / 500) % 2;
-  const setCol = slot !== flowColAt;
-  const col = slot ? '#ff9a40' : '#ffd24a';
-  if (setCol) flowColAt = slot;
-  for (const p of flowPaths) {
-    const el = p.getElement ? p.getElement() : p._path;
+  for (const f of flowPaths) {
+    const el = f.el.getElement ? f.el.getElement() : f.el._path;
     if (!el) continue;
-    el.setAttribute('stroke-dashoffset', -flowPhase.toFixed(1));
-    if (setCol) el.setAttribute('stroke', col);
+    el.setAttribute('stroke-dashoffset', (-flowPhase + f.off).toFixed(1));
   }
 }
 requestAnimationFrame(flowAnim);
@@ -1456,10 +1451,18 @@ async function ft8MapPoll() {
         if (e.arc) {
           // QSO: curved dashed flow sender → receiver over a dark
           // casing so it reads on every basemap (light AND dark).
+          // Two overlaid 6-on/18-off patterns offset by half a period
+          // give the handheld's per-dash yellow/orange alternation
+          // (not a whole-line blink); both advance with one phase.
           const pts = arcPath(e.fromLat, e.fromLon, e.lat, e.lon);
           L.polyline(pts, { color: '#000', weight: 5, opacity: .55, lineCap: 'round' }).addTo(ft8Layer);
-          const flow = L.polyline(pts, { color: '#ffd24a', weight: 2.4, opacity: .95, dashArray: '9 8', lineCap: 'round' }).addTo(ft8Layer);
-          flowPaths.push(flow);
+          const yel = L.polyline(pts, { color: '#ffd24a', weight: 2.4, opacity: .95, dashArray: '6 18', lineCap: 'round' }).addTo(ft8Layer);
+          const org = L.polyline(pts, { color: '#ff9a40', weight: 2.4, opacity: .95, dashArray: '6 18', lineCap: 'round' }).addTo(ft8Layer);
+          flowPaths.push({ el: yel, off: 0 }, { el: org, off: -12 });
+          // The SENDER draws red at the arc's origin (device rule).
+          L.circleMarker([e.fromLat, e.fromLon], { radius: 3.5, color: '#ff5a5a', weight: 1.5, fillColor: '#ff5a5a', fillOpacity: .8 })
+            .bindTooltip(`<span style="color:#ff5a5a">${esc(e.call)}</span> · ${esc(e.text.slice(0, 30))}`, { direction: 'top' })
+            .addTo(ft8Layer);
         }
         const col = e.arc ? '#35e08a' : '#ff5a5a';
         const mk = L.circleMarker([e.lat, e.lon], { radius: e.cq ? 4 : 3.5, color: col, weight: 1.5, fillColor: col, fillOpacity: e.approx ? 0.15 : 0.6 });
