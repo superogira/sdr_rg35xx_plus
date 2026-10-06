@@ -787,16 +787,17 @@ func (s *Server) handleFlag(w http.ResponseWriter, r *http.Request) {
 
 // FT8MapEntry mirrors ui.MapEntry for the web map.
 type FT8MapEntry struct {
-	Lat, Lon float64 `json:"lat"`
-	FromLat  float64 `json:"fromLat"`
-	FromLon  float64 `json:"fromLon"`
-	Arc      bool    `json:"arc"`
-	IsCQ     bool    `json:"cq"`
-	Approx   bool    `json:"approx"`
-	AgeSec   float64 `json:"ageSec"`
-	Call     string  `json:"call"`
-	ToCall   string  `json:"toCall"`
-	Text     string  `json:"text"`
+	Lat     float64 `json:"lat"`
+	Lon     float64 `json:"lon"`
+	FromLat float64 `json:"fromLat"`
+	FromLon float64 `json:"fromLon"`
+	Arc     bool    `json:"arc"`
+	IsCQ    bool    `json:"cq"`
+	Approx  bool    `json:"approx"`
+	AgeSec  float64 `json:"ageSec"`
+	Call    string  `json:"call"`
+	ToCall  string  `json:"toCall"`
+	Text    string  `json:"text"`
 }
 
 func (s *Server) handleFT8Map(w http.ResponseWriter, r *http.Request) {

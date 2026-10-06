@@ -752,6 +752,7 @@ for (const t of ['ft8','ais','tgt','map','aprs']) {
       $('pane-'+o).hidden = o!==t;
     }
     if (t === 'map' && st) initMap(st);
+    if (t === 'map') setTimeout(() => { const m = document.getElementById('map'); if (m) m.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, 60);
     if (t === 'aprs') aprsPoll();
     if (t === 'map' && map) setTimeout(() => map.invalidateSize(), 60);
     poll();
