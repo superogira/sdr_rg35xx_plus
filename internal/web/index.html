@@ -92,18 +92,24 @@ select, input { min-width:0; }
 .card { background:var(--panel); border:1px solid var(--card-border); border-radius:10px; padding:12px; }
 .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:2px; color:var(--dim); margin:0 0 10px; }
 button.nudge { padding:2px 7px; font-size:11px; line-height:1.4; flex:0 0 auto; }
+#pane-map { position:relative; }
+.mapctlbtn { }
+body.maponly #mapctl button, body.maponly #mapctl select { background:rgba(10,20,15,.82); }
 .tgt { background:none; border:none; }
 .ownmark { outline:2px solid #fff; outline-offset:2px; border-radius:50%; }
 .tgtlbl { background:rgba(0,0,0,.65); border:none; color:#dfe; font-size:11px; padding:1px 5px; border-radius:4px; }
 body.maponly header, body.maponly .card:not(:has(#pane-map)) { display:none !important; }
-body.maponly #tabs { display:none !important; }
+body.maponly .tabs { display:none !important; }
+body.maponly #mapPop { display:none !important; }
+body.maponly main .card:has(#pane-map) { border:none; background:transparent; padding:0; margin:0 !important; height:100vh; }
+body.maponly main .card:has(#pane-map) > h2, body.maponly main .card:has(#pane-map) > .tabs { display:none; }
+body.maponly #pane-map #map { height:100vh !important; border-radius:0; }
+body.maponly #mapctl { top:10px; }
 body.maponly main { grid-template-columns:1fr; padding:0; gap:0; }
 body.maponly .card:has(#pane-map) { margin:0; border:none; border-radius:0; padding:4px 6px; }
 body.maponly { overflow:hidden; height:100vh; }
-body.maponly main { padding:0; height:100vh; overflow:hidden; align-items:start; }
-body.maponly main .card:has(#pane-map) { display:flex; flex-direction:column; height:calc(100vh - 8px); box-sizing:border-box; }
-body.maponly #pane-map { display:flex; flex-direction:column; flex:1; min-height:0; }
-body.maponly #pane-map #map { flex:1; height:auto !important; min-height:0; }
+body.maponly main { padding:0; gap:0; height:100vh; overflow:hidden; align-items:start; }
+
 .tgt svg { display:block; filter:drop-shadow(0 0 3px rgba(0,0,0,.85)); transition:transform .6s linear; }
 .freq { font-size:34px; font-variant-numeric:tabular-nums; color:var(--acc); cursor:pointer; }
 .freq small { font-size:14px; color:var(--dim); }
@@ -265,15 +271,15 @@ tr:hover td { background:var(--row-hover); }
         <button id="tab-tgt" data-i18n="targets">Targets</button>
         <button id="tab-map" data-i18n="map">Map</button><button id="tab-aprs">APRS</button>
       </div>
-      <div id="pane-map" hidden><div id="map" style="height:420px;border-radius:8px;background:#0b1410"></div>
-        <div class="row" style="margin-top:6px">
+      <div id="pane-map" hidden>
+        <div id="map" style="height:420px;border-radius:8px;background:#0b1410"></div>
+        <div id="mapctl" style="position:absolute;z-index:800;top:8px;left:8px;display:flex;gap:6px;align-items:center;pointer-events:auto">
           <button id="tgPlane">✈</button><button id="tgShip">⛵</button><button id="tgAprs">◆</button>
           <button id="tgLabel" data-i18n-title="ttLabel">🏷+🚩</button>
-          <span style="flex:1"></span>
-          <button id="mapPop" data-i18n-title="ttMapPop">⛶</button>
+          <select id="mlayer" style="width:auto"></select>
+          <span id="mattr" style="color:rgba(255,255,255,.75);font-size:11px;text-shadow:0 1px 2px #000"></span>
         </div>
-        <div class="row" style="margin-top:6px"><label data-i18n="mlayer">ชั้นแผนที่</label><select id="mlayer"></select>
-          <span class="val" id="mattr" style="color:var(--dim);font-size:11px"></span></div>
+        <button id="mapPop" data-i18n-title="ttMapPop" style="position:absolute;z-index:800;top:8px;right:44px">⛶</button>
       </div>
       <div id="pane-aprs" hidden>
         <div style="max-height:170px;overflow-y:auto"><table><thead><tr><th data-i18n="aprsSt">สถานี</th><th data-i18n="pos">พิกัด</th><th data-i18n="altspd">สูง/เร็ว</th><th data-i18n="age">อายุ</th></tr></thead><tbody id="aprsSt"></tbody></table></div>
