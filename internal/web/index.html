@@ -104,7 +104,7 @@ body.maponly #mapPop { display:none !important; }
 body.maponly main .card:has(#pane-map) { border:none; background:transparent; padding:0; margin:0 !important; height:100vh; }
 body.maponly main .card:has(#pane-map) > h2, body.maponly main .card:has(#pane-map) > .tabs { display:none; }
 body.maponly #pane-map #map { height:100vh !important; border-radius:0; }
-body.maponly #mapctl { top:10px; }
+body.maponly #mapctl { bottom:24px; }
 body.maponly main { grid-template-columns:1fr; padding:0; gap:0; }
 body.maponly .card:has(#pane-map) { margin:0; border:none; border-radius:0; padding:4px 6px; }
 body.maponly { overflow:hidden; height:100vh; }
@@ -273,13 +273,13 @@ tr:hover td { background:var(--row-hover); }
       </div>
       <div id="pane-map" hidden>
         <div id="map" style="height:420px;border-radius:8px;background:#0b1410"></div>
-        <div id="mapctl" style="position:absolute;z-index:800;top:8px;left:8px;display:flex;gap:6px;align-items:center;pointer-events:auto">
+        <div id="mapctl" style="position:absolute;z-index:800;bottom:18px;left:8px;display:flex;gap:6px;align-items:center;pointer-events:auto">
           <button id="tgPlane">✈</button><button id="tgShip">⛵</button><button id="tgAprs">◆</button>
           <button id="tgLabel" data-i18n-title="ttLabel">🏷+🚩</button>
           <select id="mlayer" style="width:auto"></select>
           <span id="mattr" style="color:rgba(255,255,255,.75);font-size:11px;text-shadow:0 1px 2px #000"></span>
         </div>
-        <button id="mapPop" data-i18n-title="ttMapPop" style="position:absolute;z-index:800;top:8px;right:44px">⛶</button>
+        <button id="mapPop" data-i18n-title="ttMapPop" style="position:absolute;z-index:800;bottom:18px;right:44px">⛶</button>
       </div>
       <div id="pane-aprs" hidden>
         <div style="max-height:170px;overflow-y:auto"><table><thead><tr><th data-i18n="aprsSt">สถานี</th><th data-i18n="pos">พิกัด</th><th data-i18n="altspd">สูง/เร็ว</th><th data-i18n="age">อายุ</th></tr></thead><tbody id="aprsSt"></tbody></table></div>
