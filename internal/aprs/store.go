@@ -23,6 +23,7 @@ type Station struct {
 	HasAlt    bool
 	Comment   string
 	LastHeard time.Time
+	Own       bool // our own transmitted position
 }
 
 // LogEntry is one received or transmitted packet (for the history
@@ -43,10 +44,11 @@ type LogEntry struct {
 // Store keeps the newest report per callsign plus receive/transmit
 // histories.
 type Store struct {
-	mu sync.Mutex
-	m  map[string]*Station
-	rx []LogEntry
-	tx []LogEntry
+	mu  sync.Mutex
+	m   map[string]*Station
+	own *Station // our last transmitted position (shown on the radar)
+	rx  []LogEntry
+	tx  []LogEntry
 }
 
 const logCap = 60
@@ -121,12 +123,25 @@ func (s *Store) ProcessFrame(body []byte) *Station {
 	return st
 }
 
+// SetOwn records our last transmitted position so the radar and the
+// web map show where we reported ourselves, next to decoded stations.
+func (s *Store) SetOwn(st Station) {
+	st.Own = true
+	st.LastHeard = time.Now()
+	s.mu.Lock()
+	s.own = &st
+	s.mu.Unlock()
+}
+
 // All returns stations heard inside the TTL, newest first.
 func (s *Store) All() []Station {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]Station, 0, len(s.m))
+	out := make([]Station, 0, len(s.m)+1)
 	cut := time.Now().Add(-StationTTL)
+	if s.own != nil && !s.own.LastHeard.Before(cut) {
+		out = append(out, *s.own)
+	}
 	for _, st := range s.m {
 		if st.LastHeard.Before(cut) {
 			continue

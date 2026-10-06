@@ -166,6 +166,7 @@ type APRSStation struct {
 	Country string  `json:"country"` // ISO-2 for the flag
 	Sym     string  `json:"sym"`     // emoji per the sender's symbol
 	SymChar string  `json:"symChar"` // raw APRS symbol char
+	Own     bool    `json:"own"`     // our own transmitted position
 }
 
 // APRSLog bundles the three APRS histories for the web tab.
@@ -703,6 +704,7 @@ type Target struct {
 	Track   int       `json:"track"`
 	AgeSec  float64   `json:"ageSec"`
 	Country string    `json:"country"`
+	Own     bool      `json:"own"`
 	Trail   []TrailPt `json:"trail,omitempty"`
 }
 
@@ -744,7 +746,7 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	}
 	if get != nil {
 		for _, st := range get() {
-			out = append(out, Target{Kind: "aprs", ID: st.Call, Call: st.Call, Lat: st.Lat, Lon: st.Lon, HasPos: true, Speed: st.SpeedKt, Track: int(st.Course), AltFt: st.AltFt, AgeSec: st.AgeSec})
+			out = append(out, Target{Kind: "aprs", ID: st.Call, Call: st.Call, Lat: st.Lat, Lon: st.Lon, HasPos: true, Speed: st.SpeedKt, Track: int(st.Course), AltFt: st.AltFt, AgeSec: st.AgeSec, Country: st.Country, Own: st.Own})
 		}
 	}
 	writeJSON(w, out)

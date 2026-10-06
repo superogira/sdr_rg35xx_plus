@@ -72,6 +72,7 @@ type RadarBlip struct {
 	AtoN         bool    // AIS type 6/21 static aid: yellow rhombus
 	Aprs         bool    // APRS station (RF decode)
 	Sym          string  // APRS sender symbol char (drawn as the icon)
+	Own          bool    // our own transmitted position: white ring
 	MercX, MercY float64 // Web-Mercator world pixels (see MercView)
 	Call         string
 	ICAO         string
@@ -358,6 +359,13 @@ func (u *UI) DrawRadar(blips []RadarBlip, rangeKm float64, host string, connecte
 			sf := Face(15, true)
 			sw := sf.TextWidth(sym)
 			sf.DrawString(u.img, col, x-sw/2, y+6, sym)
+			if b.Own {
+				ring := color.RGBA{255, 255, 255, 255}
+				for a := 0; a < 360; a += 12 {
+					r := 7.0
+					u.setPixel(x+int(r*math.Sin(float64(a)*math.Pi/180)), y+int(-r*math.Cos(float64(a)*math.Pi/180)), ring)
+				}
+			}
 			if labelMode != LabelNone {
 				label := b.Call
 				var flag image.Image

@@ -557,6 +557,10 @@ func sendAPRSNow(r *radio.Radio, gpsRx *gps.Receiver, call, path string, sym str
 		*lastCourse = f.CourseDeg
 		r.PlayBeacon(aprs.Modulate(body, float64(lvl)/100*0.9, aprsPreambleFlags(pre)))
 		setMsg(i18n.T("aprs_sent"))
+		store.SetOwn(aprs.Station{Call: call, Lat: f.Lat, Lon: f.Lon,
+			Table: sym.table, Sym: sym.sym,
+			SpeedKt: f.SpeedKt, CourseDeg: f.CourseDeg, HasCS: f.SpeedKt >= 1,
+			AltFt: int(f.Alt * 3.28084), HasAlt: f.Alt != 0, Comment: comment})
 		store.LogTX(aprs.LogEntry{At: time.Now(), Call: call, Lat: f.Lat, Lon: f.Lon,
 			SpeedKt: f.SpeedKt, AltFt: int(f.Alt * 3.28084), Comment: comment, Info: info, Via: "RF", Sym: string(sym.sym)})
 		if isOn {
@@ -922,6 +926,7 @@ func main() {
 			aprsStore.ProcessFrame(append(append(body, lo), hi))
 		}
 		aprsStore.LogTX(aprs.LogEntry{At: time.Now().Add(-2 * time.Minute), Call: "DEMO-1", Lat: 13.60, Lon: 100.55, SpeedKt: 12, Comment: "test beacon", Via: "RF", Sym: ">"})
+		aprsStore.SetOwn(aprs.Station{Call: "DEMO-1", Lat: 13.60, Lon: 100.55, Table: '/', Sym: '>', SpeedKt: 12, HasCS: true, Comment: "own position"})
 	}
 	aprsSymList := []struct {
 		i18nKey string
@@ -1336,7 +1341,7 @@ func main() {
 			out = append(out, web.APRSStation{Call: st.Call, Lat: st.Lat, Lon: st.Lon,
 				SpeedKt: st.SpeedKt, Course: st.CourseDeg, AltFt: st.AltFt,
 				Comment: st.Comment, AgeSec: time.Since(st.LastHeard).Seconds(),
-				Country: geo.CountryISO(st.Call), Sym: aprs.Emoji(st.Table, st.Sym), SymChar: string(st.Sym)})
+				Country: geo.CountryISO(st.Call), Sym: aprs.Emoji(st.Table, st.Sym), SymChar: string(st.Sym), Own: st.Own})
 		}
 		return out
 	})
@@ -1346,7 +1351,7 @@ func main() {
 			lg.Stations = append(lg.Stations, web.APRSStation{Call: st.Call, Lat: st.Lat, Lon: st.Lon,
 				SpeedKt: st.SpeedKt, Course: st.CourseDeg, AltFt: st.AltFt, Comment: st.Comment,
 				AgeSec: time.Since(st.LastHeard).Seconds(), Country: geo.CountryISO(st.Call),
-				Sym: aprs.Emoji(st.Table, st.Sym), SymChar: string(st.Sym)})
+				Sym: aprs.Emoji(st.Table, st.Sym), SymChar: string(st.Sym), Own: st.Own})
 		}
 		mk := func(es []aprs.LogEntry) []web.APRSLogRow {
 			var rows []web.APRSLogRow
@@ -3082,6 +3087,10 @@ func main() {
 				if body, info, ok := buildAPRSBeacon(f, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt); ok {
 					r.PlayBeacon(aprs.Modulate(body, float64(aprsLvl)/100*0.9, aprsPreambleFlags(aprsPre)))
 					setMsg(i18n.T("aprs_sent"))
+					aprsStore.SetOwn(aprs.Station{Call: aprsCall, Lat: f.Lat, Lon: f.Lon,
+						Table: aprsSymList[aprsSymIdx].table, Sym: aprsSymList[aprsSymIdx].sym,
+						SpeedKt: f.SpeedKt, CourseDeg: f.CourseDeg, HasCS: f.SpeedKt >= 1,
+						AltFt: int(f.Alt * 3.28084), HasAlt: f.Alt != 0, Comment: aprsCmt})
 					aprsStore.LogTX(aprs.LogEntry{At: time.Now(), Call: aprsCall, Lat: f.Lat, Lon: f.Lon,
 						SpeedKt: f.SpeedKt, AltFt: int(f.Alt * 3.28084), Comment: aprsCmt, Info: info, Via: "RF", Sym: string(aprsSymList[aprsSymIdx].sym)})
 					if aprsISOn {
@@ -4245,7 +4254,7 @@ func main() {
 			for _, st := range aprsStore.All() {
 				d, br := geo.DistanceBearingKm(adsbLat, adsbLon, st.Lat, st.Lon)
 				mx, my := mercPos(st.Lat, st.Lon)
-				blips = append(blips, ui.RadarBlip{Aprs: true, Call: st.Call, Sym: string(st.Sym), Country: geo.CountryISO(st.Call),
+				blips = append(blips, ui.RadarBlip{Aprs: true, Own: st.Own, Call: st.Call, Sym: string(st.Sym), Country: geo.CountryISO(st.Call),
 					BrngDeg: br, DistKm: d,
 					HasPos: true, MercX: mx, MercY: my, Seen: st.LastHeard,
 					SogKt: st.SpeedKt, TrackDeg: int(st.CourseDeg), Lat: st.Lat, Lon: st.Lon})

@@ -93,9 +93,12 @@ select, input { min-width:0; }
 .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:2px; color:var(--dim); margin:0 0 10px; }
 button.nudge { padding:2px 7px; font-size:11px; line-height:1.4; flex:0 0 auto; }
 .tgt { background:none; border:none; }
+.ownmark { outline:2px solid #fff; outline-offset:2px; border-radius:50%; }
 .tgtlbl { background:rgba(0,0,0,.65); border:none; color:#dfe; font-size:11px; padding:1px 5px; border-radius:4px; }
 body.maponly header, body.maponly .card:not(:has(#pane-map)) { display:none !important; }
-body.maponly #map { height:calc(100vh - 120px); }
+body.maponly main { grid-template-columns:1fr; padding:0; gap:0; }
+body.maponly .card:has(#pane-map) { margin:0; border:none; border-radius:0; padding:6px; }
+body.maponly #map { height:calc(100vh - 92px) !important; }
 .tgt svg { display:block; filter:drop-shadow(0 0 3px rgba(0,0,0,.85)); transition:transform .6s linear; }
 .freq { font-size:34px; font-variant-numeric:tabular-nums; color:var(--acc); cursor:pointer; }
 .freq small { font-size:14px; color:var(--dim); }
@@ -1308,6 +1311,9 @@ async function initMap(st) {
   $('mlayer').innerHTML = layers.map((l, i) => `<option value="${i}">${l.name}</option>`).join('');
   $('mlayer').onchange = e => { layerIdx = +e.target.value; setTiles(); };
   map = L.map('map', { zoomControl: true }).setView([st.rxLat, st.rxLon], 10);
+  if (document.body.classList.contains('maponly')) {
+    setTimeout(() => map.invalidateSize(), 120);
+  }
   setTiles();
   rxMark = L.circleMarker([st.rxLat, st.rxLon], { radius: 6, color: '#35e08a', weight: 2, fill: false }).addTo(map).bindTooltip('RX');
   setInterval(mapPoll, 2000);
@@ -1337,6 +1343,7 @@ $('mapPop').onclick = () => window.open(location.pathname + '?map=1', '_blank');
 syncToggles();
 if (new URLSearchParams(location.search).get('map') === '1') {
   document.body.classList.add('maponly');
+  setTimeout(() => { if (map) map.invalidateSize(); }, 100);
   // show only the map pane + its controls
   document.querySelectorAll('#tabs button').forEach(b => b.style.display = b.id === 'tab-map' ? '' : 'none');
   document.querySelectorAll('main .card').forEach(c => { if (!c.querySelector('#pane-map')) c.style.display = 'none'; });
@@ -1362,7 +1369,7 @@ async function mapPoll() {
     if (!t.hasPos) { if (m) { map.removeLayer(m); delete markers[t.kind + t.id]; } continue; }
     if (!m) {
       m = markers[key] = L.marker(ll, {
-        icon: L.divIcon({ className: 'tgt', html: ICONS[t.kind] || ICONS.aprs, iconSize: [26, 26], iconAnchor: [13, 13] }),
+        icon: L.divIcon({ className: 'tgt' + (t.own ? ' ownmark' : ''), html: ICONS[t.kind] || ICONS.aprs, iconSize: [26, 26], iconAnchor: [13, 13] }),
       }).addTo(map);
       m.bindTooltip('', { direction: 'top', permanent: true, className: 'tgtlbl', opacity: .9 });
       m.on('click', () => {
@@ -1382,8 +1389,17 @@ async function mapPoll() {
     // Label modes: flag+text / flag / none / text (like the handheld)
     const tip = m.getTooltip();
     if (tip) {
-      if (labelMode === 2) tip.setContent('');
-      else tip.setContent((labelMode !== 3 ? flagImg(t.country) + ' ' : '') + (labelMode !== 1 ? esc(t.call) : ''));
+      // setContent('') does NOT clear Leaflet's tooltip DOM (its
+      // _updateContent early-returns on empty content), so stale
+      // flags/text stayed visible in "none" mode — hide the element
+      // instead and set content only for the visible modes.
+      const el2 = tip.getElement ? tip.getElement() : null;
+      if (labelMode === 2) {
+        if (el2) el2.style.display = 'none';
+      } else {
+        if (el2) el2.style.display = '';
+        tip.setContent((labelMode !== 3 ? flagImg(t.country) + ' ' : '') + (labelMode !== 1 ? esc(t.call) : ''));
+      }
     }
     const el = m.getElement();
     if (el) {
