@@ -93,6 +93,7 @@ type Server struct {
 	aprsStat func() (rx bool, beac int, isOn bool, count int)
 	extraTgt func() []Target
 	aprsLog  func() APRSLog
+	ft8Grid  func([]FT8Line) []FT8MapEntry
 	panelSet func(state int)
 	panelGet func() int
 	wfSet    func(min, max float64)
@@ -193,6 +194,14 @@ type APRSLogRow struct {
 func (s *Server) SetAPRSProvider(f func() []APRSStation) {
 	s.mu.Lock()
 	s.aprsGet = f
+	s.mu.Unlock()
+}
+
+// SetFT8Grid computes FT8 map entries (stations + QSO arcs) from the
+// decoded log — the same recipe as the handheld map screen.
+func (s *Server) SetFT8Grid(f func([]FT8Line) []FT8MapEntry) {
+	s.mu.Lock()
+	s.ft8Grid = f
 	s.mu.Unlock()
 }
 
@@ -337,6 +346,7 @@ func (s *Server) startLocked() {
 	mux.HandleFunc("/api/ais", s.handleAIS)
 	mux.HandleFunc("/api/targets", s.handleTargets)
 	mux.HandleFunc("/api/aprslog", s.handleAPRSLog)
+	mux.HandleFunc("/api/ft8map", s.handleFT8Map)
 	mux.HandleFunc("/api/flag/", s.handleFlag)
 	mux.HandleFunc("/api/spec", s.handleSpec)
 	mux.HandleFunc("/api/wefaximg", s.handleWefaxImg)
@@ -735,7 +745,11 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 		if call == "" {
 			call = sh.MMSI
 		}
-		out = append(out, Target{Kind: "ship", ID: sh.MMSI, Call: call, Lat: sh.Lat, Lon: sh.Lon, HasPos: sh.HasPos, Speed: sh.SogKt, Track: int(sh.CogDeg), AgeSec: now.Sub(sh.LastSeen).Seconds(), Country: geo.MMSICountry(sh.MMSI)})
+		t := Target{Kind: "ship", ID: sh.MMSI, Call: call, Lat: sh.Lat, Lon: sh.Lon, HasPos: sh.HasPos, Speed: sh.SogKt, Track: int(sh.CogDeg), AgeSec: now.Sub(sh.LastSeen).Seconds(), Country: geo.MMSICountry(sh.MMSI)}
+		for _, d := range sh.Trail {
+			t.Trail = append(t.Trail, TrailPt{Lat: d.Lat, Lon: d.Lon, AgeSec: now.Sub(d.At).Seconds()})
+		}
+		out = append(out, t)
 	}
 	s.mu.Lock()
 	get := s.aprsGet
@@ -762,6 +776,34 @@ func (s *Server) handleFlag(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "max-age=86400")
 	w.Write(data)
+}
+
+// FT8MapEntry mirrors ui.MapEntry for the web map.
+type FT8MapEntry struct {
+	Lat, Lon float64 `json:"lat"`
+	FromLat  float64 `json:"fromLat"`
+	FromLon  float64 `json:"fromLon"`
+	Arc      bool    `json:"arc"`
+	IsCQ     bool    `json:"cq"`
+	Approx   bool    `json:"approx"`
+	AgeSec   float64 `json:"ageSec"`
+	Call     string  `json:"call"`
+	ToCall   string  `json:"toCall"`
+	Text     string  `json:"text"`
+}
+
+func (s *Server) handleFT8Map(w http.ResponseWriter, r *http.Request) {
+	s.logMu.Lock()
+	log := append([]FT8Line(nil), s.ft8Log...)
+	s.logMu.Unlock()
+	s.mu.Lock()
+	get := s.ft8Grid
+	s.mu.Unlock()
+	out := []FT8MapEntry{}
+	if get != nil {
+		out = get(log)
+	}
+	writeJSON(w, out)
 }
 
 func (s *Server) handleAPRSLog(w http.ResponseWriter, r *http.Request) {

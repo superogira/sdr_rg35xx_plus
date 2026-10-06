@@ -596,6 +596,11 @@ func aprsPreambleFlags(seconds float64) int {
 	return n
 }
 
+// gridCache remembers each FT8 station's maidenhead grid from their
+// CQ/contact messages; shared by the map screen and the web grid
+// provider.
+var gridCache map[string]string
+
 // buildAPRSBeacon renders the UI frame body for a position beacon from
 // a live GPS fix (uncompressed format: table+symbol, course/speed when
 // moving, altitude).
@@ -1345,6 +1350,73 @@ func main() {
 		}
 		return out
 	})
+	if os.Getenv("SDR_MAP_DEMO") != "" || os.Getenv("SDR_ADSB_DEMO") != "" {
+		now := time.Now()
+		for i, m := range []struct{ t, text string }{
+			{now.Add(-20 * time.Second).Format("15:04:05"), "CQ HS0JR KO85"},
+			{now.Add(-70 * time.Second).Format("15:04:05"), "CQ 9M2XYZ OJ02"},
+			{now.Add(-3 * time.Minute).Format("15:04:05"), "HS0JR DU1XXX PK04"},
+			{now.Add(-5 * time.Minute).Format("15:04:05"), "CQ E21ABC OK03"},
+		} {
+			webSrv.AddFT8(web.FT8Line{Time: m.t, SNR: -float64(i), Hz: 500 + float64(i*37), Text: m.text})
+		}
+	}
+	webSrv.SetFT8Grid(func(log []web.FT8Line) []web.FT8MapEntry {
+		now := time.Now()
+		out := []web.FT8MapEntry{}
+		for _, e := range log {
+			t, err := time.Parse("15:04:05", e.Time)
+			if err != nil {
+				continue
+			}
+			eTime := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), t.Second(), 0, now.Location())
+			if eTime.After(now.Add(time.Hour)) {
+				eTime = eTime.Add(-24 * time.Hour)
+			}
+			age := now.Sub(eTime)
+			if age < 0 || age > 10*time.Minute {
+				continue
+			}
+			toks := strings.Fields(e.Text)
+			if len(toks) < 2 {
+				continue
+			}
+			isCQ := toks[0] == "CQ" || strings.HasPrefix(toks[0], "CQ_")
+			senderGrid := ""
+			lastTok := toks[len(toks)-1]
+			hasGrid := len(lastTok) == 4 && lastTok[0] >= 'A' && lastTok[0] <= 'R' &&
+				lastTok[1] >= 'A' && lastTok[1] <= 'R' &&
+				lastTok[2] >= '0' && lastTok[2] <= '9' && lastTok[3] >= '0' && lastTok[3] <= '9'
+			if hasGrid {
+				senderGrid = lastTok
+			} else if g, ok := gridCache[toks[1]]; ok {
+				senderGrid = g
+			}
+			pos := func(call, grid string) (float64, float64, bool, bool) {
+				if grid != "" {
+					lat, lon, ok := geo.GridToLatLon(grid)
+					return lat, lon, false, ok
+				}
+				lat, lon, ok := geo.CountryLatLon(call)
+				return lat, lon, true, ok
+			}
+			slat, slon, sApprox, sok := pos(toks[1], senderGrid)
+			if !sok {
+				continue
+			}
+			ent := web.FT8MapEntry{Lat: slat, Lon: slon, IsCQ: isCQ, Approx: sApprox, AgeSec: age.Seconds(), Call: toks[1], Text: e.Text}
+			if !isCQ {
+				if rlat, rlon, rApprox, rok := pos(toks[0], gridCache[toks[0]]); rok && (rlat != slat || rlon != slon) {
+					ent.Arc = true
+					ent.FromLat, ent.FromLon = slat, slon
+					ent.Lat, ent.Lon, ent.Approx = rlat, rlon, rApprox
+					ent.ToCall = toks[0]
+				}
+			}
+			out = append(out, ent)
+		}
+		return out
+	})
 	webSrv.SetAPRSLog(func() web.APRSLog {
 		lg := web.APRSLog{}
 		for _, st := range aprsStore.All() {
@@ -1430,7 +1502,7 @@ func main() {
 	// gridCache remembers each station's grid from their CQ/contact
 	// messages, so report/RRR/73 messages (which don't carry a grid)
 	// can still show the distance.
-	gridCache := map[string]string{}
+	gridCache = map[string]string{}
 	// PSK Reporter: spots are buffered as they decode and flushed over
 	// UDP every 5 minutes (the service asks for at most that rate).
 	psk := pskreporter.New(myCall, myGrid, myAnt, myRig, pskOn)

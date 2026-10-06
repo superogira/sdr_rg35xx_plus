@@ -274,7 +274,7 @@ tr:hover td { background:var(--row-hover); }
       <div id="pane-map" hidden>
         <div id="map" style="height:420px;border-radius:8px;background:#0b1410"></div>
         <div id="mapctl" style="position:absolute;z-index:800;bottom:18px;left:8px;display:flex;gap:6px;align-items:center;pointer-events:auto">
-          <button id="tgPlane">✈</button><button id="tgShip">⛵</button><button id="tgAprs">◆</button>
+          <button id="tgPlane">✈</button><button id="tgShip">⛵</button><button id="tgAprs">◆</button><button id="tgFt8">📡</button>
           <button id="tgLabel" data-i18n-title="ttLabel">🏷+🚩</button>
           <select id="mlayer" style="width:auto"></select>
           <span id="mattr" style="color:rgba(255,255,255,.75);font-size:11px;text-shadow:0 1px 2px #000"></span>
@@ -1327,6 +1327,8 @@ async function initMap(st) {
   }
   setTiles();
   rxMark = L.circleMarker([st.rxLat, st.rxLon], { radius: 6, color: '#35e08a', weight: 2, fill: false }).addTo(map).bindTooltip('RX');
+  ft8Layer.addTo(map);
+  ft8MapPoll();
   setInterval(mapPoll, 2000);
 }
 function setTiles() {
@@ -1337,16 +1339,18 @@ function setTiles() {
   $('mattr').textContent = layers[layerIdx].attr;
 }
 const flagImg = cc => cc ? `<img src="/api/flag/${cc}" width="16" height="11" style="vertical-align:-1px" alt="${cc}">` : '';
-let showMask = +(localStorage.getItem('sdr-mask') ?? 7);
+let showMask = +(localStorage.getItem('sdr-mask') ?? 15); // all: planes+ships+aprs+ft8
 let labelMode = +(localStorage.getItem('sdr-label') ?? 0); // 0 flag+text, 1 flag, 2 none, 3 text
 const kindBit = { plane: 1, ship: 2, aprs: 4 };
+const FT8BIT = 8;
 function syncToggles() {
   $('tgPlane').className = showMask & 1 ? 'on' : '';
   $('tgShip').className = showMask & 2 ? 'on' : '';
   $('tgAprs').className = showMask & 4 ? 'on' : '';
+  $('tgFt8').className = showMask & 8 ? 'on' : '';
   $('tgLabel').textContent = ['🏷+', '🚩', '∅', ''][labelMode];
 }
-for (const [id, bit] of [['tgPlane', 1], ['tgShip', 2], ['tgAprs', 4]]) {
+for (const [id, bit] of [['tgPlane', 1], ['tgShip', 2], ['tgAprs', 4], ['tgFt8', 8]]) {
   $(id).onclick = () => { showMask ^= bit; localStorage.setItem('sdr-mask', showMask); syncToggles(); mapPoll(); };
 }
 $('tgLabel').onclick = () => { labelMode = (labelMode + 1) % 4; localStorage.setItem('sdr-label', labelMode); syncToggles(); mapPoll(); };
@@ -1361,6 +1365,29 @@ if (new URLSearchParams(location.search).get('map') === '1') {
   document.querySelectorAll('#pane-map ~ *').forEach(e => e.style.display = 'none');
   $('tab-map').click();
 }
+const ft8Layer = L.layerGroup();
+const shipTracks = {};
+async function ft8MapPoll() {
+  if (!map) return;
+  try {
+    const es = await api('/api/ft8map');
+    ft8Layer.clearLayers();
+    if (showMask & FT8BIT) {
+      for (const e of es) {
+        if (e.arc) {
+          // QSO: thin dashed line sender → receiver (device convention).
+          L.polyline([[e.fromLat, e.fromLon], [e.lat, e.lon]], { color: '#ffd24a', weight: 1, opacity: .55, dashArray: '4 4' }).addTo(ft8Layer);
+        }
+        const col = e.arc ? '#35e08a' : '#ff5a5a';
+        const mk = L.circleMarker([e.lat, e.lon], { radius: e.cq ? 4 : 3.5, color: col, weight: 1.5, fillColor: col, fillOpacity: e.approx ? 0.15 : 0.6 });
+        if (e.approx) mk.setStyle({ fillOpacity: 0.1, dashArray: '2 2' }); // country-level guess: hollow
+        mk.bindTooltip(`<span style="color:${col}">${esc(e.call)}</span> ${e.text ? '· ' + esc(e.text.slice(0, 30)) : ''}`, { direction: 'top' });
+        mk.addTo(ft8Layer);
+      }
+    }
+  } catch (err) {}
+}
+setInterval(ft8MapPoll, 10000);
 async function mapPoll() {
   if (!map) return;
   const rows = await api('/api/targets');
@@ -1420,14 +1447,22 @@ async function mapPoll() {
     }
     // Flown path: altitude-coloured breadcrumbs, fading with age —
     // the same convention as the handheld radar.
-    if (t.kind === 'plane' && t.trail && t.trail.length) {
+    if ((t.kind === 'plane' || t.kind === 'ship') && t.trail && t.trail.length) {
       let g = trailGroups[key];
       if (!g) { g = trailGroups[key] = L.layerGroup().addTo(map); }
       g.clearLayers();
-      for (const d of t.trail) {
-        const c = altColor(d.altFt);
-        const op = d.ageSec > 150 ? 0.35 : d.ageSec > 60 ? 0.6 : 0.9;
-        L.circleMarker([d.lat, d.lon], { radius: 2.5, stroke: false, fillColor: c, fillOpacity: op }).addTo(g);
+      if (t.kind === 'ship') {
+        // Vessel track: one thin 2px line (dots every 5 min would be
+        // sparse for slow movers).
+        const pts = t.trail.map(d => [d.lat, d.lon]);
+        pts.push([t.lat, t.lon]);
+        if (pts.length >= 2) L.polyline(pts, { color: '#35e08a', weight: 2, opacity: .6 }).addTo(g);
+      } else {
+        for (const d of t.trail) {
+          const c = altColor(d.altFt);
+          const op = d.ageSec > 150 ? 0.35 : d.ageSec > 60 ? 0.6 : 0.9;
+          L.circleMarker([d.lat, d.lon], { radius: 2.5, stroke: false, fillColor: c, fillOpacity: op }).addTo(g);
+        }
       }
     } else if (trailGroups[key]) {
       trailGroups[key].clearLayers();

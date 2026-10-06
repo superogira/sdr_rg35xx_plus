@@ -13,11 +13,18 @@ import (
 )
 
 // Ship is one tracked vessel.
+// TrailDot is one vessel position breadcrumb.
+type TrailDot struct {
+	Lat, Lon float64
+	At       time.Time
+}
+
 type Ship struct {
 	MMSI     string
 	Name     string
 	Lat, Lon float64
 	HasPos   bool
+	Trail    []TrailDot // position history, newest last (~5 min dots)
 	SogKt    float64
 	CogDeg   float64
 	LastSeen time.Time
@@ -69,6 +76,19 @@ func (s *Store) ship(mmsi string) *Ship {
 		s.ships[mmsi] = sh
 	}
 	return sh
+}
+
+// recordTrail keeps one breadcrumb per 5 minutes (vessels move slowly;
+// 24 h ≈ 288 dots) — enough to draw a thin track on the web map.
+func (sh *Ship) recordTrail(lat, lon float64) {
+	now := time.Now()
+	if n := len(sh.Trail); n > 0 && now.Sub(sh.Trail[n-1].At) < 5*time.Minute {
+		return
+	}
+	sh.Trail = append(sh.Trail, TrailDot{Lat: lat, Lon: lon, At: now})
+	if len(sh.Trail) > 288 {
+		sh.Trail = sh.Trail[len(sh.Trail)-288:]
+	}
 }
 
 // latLonAt reads the standard 28-bit signed latitude at latOff and
@@ -250,6 +270,7 @@ func (s *Store) decodePayload(p []byte) (typ uint32, mmsi string) {
 		lon := float64(i(p, 61, 28)) / 600000
 		lat := float64(i(p, 89, 27)) / 600000
 		if lat != 91 && lon != 181 {
+			sh.recordTrail(lat, lon)
 			sh.Lat, sh.Lon, sh.HasPos = lat, lon, true
 		}
 		sh.CogDeg = float64(u(p, 116, 12)) / 10
@@ -261,6 +282,7 @@ func (s *Store) decodePayload(p []byte) (typ uint32, mmsi string) {
 		lon := float64(i(p, 57, 28)) / 600000
 		lat := float64(i(p, 85, 27)) / 600000
 		if lat != 91 && lon != 181 {
+			sh.recordTrail(lat, lon)
 			sh.Lat, sh.Lon, sh.HasPos = lat, lon, true
 		}
 		sh.CogDeg = float64(u(p, 112, 12)) / 10
