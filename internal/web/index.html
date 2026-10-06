@@ -1367,6 +1367,40 @@ if (new URLSearchParams(location.search).get('map') === '1') {
   $('tab-map').click();
 }
 const ft8Layer = L.layerGroup();
+// QSO arc geometry + flow animation (same conventions as the handheld:
+// a quadratic Bézier arcing over the top, dashes running sender →
+// receiver, yellow/orange alternating).
+function arcPath(la1, lo1, la2, lo2, n = 40, peak = 0.22) {
+  const mLa = (la1 + la2) / 2, mLo = (lo1 + lo2) / 2;
+  const cl = Math.cos(mLa * Math.PI / 180) || 1e-6;
+  const dx = (lo2 - lo1) * cl, dy = la2 - la1;
+  const d = Math.hypot(dx, dy) || 1e-9;
+  let px = -dy, py = dx;                 // perpendicular
+  if (py < 0) { px = -px; py = -py; }    // arc over the NORTH side
+  const h = d * peak;
+  px = px / (Math.hypot(px, py) || 1) * h;
+  py = py / (Math.hypot(px, py) || 1) * h;
+  const cLa = mLa + py, cLo = mLo + px / cl;
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, u = 1 - t;
+    pts.push([u * u * la1 + 2 * u * t * cLa + t * t * la2,
+              u * u * lo1 + 2 * u * t * cLo + t * t * lo2]);
+  }
+  return pts;
+}
+let flowPaths = [], flowPhase = 0, flowTick = 0;
+setInterval(() => {
+  flowPhase = (flowPhase + 1.3) % 26;
+  flowTick++;
+  const col = (flowTick % 24) < 12 ? '#ffd24a' : '#ff9a40';
+  for (const p of flowPaths) {
+    const el = p.getElement ? p.getElement() : p._path;
+    if (!el) continue;
+    el.setAttribute('stroke-dashoffset', -flowPhase);
+    el.setAttribute('stroke', col);
+  }
+}, 42);
 const shipTracks = {};
 async function ft8MapPoll() {
   if (!map) return;
@@ -1374,10 +1408,15 @@ async function ft8MapPoll() {
     const es = await api('/api/ft8map');
     ft8Layer.clearLayers();
     if (showMask & FT8BIT) {
+      flowPaths = [];
       for (const e of es) {
         if (e.arc) {
-          // QSO: thin dashed line sender → receiver (device convention).
-          L.polyline([[e.fromLat, e.fromLon], [e.lat, e.lon]], { color: '#ffd24a', weight: 1, opacity: .55, dashArray: '4 4' }).addTo(ft8Layer);
+          // QSO: curved dashed flow sender → receiver over a dark
+          // casing so it reads on every basemap (light AND dark).
+          const pts = arcPath(e.fromLat, e.fromLon, e.lat, e.lon);
+          L.polyline(pts, { color: '#000', weight: 5, opacity: .55, lineCap: 'round' }).addTo(ft8Layer);
+          const flow = L.polyline(pts, { color: '#ffd24a', weight: 2.4, opacity: .95, dashArray: '9 8', lineCap: 'round' }).addTo(ft8Layer);
+          flowPaths.push(flow);
         }
         const col = e.arc ? '#35e08a' : '#ff5a5a';
         const mk = L.circleMarker([e.lat, e.lon], { radius: e.cq ? 4 : 3.5, color: col, weight: 1.5, fillColor: col, fillOpacity: e.approx ? 0.15 : 0.6 });
