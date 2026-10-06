@@ -521,6 +521,16 @@ func (u *UI) drawArc(x1, y1, x2, y2 int, fade, phase float64) {
 	orange := fadeColor(u.palette().dashB, fade)
 
 	pts := arcPoints(x1, y1, x2, y2)
+	// Dark casing under the 1px dashes: without it the arc vanishes on
+	// the pale basemaps (and against dense coastline detail) — the same
+	// fix the web map needed.
+	casing := color.RGBA{A: uint8(fade * 150)}
+	for _, p := range pts {
+		u.setPixel(p.X+1, p.Y, casing)
+		u.setPixel(p.X-1, p.Y, casing)
+		u.setPixel(p.X, p.Y+1, casing)
+		u.setPixel(p.X, p.Y-1, casing)
+	}
 	dist := 0.0 // arc length travelled so far
 	px, py := float64(pts[0].X), float64(pts[0].Y)
 	for _, p := range pts {

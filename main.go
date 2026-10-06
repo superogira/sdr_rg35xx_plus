@@ -1361,7 +1361,7 @@ func main() {
 				dt   time.Duration
 				text string
 			}{
-				{-20 * time.Second, "CQ HS0JR KO85"},
+				{-3 * time.Second, "CQ HS0JR KO85"},
 				{-70 * time.Second, "CQ 9M2XYZ OJ02"},
 				{-3 * time.Minute, "HS0JR DU1XXX PK04"},
 				{-5 * time.Minute, "CQ E21ABC OK03"},
@@ -1371,7 +1371,7 @@ func main() {
 		}
 		seedFT8()
 		go func() {
-			for range time.Tick(30 * time.Second) {
+			for range time.Tick(15 * time.Second) {
 				seedFT8()
 			}
 		}()
