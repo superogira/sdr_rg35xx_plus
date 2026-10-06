@@ -510,9 +510,9 @@ const (
 // was unreachable from the d-pad.
 var pageItems = [][]int{
 	{0, 0, 0, 0, 0, 0, 0, 0, 0, menuExit}, // rows 0-8 open subpages by position; the last row is Exit
-	{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC},
+	{menuHost, menuSample, menuFreq, menuStep, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC},
 	{menuAF, menuNR, menuHP, menuLP, menuLocalMute, menuVolume},
-	{menuSpan, menuStep, menuWFMin, menuWFMax},
+	{menuSpan, menuWFMin, menuWFMax},
 	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSNow},
@@ -1658,6 +1658,8 @@ func main() {
 		uiMode, menuPage = uiMenu, pageADSB
 	case "gpspage":
 		uiMode, menuPage = uiMenu, pageGPS
+	case "rxpage":
+		uiMode, menuPage = uiMenu, pageRx
 	case "aprspage":
 		uiMode, menuPage = uiMenu, pageAPRS
 		r.SetAPRSEnabled(true)
@@ -3700,6 +3702,7 @@ func main() {
 					}(),
 					ui.MenuItem{Label: i18n.T("m_rate"), Value: fmt.Sprintf("%.3fM", float64(r.IQRate())/1e6)},
 					ui.MenuItem{Label: i18n.T("m_freq"), Value: fmt.Sprintf("%.*f MHz >", freqDec, float64(r.Freq())/1e6)},
+					ui.MenuItem{Label: i18n.T("m_step"), Value: stepLabel(stepHz)},
 					func() ui.MenuItem {
 						if r.PpmOff() {
 							return ui.MenuItem{Label: i18n.T("m_ppm"), Value: i18n.T("off")}
@@ -3721,7 +3724,6 @@ func main() {
 			case pageDisp:
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_span"), Value: fmt.Sprintf("%d kHz", u.SpanFull/1000)},
-					ui.MenuItem{Label: i18n.T("m_step"), Value: stepLabel(stepHz)},
 					ui.MenuItem{Label: i18n.T("m_wfmin"), Value: fmt.Sprintf("+%.0f dB", wfMin)},
 					ui.MenuItem{Label: i18n.T("m_wfmax"), Value: fmt.Sprintf("%.0f dB", wfMax)})
 			case pageFT8:

@@ -32,9 +32,9 @@ func TestPageItemsCoverEveryPage(t *testing.T) {
 // swaps whole subpages (Audio↔FT8 was a real bug).
 func TestRootRowsOpenMatchingPages(t *testing.T) {
 	want := [][]int{
-		{menuHost, menuSample, menuFreq, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC},
+		{menuHost, menuSample, menuFreq, menuStep, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC},
 		{menuAF, menuNR, menuHP, menuLP, menuLocalMute, menuVolume},
-		{menuSpan, menuStep, menuWFMin, menuWFMax},
+		{menuSpan, menuWFMin, menuWFMax},
 		{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 		{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 		{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSNow},

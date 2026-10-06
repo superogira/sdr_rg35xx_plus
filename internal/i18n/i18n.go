@@ -188,7 +188,7 @@ var strings = map[string][2]string{
 	"m_lp":               {"ตัดเสียงแหลม (LP)", "Low-pass (LP)"},
 	"band_title":         {"ความถี่ FT8", "FT8 frequencies"},
 	"band_hint":          {"A จูน+เปิด FT8 · B กลับ", "A tune+FT8 on · B back"},
-	"m_rxpage":           {"การรับ", "Receive"},
+	"m_rxpage":           {"การรับและจูน", "Receive & Tune"},
 	"m_ft8page":          {"โหมดดิจิทัล", "Digital Modes"},
 	"m_syspage":          {"ระบบ", "System"},
 	"m_sysmon":           {"ข้อมูลเครื่อง >", "System monitor >"},
