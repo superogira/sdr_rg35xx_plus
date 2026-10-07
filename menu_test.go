@@ -38,7 +38,7 @@ func TestPageItemsCoverEveryPage(t *testing.T) {
 func TestRootRowsOpenMatchingPages(t *testing.T) {
 	want := [][]int{
 		{menuHost, menuSample, menuFreq, menuStep, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC},
-		{menuAF, menuNR, menuHP, menuLP, menuLocalMute, menuVolume},
+		{menuAF, menuNR, menuHP, menuLP, menuNRNN, menuLocalMute, menuVolume},
 		{menuSpan, menuWFMin, menuWFMax},
 		{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 		{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},

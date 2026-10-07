@@ -273,6 +273,7 @@ tr:hover td { background:var(--row-hover); }
           <label data-i18n="cw">CW</label>
           <span class="val" id="cwst" style="color:var(--dim)"></span>
           <button id="cwclear" data-i18n="wefaxClear">ล้าง</button>
+        <button id="nrnn" data-i18n-title="ttNR">AI-NR</button>
         <button id="sstv">SSTV</button>
         <button id="sstvview" data-i18n-title="ttSSTV">📺</button>
         </div>
@@ -372,7 +373,7 @@ const STRINGS = {
     tuneHint: 'กดเพื่อตั้งความถี่',
     signal: 'สัญญาณ', smeterTT: 'มิเตอร์ความแรงสัญญาณ (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
-    ttSysHist: 'กราฟประวัติระบบ (24 ชม.)', sysHist: 'ประวัติระบบ', sysHistTile: 'ประวัติ',     ttAprsSrc: 'แหล่งตำแหน่ง beacon: GPS สด หรือพิกัดคงที่', ttWfxShift: 'ขยับจุดเริ่มแถวภาพ FAX ±5%', ttSSTV: 'เปิด/ปิดจอภาพ SSTV', aprsNowTT: 'ส่ง beacon เดี๋ยวนี้', ttIGate: 'iGate: ส่งต่อสถานีที่รับจาก RF ขึ้น APRS-IS', ttLabel: 'ป้ายชื่อ/ธง', ttMapPop: 'เปิดแผนที่แท็บใหม่', aprsSt: 'สถานี', aprsRxH: 'ประวัติรับ', aprsTxH: 'ประวัติส่ง',
+    ttSysHist: 'กราฟประวัติระบบ (24 ชม.)', sysHist: 'ประวัติระบบ', sysHistTile: 'ประวัติ',     ttAprsSrc: 'แหล่งตำแหน่ง beacon: GPS สด หรือพิกัดคงที่', ttWfxShift: 'ขยับจุดเริ่มแถวภาพ FAX ±5%', ttNR: 'ลดสัญญาณรบกวนด้วย neural net (HamNoise)', ttSSTV: 'เปิด/ปิดจอภาพ SSTV', aprsNowTT: 'ส่ง beacon เดี๋ยวนี้', ttIGate: 'iGate: ส่งต่อสถานีที่รับจาก RF ขึ้น APRS-IS', ttLabel: 'ป้ายชื่อ/ธง', ttMapPop: 'เปิดแผนที่แท็บใหม่', aprsSt: 'สถานี', aprsRxH: 'ประวัติรับ', aprsTxH: 'ประวัติส่ง',
     listenOn: '🔊 ฟัง', listenOff: '🔇 ฟัง', compat: ' (compat)',
     devOn: '🔈 เครื่อง', devOff: '🔇 เครื่อง',
     connFail: '○ เว็บไม่ตอบ', connOff: '○ ไม่เชื่อมต่อ ', tuned: 'จูน → ', reset: ' · ดับเบิลคลิกรีเซ็ต',
@@ -409,7 +410,7 @@ const STRINGS = {
     tuneHint: 'Click to set frequency',
     signal: 'Signal', smeterTT: 'Signal strength meter (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
-    ttSysHist: 'system history graph (24 h)', sysHist: 'System history', sysHistTile: 'HIST',     ttAprsSrc: 'beacon position: live GPS or fixed coordinates', ttWfxShift: 'nudge FAX line start ±5%', ttSSTV: 'show/hide the SSTV picture', aprsNowTT: 'Send beacon now', ttIGate: 'iGate: forward RF-heard stations to APRS-IS', ttLabel: 'labels/flags', ttMapPop: 'open map in new tab', aprsSt: 'Stations', aprsRxH: 'Receive log', aprsTxH: 'Transmit log',
+    ttSysHist: 'system history graph (24 h)', sysHist: 'System history', sysHistTile: 'HIST',     ttAprsSrc: 'beacon position: live GPS or fixed coordinates', ttWfxShift: 'nudge FAX line start ±5%', ttNR: 'neural noise reduction (HamNoise)', ttSSTV: 'show/hide the SSTV picture', aprsNowTT: 'Send beacon now', ttIGate: 'iGate: forward RF-heard stations to APRS-IS', ttLabel: 'labels/flags', ttMapPop: 'open map in new tab', aprsSt: 'Stations', aprsRxH: 'Receive log', aprsTxH: 'Transmit log',
     listenOn: '🔊 Listen', listenOff: '🔇 Listen', compat: ' (compat)',
     devOn: '🔈 Device', devOff: '🔇 Device',
     connFail: '○ no response', connOff: '○ offline ', tuned: 'Tuned → ', reset: ' · dbl-click reset',
@@ -531,6 +532,8 @@ function renderState(s) {
   $('wefax').className = s.wefax ? 'on' : '';
   $('cwdec').className = s.cw ? 'on' : '';
   $('sstv').className = s.sstv ? 'on' : '';
+  $('nrnn').className = s.nrnn !== 'off' ? 'on' : '';
+  $('nrnn').textContent = s.nrAvail ? (s.nrnn === 'off' ? 'AI-NR' : s.nrnn === 'voice' ? 'AI-เสียง' : 'AI-CW') : 'AI-NR ✕';
   $('cwbox').hidden = !s.cw;
   if (s.cw) {
     $('cwst').textContent = (s.cwWpm > 0 ? s.cwWpm.toFixed(1) + STRINGS[lang].cwwpm : STRINGS[lang].cwnone);
@@ -749,6 +752,10 @@ $('ft8').onclick = () => cmd({cmd:'ft8', on: !st.ft8});
 $('aisrf').onclick = () => cmd({cmd:'aisrf', on: !st.aisrf});
 $('wefax').onclick = () => cmd({cmd:'wefax', on: !st.wefax});
 $('cwdec').onclick = () => cmd({cmd:'cwdec', on: !st.cw});
+  $('nrnn').onclick = () => {
+    const cur = st ? st.nrnn : 'off';
+    api('/api/cmd', { cmd: 'nrnn', v: cur === 'off' ? 1 : cur === 'voice' ? 2 : 0 }).catch(showErr);
+  };
   $('sstv').onclick = () => api('/api/cmd', { cmd: 'sstv', on: !$('sstv').classList.contains('on') }).catch(showErr);
   $('sstvview').onclick = () => { $('cwbox').hidden = true; $('sstvbox').hidden = !$('sstvbox').hidden; if (!$('sstvbox').hidden) sstvPoll(); };
 $('cwclear').onclick = () => cmd({cmd:'cwclear'});

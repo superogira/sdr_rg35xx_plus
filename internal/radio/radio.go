@@ -20,6 +20,7 @@ import (
 	"sdr35/internal/audio"
 	"sdr35/internal/dsp"
 	"sdr35/internal/i18n"
+	"sdr35/internal/nr"
 	"sdr35/internal/rtltcp"
 )
 
@@ -107,6 +108,10 @@ type Radio struct {
 	aprsDem    *aprs.Demodulator
 	sstvDec    *dsp.SSTVDecoder
 	sstvOn     bool
+	nrEng      *nr.Engine
+	nrOn       bool
+	nrMode     string
+	nrExeDir   string
 	aprsRFOn   bool
 	aprsFreqHz int64     // channel centre the RX branch tracks
 	aprsOff    float64   // current offset applied to the chain
@@ -273,6 +278,13 @@ func (r *Radio) Run(ctx context.Context) {
 	// Leaving the app (or dropping to another source) must release the
 	// dongle for other programs.
 	defer r.stopUSBSrv()
+	defer func() {
+		r.mu.Lock()
+		eng := r.nrEng
+		r.nrEng = nil
+		r.mu.Unlock()
+		eng.Close()
+	}()
 	if r.demo {
 		r.mu.Lock()
 		r.state = stateStreaming
@@ -298,8 +310,12 @@ func (r *Radio) Run(ctx context.Context) {
 			muted := r.localMute
 			beaconing := r.beacon != nil || r.beaconOn // duck from queue time
 			rel := r.relArm
+			eng := r.nrEng
 			r.relArm = false
 			r.mu.Unlock()
+			if eng != nil {
+				audio = eng.Process(audio, rate)
+			}
 			if rel && !beaconing && resumeFade == 0 {
 				resumeFade = rate / 200
 			}
@@ -584,10 +600,14 @@ func (r *Radio) session(ctx context.Context) error {
 			tap := r.audioTap
 			rate := r.mode.AudioOutRate()
 			muted := r.localMute
+			eng := r.nrEng
 			beaconing := r.beacon != nil || r.beaconOn // duck from queue time
 			rel := r.relArm
 			r.relArm = false
 			r.mu.Unlock()
+			if eng != nil {
+				audioBuf = eng.Process(audioBuf, rate)
+			}
 			if rel && !beaconing && resumeFade == 0 {
 				resumeFade = rate / 200
 			}
@@ -1248,6 +1268,56 @@ func (r *Radio) SetAISRFEnabled(on bool) {
 		r.SetFreq(162_000_000)
 	}
 	fmt.Fprintf(os.Stderr, "radio: AIS RF %v"+string(rune(10)), on)
+}
+
+// SetNRDir tells the radio where to look for the hamnoise sidecar.
+func (r *Radio) SetNRDir(dir string) {
+	r.mu.Lock()
+	r.nrExeDir = dir
+	r.mu.Unlock()
+}
+
+// NREnabled reports the neural noise reduction state/mode.
+func (r *Radio) NREnabled() (bool, string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.nrOn, r.nrMode
+}
+
+// SetNREnabled starts/stops the hamnoise sidecar ("voice" or "cw").
+// Returns false when the sidecar binary is missing.
+func (r *Radio) SetNREnabled(on bool, mode string) bool {
+	r.mu.Lock()
+	if r.nrEng != nil {
+		r.nrEng.Close()
+		r.nrEng = nil
+	}
+	r.nrOn = false
+	start := on && mode != ""
+	dir := r.nrExeDir
+	r.mu.Unlock()
+	if !start {
+		return true
+	}
+	eng := nr.Start(dir, mode)
+	r.mu.Lock()
+	if eng == nil {
+		r.mu.Unlock()
+		return false
+	}
+	r.nrEng = eng
+	r.nrOn = true
+	r.nrMode = mode
+	r.mu.Unlock()
+	return true
+}
+
+// NRAvailable reports whether the sidecar binary exists.
+func (r *Radio) NRAvailable() bool {
+	r.mu.Lock()
+	dir := r.nrExeDir
+	r.mu.Unlock()
+	return nr.Available(dir)
 }
 
 // SSTV returns the slow-scan TV decoder.

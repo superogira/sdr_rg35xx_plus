@@ -35,7 +35,7 @@ echo "         the SD card, then launch from the APPS menu."
 # libusb/libudev) and the USB GPS reader (tools/gpsread.c -- the
 # firmware kernel has no cdc_acm/usbserial modules). Users who skip
 # the SD-card copy get them via OTA.
-for side in rtl_tcp gpsread; do
+for side in rtl_tcp gpsread hamnoise; do
   if [ -f "dist/rg35xx/$side" ]; then
     cp "dist/rg35xx/$side" "dist/rg35xx/SDRg35xx/$side"
     chmod +x "dist/rg35xx/SDRg35xx/$side"

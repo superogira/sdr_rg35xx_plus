@@ -262,7 +262,7 @@ func runUpdate(u *updater, base string, manual bool, beforeRestart func()) {
 		// opportunistically (integrity = size sanity only; the exe above
 		// is hash-pinned) so USB radio + GPS work right after this
 		// update. Failures are non-fatal.
-		for _, side := range []string{"rtl_tcp", "gpsread"} {
+		for _, side := range []string{"rtl_tcp", "gpsread", "hamnoise"} {
 			fetchSidecar(base, filepath.Dir(exe), side)
 		}
 		u.setMsg("%s", fmt.Sprintf(i18n.T("updated"), stamp))
@@ -458,6 +458,7 @@ const (
 	menuHP
 	menuLP
 	menuAF
+	menuNRNN
 	menuRTTY
 	menuRTTYLog
 	menuWefax
@@ -519,7 +520,7 @@ const (
 var pageItems = [][]int{
 	{0, 0, 0, 0, 0, 0, 0, 0, menuBM, 0, menuExit}, // rows open subpages by position (bookmarks row handled first); last row is Exit
 	{menuHost, menuSample, menuFreq, menuStep, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC},
-	{menuAF, menuNR, menuHP, menuLP, menuLocalMute, menuVolume},
+	{menuAF, menuNR, menuHP, menuLP, menuNRNN, menuLocalMute, menuVolume},
 	{menuSpan, menuWFMin, menuWFMax},
 	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
@@ -1169,6 +1170,12 @@ func main() {
 		aisLogMu.Unlock()
 	})
 	r.SetAPRSFreq(aprsFreq)
+	if v := cfg["nrnn"]; v == "voice" || v == "cw" {
+		if ex, err := os.Executable(); err == nil {
+			r.SetNRDir(filepath.Dir(ex))
+		}
+		r.SetNREnabled(true, v)
+	}
 	if cfg["sstv"] == "on" {
 		r.SetSSTVEnabled(true)
 	}
@@ -2241,6 +2248,32 @@ func main() {
 				v = 1.5
 			}
 			r.SetVolume(v)
+		case menuNRNN:
+			on, mode := r.NREnabled()
+			next := "voice"
+			if on && mode == "voice" {
+				next = "cw"
+			} else if on && mode == "cw" {
+				next = ""
+			}
+			if dir < 0 {
+				if !on {
+					next = "cw"
+				} else if mode == "cw" {
+					next = "voice"
+				} else {
+					next = ""
+				}
+			}
+			if next == "" {
+				r.SetNREnabled(false, "")
+				cfg["nrnn"] = "off"
+			} else if r.SetNREnabled(true, next) {
+				cfg["nrnn"] = next
+			} else {
+				setMsg(i18n.T("nr_missing"))
+			}
+			saveNow()
 		case menuAPRSBeacon:
 			aprsBeaconIdx = (aprsBeaconIdx + dir + 7) % 7
 			cfg["aprsbeacon"] = []string{"off", "1", "2", "5", "10", "30", "smart"}[aprsBeaconIdx]
@@ -4000,6 +4033,16 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_nr"), Value: nrVal},
 					ui.MenuItem{Label: i18n.T("m_hp"), Value: hpVal},
 					ui.MenuItem{Label: i18n.T("m_lp"), Value: lpVal},
+					func() ui.MenuItem {
+						on, mode := r.NREnabled()
+						v := i18n.T("off")
+						if on {
+							v = map[string]string{"voice": i18n.T("nr_voice"), "cw": i18n.T("nr_cw")}[mode]
+						} else if !r.NRAvailable() {
+							v = i18n.T("nr_missing")
+						}
+						return ui.MenuItem{Label: i18n.T("m_nrnn"), Value: v}
+					}(),
 					ui.MenuItem{Label: i18n.T("m_lmute"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.LocalMuted()]},
 					ui.MenuItem{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)})
 			case pageADSB:
@@ -4958,6 +5001,10 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	if v, ok := cfg["aprspre"]; ok {
 		fmt.Fprintf(f, "aprspre=%s\n", v)
 	}
+	if v, ok := cfg["nrnn"]; ok {
+		fmt.Fprintf(f, "nrnn=%s\n", v)
+	}
+
 	if v, ok := cfg["sstv"]; ok {
 		fmt.Fprintf(f, "sstv=%s\n", v)
 	}

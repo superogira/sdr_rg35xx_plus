@@ -34,7 +34,7 @@ curl -sfT dist/version.txt --ftp-create-dirs "ftp://$FTP_USER:$FTP_PASS@$FTP_HOS
 
 # Sidecars for the USB sources (small, rarely change — always
 # re-uploaded, the app fetches each only when missing).
-for side in rtl_tcp gpsread; do
+for side in rtl_tcp gpsread hamnoise; do
   if [ -f "dist/rg35xx/$side" ]; then
     gzip -9 -c "dist/rg35xx/$side" > "dist/$side-linux-arm64.gz"
     curl -sfT "dist/$side-linux-arm64.gz" --ftp-create-dirs "ftp://$FTP_USER:$FTP_PASS@$FTP_HOST${FTP_PATH}sdrg35xx/$side-linux-arm64.gz"

@@ -430,6 +430,8 @@ type state struct {
 	PpmOff    bool      `json:"ppmOff"`
 	FT8       bool      `json:"ft8"`
 	SSTV      bool      `json:"sstv"`
+	NRNN      string    `json:"nrnn"`
+	NRAvail   bool      `json:"nrAvail"`
 	AISRF     bool      `json:"aisrf"`
 	LocalMute bool      `json:"localmute"`
 	Reboot    bool      `json:"reboot"`
@@ -539,6 +541,13 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		SqlDb: radio.SquelchDb(), BwHz: radio.Bandwidth(), Bws: radio.Bandwidths(),
 		Ppm: radio.Ppm(), PpmOff: radio.PpmOff(),
 		FT8: radio.FT8Enabled(), AISRF: radio.AISRFEnabled(), LocalMute: radio.LocalMuted(), SSTV: radio.SSTVEnabled(),
+		NRNN: func() string {
+			on, m := radio.NREnabled()
+			if !on {
+				return "off"
+			}
+			return m
+		}(), NRAvail: radio.NRAvailable(),
 		IQRate: radio.IQRate(), Rates: dsp.SampleRates,
 		Reboot:    s.rebooting(),
 		Connected: snap.Connected, Host: radio.Hostname(),
@@ -724,6 +733,12 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 		msg := fn(action, v)
 		writeJSON(w, map[string]any{"ok": true, "msg": msg})
 		return
+	case "nrnn":
+		if int(c.V) == 0 {
+			radio.SetNREnabled(false, "")
+		} else {
+			radio.SetNREnabled(true, map[int]string{1: "voice", 2: "cw"}[int(c.V)])
+		}
 	case "sstv":
 		if c.On != nil {
 			radio.SetSSTVEnabled(*c.On)

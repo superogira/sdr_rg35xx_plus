@@ -62,7 +62,8 @@ kill $syncer 2>/dev/null
 # dead device handle and SIGTERM cannot move it.
 pkill -9 -x rtl_tcp 2>/dev/null
 pkill -9 -x rtl_tcp_static 2>/dev/null
-pkill -9 -x gpsread 2>/dev/null
+pkill -9 -x gpsread
+pkill -9 -x hamnoise 2>/dev/null
 sleep 0.3
 sync
 exit $status
