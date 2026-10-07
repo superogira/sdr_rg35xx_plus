@@ -240,6 +240,7 @@ tr:hover td { background:var(--row-hover); }
       <h2 style="display:flex;align-items:center;gap:8px"><span data-i18n="spectrum">Spectrum</span> <span id="specinfo" style="color:var(--dim);text-transform:none;letter-spacing:0;font-size:13px"></span><button id="specfull" title="เต็มจอ / Fullscreen (F)" style="margin-left:auto;padding:2px 10px">⛶</button></h2>
       <div style="position:relative">
         <canvas id="spc" width="512" height="110" style="width:100%;height:110px;cursor:crosshair;background:var(--bg);touch-action:none"></canvas>
+        <span id="clickhz" style="position:absolute;z-index:5;top:3px;left:6px;color:var(--dim);font-size:11px;background:rgba(0,0,0,.55);padding:1px 6px;border-radius:999px;pointer-events:none"></span>
         <canvas id="spcOv" width="512" height="110" style="position:absolute;inset:0;width:100%;height:110px;pointer-events:none"></canvas>
       </div>
       <canvas id="freqaxis" width="512" height="16" style="display:block;width:100%;height:16px;pointer-events:none"></canvas>
@@ -247,7 +248,6 @@ tr:hover td { background:var(--row-hover); }
         <canvas id="wf" width="512" height="240" style="width:100%;height:240px;cursor:crosshair;touch-action:none"></canvas>
         <canvas id="wfOv" width="512" height="240" style="position:absolute;inset:0;width:100%;height:240px;pointer-events:none"></canvas>
       </div>
-      <div class="row" style="margin-top:6px"><label data-i18n="clicktune">คลิกกราฟ/น้ำตก = จูน</label><span class="val" id="clickhz" style="color:var(--dim)"></span></div>
       <div class="row" style="margin-top:6px"><label data-i18n="signal">สัญญาณ</label><span class="val" id="sigdb" style="color:var(--acc)">—</span></div>
       <div class="row"><label data-i18n="wfmin">น้ำตก ต่ำสุด</label><input type="range" id="wfmin" min="0" max="40" step="1"><span class="val" id="wfminv"></span></div>
       <div class="row"><label data-i18n="wfmax">น้ำตก สูงสุด</label><input type="range" id="wfmax" min="10" max="120" step="2"><span class="val" id="wfmaxv"></span></div>
