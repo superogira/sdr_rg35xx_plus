@@ -54,13 +54,13 @@ func ppmModulate(msg []byte, rate float64, amp, noise float64, seed uint64) []by
 
 func TestCRC24ZeroForValid(t *testing.T) {
 	// Any message with its CRC appended must check to zero.
-	data := appendCRC24([]byte{0x8D, 0x40, 0x6B, 0x90, 0x20, 0x15, 0xA6, 0x78, 0xD4, 0xD2, 0x20})
-	if crc24(bytesToBits(data)) != 0 {
+	data := AppendCRC24([]byte{0x8D, 0x40, 0x6B, 0x90, 0x20, 0x15, 0xA6, 0x78, 0xD4, 0xD2, 0x20})
+	if crc24(data) != 0 {
 		t.Fatal("CRC round-trip failed")
 	}
 	// Flip one bit → non-zero.
 	data[3] ^= 0x40
-	if crc24(bytesToBits(data)) == 0 {
+	if crc24(data) == 0 {
 		t.Fatal("CRC did not catch a bit error")
 	}
 }
@@ -78,10 +78,10 @@ func TestModeSDemodDecodes(t *testing.T) {
 		// zero bytes would be a full-scale DC carrier.
 		idle := ppmIdle(int(0.002*rate), 0.12, 7)
 		for _, m := range [][]byte{
-			appendCRC24(encodePosFrame(icao, 13.70, 100.60, 35000, true)),
-			appendCRC24(encodePosFrame(icao, 13.70, 100.60, 35000, false)),
-			appendCRC24(encodeCallsignFrame(icao, "THA341")),
-			appendCRC24(encodeVelocityFrame(icao, 450, 123)),
+			AppendCRC24(encodePosFrame(icao, 13.70, 100.60, 35000, true)),
+			AppendCRC24(encodePosFrame(icao, 13.70, 100.60, 35000, false)),
+			AppendCRC24(encodeCallsignFrame(icao, "THA341")),
+			AppendCRC24(encodeVelocityFrame(icao, 450, 123)),
 		} {
 			air = append(air, idle...)
 			air = append(air, ppmModulate(m, rate, 0.7, 0.05, 42)...)
@@ -125,4 +125,34 @@ func ppmIdle(n int, noise float64, seed uint64) []byte {
 		out = append(out, byte(127.5+nr*127.5), byte(127.5+ni*127.5))
 	}
 	return out
+}
+
+// TestCRC24TableMatchesBitwise: the byte-table CRC (hot path) must
+// agree with the bit-by-bit reference for random frames.
+func TestCRC24TableMatchesBitwise(t *testing.T) {
+	ref := func(data []byte) uint32 {
+		c := uint32(0)
+		for _, d := range data {
+			for i := 7; i >= 0; i-- { // MSB first
+				bit := uint32((d >> uint(i)) & 1)
+				fb := ((c >> 23) & 1) ^ bit
+				c = (c << 1) & 0xFFFFFF
+				if fb != 0 {
+					c ^= 0xFFF409
+				}
+			}
+		}
+		return c
+	}
+	rnd := uint64(12345)
+	for i := 0; i < 2000; i++ {
+		var b [14]byte
+		for j := range b {
+			rnd = rnd*6364136223846793005 + 1442695040888963407
+			b[j] = byte(rnd >> 33)
+		}
+		if crc24(b[:]) != ref(b[:]) {
+			t.Fatalf("crc24(% x) = %06x, ref %06x", b, crc24(b[:]), ref(b[:]))
+		}
+	}
 }

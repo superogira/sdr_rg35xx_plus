@@ -48,7 +48,7 @@ func encodePosFrame(icao [3]byte, lat, lon float64, altFt int, odd bool) []byte 
 	if odd {
 		f = 1
 	}
-	// 11 data bytes; appendCRC24 grows this to the 14-byte (112-bit)
+	// 11 data bytes; AppendCRC24 grows this to the 14-byte (112-bit)
 	// Mode S long frame.
 	msg := make([]byte, 11)
 	msg[0] = 0x8D // DF17 CA=5
@@ -134,8 +134,8 @@ func TestPositionRoundTrip(t *testing.T) {
 	s := NewStore()
 	icao := [3]byte{0x40, 0x6B, 0x90}
 	// Odd first, then even — the newest frame (even) selects the grid.
-	s.Decode(appendCRC24(encodePosFrame(icao, 13.70, 100.60, 35000, true)))
-	s.Decode(appendCRC24(encodePosFrame(icao, 13.70, 100.60, 35000, false)))
+	s.Decode(AppendCRC24(encodePosFrame(icao, 13.70, 100.60, 35000, true)))
+	s.Decode(AppendCRC24(encodePosFrame(icao, 13.70, 100.60, 35000, false)))
 	ps := s.Planes()
 	if len(ps) != 1 || !ps[0].HasPos {
 		t.Fatalf("no position: %+v", ps)
@@ -155,8 +155,8 @@ func TestPositionRoundTrip(t *testing.T) {
 func TestCallsignAndVelocityRoundTrip(t *testing.T) {
 	s := NewStore()
 	icao := [3]byte{0x88, 0x41, 0xF2}
-	s.Decode(appendCRC24(encodeCallsignFrame(icao, "THA341")))
-	s.Decode(appendCRC24(encodeVelocityFrame(icao, 450, 123)))
+	s.Decode(AppendCRC24(encodeCallsignFrame(icao, "THA341")))
+	s.Decode(AppendCRC24(encodeVelocityFrame(icao, 450, 123)))
 	ps := s.Planes()
 	if len(ps) != 1 {
 		t.Fatalf("planes %d", len(ps))
@@ -239,9 +239,9 @@ func TestTrailThirtySecondSpacing(t *testing.T) {
 	icao := [3]byte{0x40, 0x6B, 0x90}
 	// A burst of position fixes within a few seconds: only ONE
 	// breadcrumb is laid down (the 5 s spacing rule).
-	s.Decode(appendCRC24(encodePosFrame(icao, 13.70, 100.60, 35000, true)))
-	s.Decode(appendCRC24(encodePosFrame(icao, 13.701, 100.601, 35000, false)))
-	s.Decode(appendCRC24(encodePosFrame(icao, 13.702, 100.602, 35000, true)))
+	s.Decode(AppendCRC24(encodePosFrame(icao, 13.70, 100.60, 35000, true)))
+	s.Decode(AppendCRC24(encodePosFrame(icao, 13.701, 100.601, 35000, false)))
+	s.Decode(AppendCRC24(encodePosFrame(icao, 13.702, 100.602, 35000, true)))
 	ps := s.Planes()
 	if len(ps) != 1 {
 		t.Fatalf("planes %d", len(ps))

@@ -102,16 +102,20 @@ type Radio struct {
 	ft8On      bool
 	ft8        *dsp.FT8Detector
 	aisRFOn    bool
-	adsbRFOn   bool          // in-app Mode S decode from raw 2.4M IQ
+	adsbRFOn   bool // in-app Mode S decode from raw 2.4M IQ
 	adsbDem    *adsb.ModeSDemod
 	adsbStore  *adsb.Store
-	adsbRateBk int // capture rate to restore when ADS-B RF is turned off
+	adsbRateBk int         // capture rate to restore when ADS-B RF is turned off
+	adsbQ      chan []byte // IQ blocks queued for the demod goroutine
+	adsbFree   chan []byte // reusable block buffers (zero-alloc steady state)
+	adsbQuit   chan struct{}
+	adsbDone   chan struct{}
 
 	// rtl_tcp server mode: republish the live IQ so other hosts connect.
-	srvOn     bool
-	srv       *rtltcp.Server
-	srvPort   int
-	audioTap  func(mono []float32, rate int) // web audio stream tap
+	srvOn      bool
+	srv        *rtltcp.Server
+	srvPort    int
+	audioTap   func(mono []float32, rate int) // web audio stream tap
 	localMute  bool                           // speaker off; web tap still live
 	aisA, aisB *ais.ChannelDemod
 	aisPay     func(payload []byte, ch int, levelDb float64)
@@ -293,9 +297,15 @@ func (r *Radio) Run(ctx context.Context) {
 		srv := r.srv
 		r.srv = nil
 		r.srvOn = false
+		quit, done := r.adsbQuit, r.adsbDone
+		r.adsbQ, r.adsbFree, r.adsbQuit, r.adsbDone = nil, nil, nil, nil
 		r.mu.Unlock()
 		if srv != nil {
 			srv.Close()
+		}
+		if quit != nil {
+			close(quit)
+			<-done
 		}
 	}()
 	defer func() {
@@ -617,14 +627,27 @@ func (r *Radio) session(ctx context.Context) error {
 			audioBuf = audioBuf[:0]
 			chain.Process(buf[:n], &audioBuf)
 			// In-app Mode S decoding eats the RAW 2.4M IQ (it is not an
-			// audio-branch demod like FT8/AIS/APRS): feed the demod the
-			// same u8 block the chain just consumed.
+			// audio-branch demod like FT8/AIS/APRS). The demod runs on
+			// its own goroutine; hand the block over without blocking
+			// the read loop (a noisy band can outrun the demod, and
+			// ADS-B repeats, so a dropped block only delays a track).
 			r.mu.Lock()
-			adsbDem := r.adsbDem
-			adsbOn := r.adsbRFOn
+			q := r.adsbQ
+			free := r.adsbFree
 			r.mu.Unlock()
-			if adsbOn && adsbDem != nil {
-				adsbDem.FeedIQ(buf[:n])
+			if q != nil {
+				var blk []byte
+				select {
+				case blk = <-free:
+				default:
+					blk = make([]byte, n)
+				}
+				blk = blk[:n]
+				copy(blk, buf[:n])
+				select {
+				case q <- blk:
+				default:
+				}
 			}
 			// rtl_tcp fan-out: republish the exact bytes to remote hosts.
 			r.mu.Lock()
@@ -1350,7 +1373,26 @@ func (r *Radio) SetADSBRFEnabled(on bool) {
 	if !on && rateBk != 0 {
 		r.adsbRateBk = 0
 	}
+	// Start/stop the demod goroutine.
+	if on && r.adsbQ == nil {
+		r.adsbQ = make(chan []byte, 4)
+		r.adsbFree = make(chan []byte, 8)
+		r.adsbQuit = make(chan struct{})
+		r.adsbDone = make(chan struct{})
+		go r.adsbLoop(r.adsbQ, r.adsbFree, r.adsbQuit, r.adsbDone)
+	}
+	quit, done := r.adsbQuit, r.adsbDone
+	if !on && r.adsbQ != nil {
+		r.adsbQ = nil
+		r.adsbFree = nil
+		r.adsbQuit = nil
+		r.adsbDone = nil
+		close(quit)
+	}
 	r.mu.Unlock()
+	if !on && done != nil {
+		<-done // the goroutine has released the demod
+	}
 	if on {
 		if dsp.IQRate != 2_400_000 {
 			r.SetCaptureRate(2_400_000)
@@ -1362,6 +1404,31 @@ func (r *Radio) SetADSBRFEnabled(on bool) {
 		r.SetCaptureRate(rateBk)
 	}
 	fmt.Fprintf(os.Stderr, "radio: ADS-B RF %v"+string(rune(10)), on)
+}
+
+// adsbLoop feeds queued IQ blocks to the Mode S demodulator on its own
+// goroutine: on a noisy 1090 MHz band the demod needs more CPU than the
+// handheld can spare inline inside the radio read loop, and blocking
+// that loop would starve the audio chain. Blocks the demod cannot keep
+// up with are dropped by the enqueuer (ADS-B repeats ~1 msg/s/aircraft,
+// so a dropped block only delays a track, it never loses the aircraft).
+func (r *Radio) adsbLoop(q, free chan []byte, quit, done chan struct{}) {
+	defer close(done)
+	r.mu.Lock()
+	dem := r.adsbDem
+	r.mu.Unlock()
+	for {
+		select {
+		case buf := <-q:
+			dem.FeedIQ(buf)
+			select {
+			case free <- buf:
+			default: // pool full: let the GC take it
+			}
+		case <-quit:
+			return
+		}
+	}
 }
 
 // SetRTLSrvPort sets the port the fan-out rtl_tcp server listens on.
