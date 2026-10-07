@@ -11,3 +11,8 @@ truth_*.txt
 wfm_*.wav
 known_payloads.txt
 .webtest/
+
+# stray local test binaries
+*.test.exe
+adsbtest.exe
+rttytest.exe
