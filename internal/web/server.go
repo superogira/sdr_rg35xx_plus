@@ -53,6 +53,17 @@ type AISLine struct {
 }
 
 // Server owns the HTTP listener and the log mirrors.
+// sysSample is one system-metrics history point.
+type sysSample struct {
+	t          int64
+	cpu, mem   float64
+	bat        int
+	ct, gt, dt float64
+}
+
+// sysHistCap is 24 h at the 10 s sample interval.
+const sysHistCap = 24 * 3600 / 10
+
 type Server struct {
 	mu      sync.Mutex
 	enabled bool
@@ -73,6 +84,11 @@ type Server struct {
 	aisLog   []AISLine
 	logMu    sync.Mutex
 	upSince  time.Time
+
+	// system metrics history (since app start; cleared on exit by
+	// process death — nothing is persisted)
+	histMu sync.Mutex
+	hist   []sysSample
 
 	// cmdMu serializes handleCmd: web commands run one at a time so
 	// no two HTTP goroutines can race on anything they touch.
@@ -353,6 +369,7 @@ func (s *Server) startLocked() {
 	mux.HandleFunc("/api/ais", s.handleAIS)
 	mux.HandleFunc("/api/targets", s.handleTargets)
 	mux.HandleFunc("/api/aprslog", s.handleAPRSLog)
+	mux.HandleFunc("/api/syshist", s.handleSysHist)
 	mux.HandleFunc("/api/ft8map", s.handleFT8Map)
 	mux.HandleFunc("/api/flag/", s.handleFlag)
 	mux.HandleFunc("/api/spec", s.handleSpec)
@@ -366,6 +383,7 @@ func (s *Server) startLocked() {
 		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 	}
 	s.srv = &http.Server{Addr: fmt.Sprintf(":%d", s.port), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go s.sampleLoop()
 	go s.srv.ListenAndServe() //nolint:errcheck // listener errors surface as "unreachable" in the UI
 	fmt.Fprintf(os.Stderr, "web: server listening on :%d\n", s.port)
 }
@@ -461,6 +479,53 @@ func (s *Server) rebooting() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return time.Since(s.rebootAt) < 90*time.Second
+}
+
+// sampleLoop records system metrics every 10 s for the history graph.
+func (s *Server) sampleLoop() {
+	tick := time.NewTicker(10 * time.Second)
+	defer tick.Stop()
+	for range tick.C {
+		cpu, mem, _ := sysinfo.Snapshot()
+		sens := sysinfo.SensorSnapshot()
+		s.histMu.Lock()
+		s.hist = append(s.hist, sysSample{
+			t: time.Now().Unix(), cpu: cpu, mem: mem, bat: sens.BattPct,
+			ct: sens.CPUTemp, gt: sens.GPUTemp, dt: sens.DDRTemp,
+		})
+		if len(s.hist) > sysHistCap {
+			s.hist = s.hist[len(s.hist)-sysHistCap:]
+		}
+		s.histMu.Unlock()
+	}
+}
+
+func (s *Server) handleSysHist(w http.ResponseWriter, r *http.Request) {
+	s.histMu.Lock()
+	n := len(s.hist)
+	out := struct {
+		T   []int64   `json:"t"`
+		Cpu []float64 `json:"cpu"`
+		Mem []float64 `json:"mem"`
+		Bat []float64 `json:"bat"`
+		Ct  []float64 `json:"ct"`
+		Gt  []float64 `json:"gt"`
+		Dt  []float64 `json:"dt"`
+	}{
+		T: make([]int64, n), Cpu: make([]float64, n), Mem: make([]float64, n),
+		Bat: make([]float64, n), Ct: make([]float64, n), Gt: make([]float64, n), Dt: make([]float64, n),
+	}
+	for i, h := range s.hist {
+		out.T[i] = h.t
+		out.Cpu[i] = math.Round(h.cpu*10) / 10
+		out.Mem[i] = math.Round(h.mem*10) / 10
+		out.Bat[i] = float64(h.bat)
+		out.Ct[i] = math.Round(h.ct*10) / 10
+		out.Gt[i] = math.Round(h.gt*10) / 10
+		out.Dt[i] = math.Round(h.dt*10) / 10
+	}
+	s.histMu.Unlock()
+	writeJSON(w, out)
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
