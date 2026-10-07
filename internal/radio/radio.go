@@ -106,7 +106,12 @@ type Radio struct {
 	adsbDem    *adsb.ModeSDemod
 	adsbStore  *adsb.Store
 	adsbRateBk int // capture rate to restore when ADS-B RF is turned off
-	audioTap   func(mono []float32, rate int) // web audio stream tap
+
+	// rtl_tcp server mode: republish the live IQ so other hosts connect.
+	srvOn     bool
+	srv       *rtltcp.Server
+	srvPort   int
+	audioTap  func(mono []float32, rate int) // web audio stream tap
 	localMute  bool                           // speaker off; web tap still live
 	aisA, aisB *ais.ChannelDemod
 	aisPay     func(payload []byte, ch int, levelDb float64)
@@ -283,6 +288,16 @@ func (r *Radio) Run(ctx context.Context) {
 	// Leaving the app (or dropping to another source) must release the
 	// dongle for other programs.
 	defer r.stopUSBSrv()
+	defer func() {
+		r.mu.Lock()
+		srv := r.srv
+		r.srv = nil
+		r.srvOn = false
+		r.mu.Unlock()
+		if srv != nil {
+			srv.Close()
+		}
+	}()
 	defer func() {
 		r.mu.Lock()
 		eng := r.nrEng
@@ -610,6 +625,13 @@ func (r *Radio) session(ctx context.Context) error {
 			r.mu.Unlock()
 			if adsbOn && adsbDem != nil {
 				adsbDem.FeedIQ(buf[:n])
+			}
+			// rtl_tcp fan-out: republish the exact bytes to remote hosts.
+			r.mu.Lock()
+			srv := r.srv
+			r.mu.Unlock()
+			if srv != nil {
+				srv.Broadcast(buf[:n])
 			}
 			r.mu.Lock()
 			tap := r.audioTap
@@ -1340,6 +1362,83 @@ func (r *Radio) SetADSBRFEnabled(on bool) {
 		r.SetCaptureRate(rateBk)
 	}
 	fmt.Fprintf(os.Stderr, "radio: ADS-B RF %v"+string(rune(10)), on)
+}
+
+// SetRTLSrvPort sets the port the fan-out rtl_tcp server listens on.
+func (r *Radio) SetRTLSrvPort(port int) {
+	r.mu.Lock()
+	r.srvPort = port
+	r.mu.Unlock()
+}
+
+// RTLSrvEnabled reports whether the fan-out rtl_tcp server runs.
+func (r *Radio) RTLSrvEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.srvOn
+}
+
+// RTLSrvPort returns the listening port (0 when off).
+func (r *Radio) RTLSrvPort() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.srv == nil {
+		return 0
+	}
+	return r.srvPort
+}
+
+// RTLSrvClients reports how many remote hosts are attached.
+func (r *Radio) RTLSrvClients() int {
+	r.mu.Lock()
+	srv := r.srv
+	r.mu.Unlock()
+	if srv == nil {
+		return 0
+	}
+	return srv.Clients()
+}
+
+// SetRTLSrvEnabled starts/stops the in-process rtl_tcp server that
+// republishes the app's live IQ to other hosts on the network (point a
+// laptop's SDRSharp/gqrx/tar1090 at this device's IP:port). The local
+// dongle stays owned by the app — remote clients receive the app's
+// current frequency and rate, and their tuning commands are ignored.
+func (r *Radio) SetRTLSrvEnabled(on bool) bool {
+	r.mu.Lock()
+	if !on {
+		srv := r.srv
+		r.srv = nil
+		r.srvOn = false
+		r.mu.Unlock()
+		if srv != nil {
+			srv.Close()
+		}
+		fmt.Fprintf(os.Stderr, "radio: rtl_tcp server off"+string(rune(10)))
+		return true
+	}
+	if r.srv != nil {
+		r.mu.Unlock()
+		return true
+	}
+	port := r.srvPort
+	gains := r.gains
+	r.mu.Unlock()
+	if port == 0 {
+		port = 1235
+	}
+	srv, err := rtltcp.NewServer(fmt.Sprintf("0.0.0.0:%d", port), int32(5), gains)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "radio: rtl_tcp server: %v"+string(rune(10)), err)
+		return false
+	}
+	r.mu.Lock()
+	r.srv = srv
+	r.srvOn = true
+	r.srvPort = port
+	r.mu.Unlock()
+	fmt.Fprintf(os.Stderr, "radio: rtl_tcp server on %s"+string(rune(10)), srv.Addr())
+	return true
 }
 
 // SetNRDir tells the radio where to look for the hamnoise sidecar.

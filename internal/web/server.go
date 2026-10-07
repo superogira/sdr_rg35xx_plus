@@ -434,6 +434,8 @@ type state struct {
 	NRAvail   bool      `json:"nrAvail"`
 	AISRF     bool      `json:"aisrf"`
 	ADSBRF    bool      `json:"adsbrf"`
+	RTLSrv    bool      `json:"rtlsrv"`
+	RTLSrvN   int       `json:"rtlsrvClients"`
 	LocalMute bool      `json:"localmute"`
 	Reboot    bool      `json:"reboot"`
 	IQRate    int       `json:"iqRate"`
@@ -541,7 +543,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		GainDb: radio.GainDb(), AGC: radio.AGCEnabled(), Vol: radio.Volume(),
 		SqlDb: radio.SquelchDb(), BwHz: radio.Bandwidth(), Bws: radio.Bandwidths(),
 		Ppm: radio.Ppm(), PpmOff: radio.PpmOff(),
-		FT8: radio.FT8Enabled(), AISRF: radio.AISRFEnabled(), ADSBRF: radio.ADSBRFEnabled(), LocalMute: radio.LocalMuted(), SSTV: radio.SSTVEnabled(),
+		FT8: radio.FT8Enabled(), AISRF: radio.AISRFEnabled(), ADSBRF: radio.ADSBRFEnabled(), RTLSrv: radio.RTLSrvEnabled(), RTLSrvN: radio.RTLSrvClients(), LocalMute: radio.LocalMuted(), SSTV: radio.SSTVEnabled(),
 		NRNN: func() string {
 			on, m := radio.NREnabled()
 			if !on {
@@ -682,6 +684,15 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 	case "adsbrf":
 		if c.On != nil {
 			radio.SetADSBRFEnabled(*c.On)
+		}
+	case "rtlsrv":
+		if c.On != nil {
+			if *c.On {
+				if c.V >= 1 && c.V <= 65535 {
+					radio.SetRTLSrvPort(int(c.V))
+				}
+			}
+			radio.SetRTLSrvEnabled(*c.On)
 		}
 	case "wefax":
 		if c.On != nil {

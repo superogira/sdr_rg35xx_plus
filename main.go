@@ -471,6 +471,8 @@ const (
 	menuSSTVClear
 	menuADSBHost
 	menuADSBRF
+	menuRTLSrv
+	menuRTLSrvPort
 	menuADSBLat
 	menuADSBLon
 	menuADSBRadar
@@ -523,7 +525,7 @@ var pageItems = [][]int{
 	{menuHost, menuSample, menuFreq, menuStep, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC},
 	{menuAF, menuNR, menuHP, menuLP, menuNRNN, menuLocalMute, menuVolume},
 	{menuSpan, menuWFMin, menuWFMax},
-	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBRF, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
+	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBRF, menuRTLSrv, menuRTLSrvPort, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSIgate, menuAPRSGateLim, menuAPRSSrc, menuAPRSFixLat, menuAPRSFixLon, menuAPRSNow},
 	{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuSSTV, menuSSTVView, menuSSTVClear},
@@ -862,6 +864,13 @@ func main() {
 		}
 	}
 	adsbConnected := false
+	// rtl_tcp fan-out server: share the live IQ with other hosts.
+	rtlSrvPort := 1235
+	if v, ok := cfg["rtlsrvport"]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 65535 {
+			rtlSrvPort = n
+		}
+	}
 	// OSM basemap: one mosaic per (layer, range zoom), fetched in the
 	// background and cached in memory + on the SD card.
 	adsbLayerIdx := 0
@@ -1190,6 +1199,10 @@ func main() {
 	}
 	if cfg["adsbrf"] == "on" {
 		r.SetADSBRFEnabled(true)
+	}
+	r.SetRTLSrvPort(rtlSrvPort)
+	if cfg["rtlsrv"] == "on" {
+		r.SetRTLSrvEnabled(true)
 	}
 	defer func() {
 		if out != nil {
@@ -2493,6 +2506,23 @@ func main() {
 			r.SetADSBRFEnabled(on)
 			cfg["adsbrf"] = map[bool]string{true: "on", false: "off"}[on]
 			saveNow()
+		case menuRTLSrv:
+			if r.RTLSrvEnabled() {
+				r.SetRTLSrvEnabled(false)
+				cfg["rtlsrv"] = "off"
+			} else {
+				r.SetRTLSrvPort(rtlSrvPort)
+				ok := r.SetRTLSrvEnabled(true)
+				cfg["rtlsrv"] = map[bool]string{true: "on", false: "off"}[ok]
+				if !ok {
+					setMsg(i18n.T("rtlsrv_fail"))
+				}
+			}
+			saveNow()
+		case menuRTLSrvPort:
+			hostText, kbTarget = fmt.Sprintf("%d", rtlSrvPort), "rtlsrvport"
+			hostKbR, hostKbC = 0, 0
+			uiMode = uiHostEdit
 		case menuAISLog:
 			aisScroll = 0
 			uiMode = uiAISLog
@@ -3175,6 +3205,19 @@ func main() {
 					}
 					hostText = ""
 					uiMode, menuPage, menuSel = uiMenu, pageAPRS, menuRow(pageAPRS, menuAPRSFixLon)
+				case "rtlsrvport":
+					if v, err := strconv.Atoi(strings.TrimSpace(hostText)); err == nil && v >= 1 && v <= 65535 {
+						rtlSrvPort = v
+						cfg["rtlsrvport"] = fmt.Sprintf("%d", v)
+						if r.RTLSrvEnabled() { // restart on the new port
+							r.SetRTLSrvEnabled(false)
+							r.SetRTLSrvPort(v)
+							r.SetRTLSrvEnabled(true)
+						}
+						saveNow()
+					}
+					hostText = ""
+					uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuRTLSrvPort)
 				case "aprsiserver":
 					if t := strings.TrimSpace(hostText); strings.Contains(t, ":") {
 						aprsIServer = t
@@ -4069,6 +4112,14 @@ func main() {
 						return ui.MenuItem{Label: i18n.T("m_adsbhost"), Value: v}
 					}(),
 					ui.MenuItem{Label: i18n.T("m_adsbrf"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.ADSBRFEnabled()]},
+					ui.MenuItem{Label: i18n.T("m_rtlsrv"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.RTLSrvEnabled()]},
+					ui.MenuItem{Label: i18n.T("m_rtlsrvport"), Value: func() string {
+						p := r.RTLSrvPort()
+						if p == 0 {
+							p = rtlSrvPort
+						}
+						return fmt.Sprintf("%d", p)
+					}()},
 					func() ui.MenuItem {
 						v := aisHost
 						if v == "" {
@@ -4942,6 +4993,12 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["adsbrf"]; ok {
 		fmt.Fprintf(f, "adsbrf=%s\n", v)
+	}
+	if v, ok := cfg["rtlsrv"]; ok {
+		fmt.Fprintf(f, "rtlsrv=%s\n", v)
+	}
+	if v, ok := cfg["rtlsrvport"]; ok {
+		fmt.Fprintf(f, "rtlsrvport=%s\n", v)
 	}
 	if v, ok := cfg["update"]; ok {
 		fmt.Fprintf(f, "update=%s\n", v)

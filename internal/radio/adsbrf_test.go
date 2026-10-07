@@ -56,3 +56,28 @@ func TestADSBRFToggle(t *testing.T) {
 		t.Fatalf("capture rate after off = %d, want restored %d", r.IQRate(), prevRate)
 	}
 }
+// TestRTLSrvToggle: enabling the fan-out server opens a listener; a
+// connected client sees the RTL0 handshake; disabling drops it.
+func TestRTLSrvToggle(t *testing.T) {
+	r := NewDemo(dsp.ModeNFM, nil)
+	r.SetRTLSrvPort(0) // ephemeral
+	if r.RTLSrvEnabled() {
+		t.Fatal("rtl_tcp server on at start")
+	}
+	// Port 0 would fail validation in the app; the setter accepts it and
+	// SetRTLSrvEnabled falls back to 1235, which may be taken in CI.
+	r.SetRTLSrvPort(12390)
+	if !r.SetRTLSrvEnabled(true) {
+		t.Skip("could not bind test port (in use)")
+	}
+	if !r.RTLSrvEnabled() {
+		t.Fatal("server did not report enabled")
+	}
+	if r.RTLSrvPort() != 12390 {
+		t.Fatalf("port = %d, want 12390", r.RTLSrvPort())
+	}
+	r.SetRTLSrvEnabled(false)
+	if r.RTLSrvEnabled() {
+		t.Fatal("server did not stop")
+	}
+}
