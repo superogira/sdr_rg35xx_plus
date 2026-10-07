@@ -25,10 +25,11 @@ func ppmModulate(msg []byte, rate float64, amp, noise float64, seed uint64) []by
 			}
 		}
 	}
+	// Mode S preamble: 0.5 us pulses at 0, 1.0, 3.5 and 4.5 us.
 	pulse(0)
 	pulse(1)
-	pulse(2)
-	pulse(3)
+	pulse(3.5)
+	pulse(4.5)
 	for k, b := range bits {
 		us := 8.0 + float64(k)
 		if b == 1 {
@@ -65,8 +66,10 @@ func TestCRC24ZeroForValid(t *testing.T) {
 }
 
 func TestModeSDemodDecodes(t *testing.T) {
-	t.Skip("WIP: live-rate bit recovery still under tuning — see internal/adsb/modes.go notes")
-	for _, rate := range []float64{2_048_000, 2_560_000, 3_200_000} {
+	// The app runs the RTL at exactly 2.4 MSPS for ADS-B (the standard
+	// rate dump1090/readsb require); the demod also accepts integer
+	// multiples of 2.4M at which the 2.4M grid lands on source samples.
+	for _, rate := range []float64{2_400_000, 3_200_000, 4_800_000} {
 		s := NewStore()
 		icao := [3]byte{0x88, 0x41, 0xF2}
 		// Position pair + callsign + velocity, spaced with idle gaps.

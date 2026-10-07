@@ -6,8 +6,6 @@
 package adsb
 
 import (
-	"fmt"
-
 	"math"
 	"sync"
 )
@@ -73,15 +71,24 @@ var modesDebug func(f string, a ...any)
 // ModeSDemod turns raw u8 IQ at a known rate into Mode S messages.
 type ModeSDemod struct {
 	mu    sync.Mutex
-	rate  float64 // samples per second
+	rate  float64
 	store *Store
 
-	mag    []float64 // ring buffer of magnitudes
+	// source-rate magnitude ring (linear-interpolation source)
+	mag    []float64
 	head   int
 	filled int
+	count  int     // source samples consumed
+	srcPos float64 // source position of the next 2.4M bin
 
-	noise float64 // rolling noise-floor estimate
-	count int
+	// 2.4 MSPS magnitude ring (the decode domain)
+	mag24    []float64
+	head24   int
+	filled24 int
+	abs24    int // absolute 2.4M samples produced
+	scanAt   int
+
+	noise float64
 
 	// Diagnostics.
 	Preambles int
@@ -90,14 +97,76 @@ type ModeSDemod struct {
 }
 
 func NewModeSDemod(rate float64, store *Store) *ModeSDemod {
-	return &ModeSDemod{rate: rate, store: store, mag: make([]float64, 4096), noise: 20}
+	return &ModeSDemod{
+		rate:  rate,
+		store: store,
+		mag:   make([]float64, 4096),
+		mag24: make([]float64, 8192), // 2.4 MSPS magnitude ring (~3.4 ms)
+		noise: 20,
+	}
+}
+
+// at reads the source-rate ring at an absolute source sample index.
+// Only the last couple of samples are ever read (the 2.4M grid lags
+// the newest source sample by one), so the ring stays small.
+func (d *ModeSDemod) at(abs int) float64 {
+	idx := ((abs % len(d.mag)) + len(d.mag)) % len(d.mag)
+	return d.mag[idx]
+}
+
+// readsb's hand-tuned per-phase correlators at 2.4 MSPS (one sample
+// per 0.4167 us): each decides one PPM bit from 3-4 neighbouring
+// magnitude samples. Ported from wiedehopf/readsb demod_2400.c
+// (GPL-2.0-or-later; this file implements the algorithm, no code is
+// copied verbatim beyond these coefficient tables).
+func slicePhase(m []float64, i int, phase int) float64 {
+	switch phase {
+	case 0:
+		return 18*m[i] - 15*m[i+1] - 3*m[i+2]
+	case 1:
+		return 14*m[i] - 5*m[i+1] - 9*m[i+2]
+	case 2:
+		return 16*m[i] + 5*m[i+1] - 20*m[i+2]
+	case 3:
+		return 7*m[i] + 11*m[i+1] - 18*m[i+2]
+	default:
+		return 4*m[i] + 15*m[i+1] - 20*m[i+2] + 1*m[i+3]
+	}
+}
+
+// slice byte tables: for each running phase (0..4), eight
+// {phaseFn, sampleOffset} pairs, MSB first; the phase advances and
+// the pointer steps 19 samples per byte (20 on the wrap).
+var sliceTables = [5][8][2]int{
+	{{0, 0}, {2, 2}, {4, 4}, {1, 7}, {3, 9}, {0, 12}, {2, 14}, {4, 16}},
+	{{1, 0}, {3, 2}, {0, 5}, {2, 7}, {4, 9}, {1, 12}, {3, 14}, {0, 17}},
+	{{2, 0}, {4, 2}, {1, 5}, {3, 7}, {0, 10}, {2, 12}, {4, 14}, {1, 17}},
+	{{3, 0}, {0, 3}, {2, 5}, {4, 7}, {1, 10}, {3, 12}, {0, 15}, {2, 17}},
+	{{4, 0}, {1, 3}, {3, 5}, {0, 8}, {2, 10}, {4, 12}, {1, 15}, {3, 17}},
 }
 
 // FeedIQ consumes one block of interleaved u8 IQ.
+//
+// The magnitude stream is resampled onto the exact 2.4 MSPS grid the
+// phase correlators were tuned for. Bin k samples the source signal at
+// time k/2.4e6 via linear interpolation between the two source samples
+// straddling it — exact when the source rate is a multiple of 2.4M and
+// a correct band-limited resample for the higher rates.
+//
+// Rates BELOW 2.4 MSPS are not supported: Mode S is 1 Mbit/s PPM
+// (≈2 MHz occupied), so at 2.048M the pulses are already undersampled
+// and no resampling can recover them (verified: the best alignment
+// still yields 3 wrong bits, which CRC-24 cannot pass). readsb's own
+// demod_2400.c likewise requires 2.4 MSPS. The caller must set the RTL
+// rate to 2.4M for Mode S.
 func (d *ModeSDemod) FeedIQ(buf []byte) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.rate < 2.4e6 {
+		return
+	}
 	n := len(buf) / 2
+	sps := d.rate / 2.4e6 // source samples per 2.4M bin
 	for i := 0; i < n; i++ {
 		re := float64(buf[2*i]) - 127.5
 		im := float64(buf[2*i+1]) - 127.5
@@ -107,248 +176,160 @@ func (d *ModeSDemod) FeedIQ(buf []byte) {
 		if d.filled < len(d.mag) {
 			d.filled++
 		}
-		// Slow noise-floor tracking (attenuated by clipping high peaks).
 		att := m
 		if att > d.noise*4 {
 			att = d.noise * 4
 		}
 		d.noise += 0.0005 * (att - d.noise)
 		d.count++
-		if d.count%4 == 0 {
-			d.tryPreamble()
+		// Emit every bin whose two interpolation source samples exist.
+		for {
+			fp := d.srcPos // source position of bin d.abs24, in samples
+			i0 := int(fp)
+			if float64(i0+1) > float64(d.count-1) {
+				break
+			}
+			f := fp - float64(i0)
+			v := d.at(i0)*(1-f) + d.at(i0+1)*f
+			d.emit24(v)
+			d.srcPos += sps
 		}
 	}
+	d.scan24()
 }
 
-// magAt returns the magnitude ~µs after a given absolute sample index.
-func (d *ModeSDemod) at(abs int) float64 {
-	idx := ((abs % len(d.mag)) + len(d.mag)) % len(d.mag)
-	return d.mag[idx]
+// at24 reads the 2.4M ring at an absolute 2.4M sample index.
+func (d *ModeSDemod) at24(abs int) float64 {
+	idx := ((abs % len(d.mag24)) + len(d.mag24)) % len(d.mag24)
+	return d.mag24[idx]
 }
 
-// abs converts ring position to an absolute sample index.
-func (d *ModeSDemod) abs() int { return d.count }
-
-// energy sums magnitude over ±halfWidth samples around a µs position
-// relative to start (in samples).
-func (d *ModeSDemod) energy(startSample int, us, halfWidth float64) float64 {
-	c := startSample + int(us*d.rate/1e6)
-	w := halfWidth * d.rate / 1e6
-	var e float64
-	for k := -int(w); k <= int(w); k++ {
-		e += d.at(c + k)
-	}
-	return e
+// emit24 pushes one finished 2.4M magnitude into the ring.
+func (d *ModeSDemod) emit24(v float64) {
+	d.mag24[d.head24] = v
+	d.head24 = (d.head24 + 1) % len(d.mag24)
+	d.filled24++
+	d.abs24++
 }
 
-// magAt interpolates the magnitude at a fractional sample position —
-// PPM chips straddle two samples at non-integer samples-per-bit, and
-// window sums split their energy ~60/40, letting noise flip near-equal
-// chips. The chip-centre interpolation keeps the decision on the
-// stronger sample.
-func (d *ModeSDemod) magAt(pos float64) float64 {
-	i := int(math.Floor(pos))
-	frac := pos - float64(i)
-	a := d.at(i)
-	b := d.at(i + 1)
-	return a*(1-frac) + b*frac
-}
-
-// slotEnergy integrates magnitude over the half-bit slot starting at
-// usOff microseconds after t0 — the PPM decision needs the FULL chip
-// energy because at non-integer samples-per-bit any fixed sample point
-// drifts out of the chip within a few bits.
-func (d *ModeSDemod) slotEnergy(t0 int, usOff float64) float64 {
-	start := float64(t0) + usOff*d.rate/1e6
-	end := start + 0.5*d.rate/1e6
-	var e float64
-	for i := int(start + 0.5); i < int(end+0.5); i++ {
-		e += d.at(i)
+// scan24 runs readsb's preamble hunt + phase-scored decode over the
+// freshly appended 2.4M magnitudes.
+func (d *ModeSDemod) scan24() {
+	need := 320 // ~133 us of 2.4M samples for a long message + margin
+	// Resync BEFORE scanning: after a big block (or a stall) the scan
+	// cursor can sit outside the ring's window; clamping first keeps
+	// every sample the ring still holds scannable.
+	if d.scanAt < d.abs24-len(d.mag24)+40 {
+		d.scanAt = d.abs24 - len(d.mag24) + 40
+		if d.scanAt < 0 {
+			d.scanAt = 0
+		}
 	}
-	return e
-}
-
-// tryPreamble hunts for a Mode S preamble ending right at the newest
-// samples and decodes the message that follows.
-func (d *ModeSDemod) tryPreamble() {
-	// Need 121 µs of history after the preamble start.
-	need := int(125e-6 * d.rate)
-	if d.filled < need {
-		return
-	}
-	// Candidate preamble start: scan the recent 300 µs window
-	// (messages overlap-check happens by consuming).
-	to := d.abs() - need
-	from := to - int(300e-6*d.rate)
-	if from < d.abs()-len(d.mag) {
-		from = d.abs() - len(d.mag)
-	}
-	thr := d.noise * 2.2
-	if modesDebug != nil {
-		modesDebug("scan from=%d to=%d abs=%d filled=%d", from, to, d.abs(), d.filled)
-	}
-	for t0 := from; t0 <= to; t0++ {
-		// Preamble with full-window energies (shaped pulses leak onto
-		// neighbouring samples; single-sample probes see shoulders).
-		p1 := d.slotEnergy(t0, 0)
-		if p1 < thr {
+	for d.scanAt+need <= d.abs24 {
+		pa := d.scanAt
+		if modesDebug != nil && pa >= 4798 && pa <= 4802 {
+			modesDebug("scan pa=%d m1=%.0f m7=%.0f m12=%.0f m14=%.0f m15=%.0f", pa, d.at24(pa+1), d.at24(pa+7), d.at24(pa+12), d.at24(pa+14), d.at24(pa+15))
+		}
+		// readsb's cheap pre-check (indices in us at 2.4M)
+		if !(d.at24(pa+1) > d.at24(pa+7) && d.at24(pa+12) > d.at24(pa+14) && d.at24(pa+12) > d.at24(pa+15)) {
+			d.scanAt++
 			continue
 		}
-		p2 := d.slotEnergy(t0, 1)
-		p3 := d.slotEnergy(t0, 2)
-		p4 := d.slotEnergy(t0, 3)
-		g1 := d.slotEnergy(t0, 0.5)
-		g2 := d.slotEnergy(t0, 1.5)
-		g3 := d.slotEnergy(t0, 2.5)
-		g4 := d.slotEnergy(t0, 4.5)
-		peak := math.Min(math.Min(p1, p2), math.Min(p3, p4))
-		gap := math.Max(math.Max(g1, g2), math.Max(g3, g4))
-		if modesDebug != nil {
-			modesDebug("cand t0=%d p=%.0f/%.0f/%.0f/%.0f g=%.0f/%.0f/%.0f/%.0f thr=%.0f", t0, p1, p2, p3, p4, g1, g2, g3, g4, thr)
+		base := d.at24(pa+5) + d.at24(pa+8) + d.at24(pa+16) + d.at24(pa+17) + d.at24(pa+18)
+		ref := base * 4 / 32 // preambleThreshold 4, /32
+		diff23 := d.at24(pa+2) - d.at24(pa+3)
+		sum14 := d.at24(pa+1) + d.at24(pa+4)
+		diff1011 := d.at24(pa+10) - d.at24(pa+11)
+		common := sum14 - diff23 + d.at24(pa+9) + d.at24(pa+12)
+		paMag := common - diff1011
+		phases := []int{}
+		if paMag >= ref {
+			phases = append(phases, 4, 5)
 		}
-		if peak < thr*1.1 || peak < gap*1.35 {
+		paMag2 := common + diff1011
+		if paMag2 >= ref {
+			phases = append(phases, 6, 7)
+		}
+		paMag3 := sum14 + 2*diff23 + diff1011 + d.at24(pa+12)
+		if paMag3 >= ref {
+			phases = append(phases, 8)
+		}
+		if len(phases) == 0 {
+			d.scanAt++
 			continue
 		}
 		d.Preambles++
-		if modesDebug != nil {
-			sps := d.rate / 1e6
-			d2 := []byte{}
-			for k := 0; k < 8; k++ {
-				base := float64(t0) + (8.0+float64(k))*sps
-				e1 := d.magAt(base + 0.25*sps)
-				e2 := d.magAt(base + 0.75*sps)
-				if e1 >= e2 {
-					d2 = append(d2, '1')
-				} else {
-					d2 = append(d2, '0')
-				}
-			}
-			modesDebug("PASS t0=%d firstbits=%s (want 10001101)", t0, string(d2))
-		}
-		// The preamble window quantises t0 to a whole sample; at
-		// 2.4 MSPS that is a 0.42 µs error — most of a chip. Try small
-		// offsets around it and let the CRC pick the truth.
-		// Refine the time base: centre of the FIRST preamble pulse is
-		// 0.25 µs after t0 — anchor on the strongest sample in the
-		// first microsecond instead of the quantised window grid.
-		sps := d.rate / 1e6
-		bestV, bestI := -1.0, t0
-		for i := t0; i < t0+int(1.2*sps); i++ {
-			if v := d.at(i); v > bestV {
-				bestV, bestI = v, i
-			}
-		}
-		// Sample i spans [i, i+1), so its centre is i+0.5; the preamble
-		// pulse-1 centre sits 0.25 µs after t0.
-		centre := float64(bestI) + 0.5 - 0.25*sps
-		if modesDebug != nil {
-			modesDebug("t0=%d centre=%.2f", t0, centre)
-		}
-		for off := -1.5; off <= 1.51; off += 0.25 {
-			ok, bits := d.decodeBits(centre + off)
-			if modesDebug != nil {
-				b8 := ""
-				for _, b := range bits {
-					b8 += string('0' + b)
-				}
-				modesDebug("off=%+.2f bits=%s crc0=%v", off, b8, ok)
-			}
-			if ok {
+		decoded := false
+		for _, ph := range phases {
+			if d.decodePhase(pa, ph) {
+				decoded = true
 				break
 			}
 		}
-		// Skip past this message before scanning again.
-		t0 += int(120e-6 * d.rate)
-	}
-}
-
-// decodeAt samples one message after a preamble at t0 and feeds the
-// store on CRC success.
-func (d *ModeSDemod) decodeAt(t0 int) bool {
-	return d.decodeAtF(float64(t0))
-}
-
-func (d *ModeSDemod) decodeBits(t0 float64) (bool, []byte) {
-	sps := d.rate / 1e6
-	bits := make([]byte, 0, 112)
-	for k := 0; k < 112; k++ {
-		base := t0 + (8.0+float64(k))*sps
-		// The chip decision asks the SAME predicate the modulator
-		// answers: which samples have their CENTRE inside each half-bit
-		// window. Max over those samples; empty windows fall back to
-		// interpolation so fractional rates never produce an empty side.
-		c0 := t0 + (8.0+float64(k))*sps
-		c1 := c0 + 0.5*sps
-		e1, e2 := 0.0, 0.0
-		n1, n2 := 0, 0
-		for i := int(c0); i <= int(c1)+1; i++ {
-			c := float64(i) + 0.5
-			if c >= c0 && c < c1 {
-				if v := d.at(i); v > e1 {
-					e1 = v
-				}
-				n1++
-			}
-		}
-		c2 := c0 + sps
-		for i := int(c1); i <= int(c2)+1; i++ {
-			c := float64(i) + 0.5
-			if c >= c1 && c < c2 {
-				if v := d.at(i); v > e2 {
-					e2 = v
-				}
-				n2++
-			}
-		}
-		if n1 == 0 {
-			e1 = d.magAt(c0 + 0.25*sps)
-		}
-		if n2 == 0 {
-			e2 = d.magAt(c1 + 0.25*sps)
-		}
-		if e1 >= e2 {
-			bits = append(bits, 1)
+		if decoded {
+			d.scanAt += 288 // skip the whole 120 us message
 		} else {
-			bits = append(bits, 0)
-		}
-		if modesDebug != nil && (k == 88 || k == 90) {
-			var mm string
-			for j := -2; j <= 4; j++ {
-				mm += fmt.Sprintf(" %.0f", d.at(int(c0)+j))
-			}
-			modesDebug("k=%d c0=%.1f e1=%.0f e2=%.0f mags:%s", k, c0, e1, e2, mm)
-		}
-		if modesDebug != nil && false {
-			modesDebug("k=%d e1=%.0f e2=%.0f base=%.2f m28..33=%.0f", k, e1, e2, base,
-				d.magAt(float64(int(base))-4)+d.magAt(float64(int(base))-3)*0+d.at(int(base)-4)*0)
-			for j := -3; j <= 3; j++ {
-				modesDebug("   m[%d]=%.0f", int(base)+j, d.at(int(base)+j))
-			}
+			d.scanAt++
 		}
 	}
-	msg := bitsToBytes(bits)
+}
+
+// decodePhase slices the message at one preamble phase and validates
+// the CRC; on success the frame goes to the store.
+func (d *ModeSDemod) decodePhase(pa int, tryPhase int) bool {
+	off := pa + 19 + tryPhase/5
+	phase := tryPhase % 5
+	msg := make([]byte, 14)
+	for i := 0; i < 14; i++ {
+		tab := sliceTables[phase]
+		var b byte
+		for k := 0; k < 8; k++ {
+			if slicePhase(d.ringSlice(off+tab[k][1]), 0, tab[k][0]) > 0 {
+				b |= 1 << (7 - k)
+			}
+		}
+		msg[i] = b
+		// 8 bits = 19.2 samples at 2.4M: the pointer takes 19 and the
+		// 0.2 residue advances the fifth-sample phase by one; on the
+		// 4→0 wrap the residue carries into a 20th sample.
+		phase = (phase + 1) % 5
+		off += 19
+		if phase == 0 {
+			off++
+		}
+	}
 	df := msg[0] >> 3
+	// readsb accepts only legal DF values (short: 0/4/5/11; long:
+	// 16/17/18/20/21). Without this gate a one-bit-shifted slice can
+	// still hit a zero CRC by chance — the shifted frame has an illegal
+	// DF, so the whitelist rejects it and the correct alignment wins.
+	short := df == 0 || df == 4 || df == 5 || df == 11
+	long := df == 16 || df == 17 || df == 18 || df == 20 || df == 21
+	if !short && !long {
+		d.CrcFails++
+		return false
+	}
 	nbits := 112
-	if df == 0 || df == 4 || df == 5 || df == 11 {
+	if short {
 		nbits = 56
 	}
-	d.CrcFails++
+	bits := bytesToBits(msg[:nbits/8])
 	if crc24(bits[:nbits]) != 0 {
-		return false, bits
+		d.CrcFails++
+		return false
 	}
 	d.Decoded++
 	if d.store != nil {
 		d.store.Decode(msg[:nbits/8])
 	}
-	return true, bits
+	return true
 }
 
-func (d *ModeSDemod) decodeAtF(t0 float64) bool {
-	ok, _ := d.decodeBits(t0)
-	return ok
-}
-
-// DecodeBitsDebug exposes bit sampling for tests.
-func (d *ModeSDemod) DecodeBitsDebug(t0 float64) (bool, []byte) {
-	return d.decodeBits(t0)
+// ringSlice returns the 2.4M ring positioned so index 0 == abs.
+func (d *ModeSDemod) ringSlice(abs int) []float64 {
+	out := make([]float64, 21)
+	for i := range out {
+		out[i] = d.at24(abs + i)
+	}
+	return out
 }
