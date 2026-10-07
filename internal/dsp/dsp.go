@@ -259,6 +259,7 @@ type Chain struct {
 	wefax    *WefaxDecoder // WEFAX monitor (same 8 kHz branch)
 	cw       *CWDecoder    // Morse monitor (same branch)
 	aprs     APRSMonitor   // APRS AFSK monitor (own FM branch)
+	sstv     *SSTVDecoder  // slow-scan TV monitor (same 8 kHz branch)
 	// APRS FM branch state (see feedAPRS)
 	aprsOff     float64 // channel offset from LO, Hz (0 = at LO)
 	aprsNco     float64
@@ -594,7 +595,7 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 	// FT8/RTTY monitor: the dedicated branch below feeds the detectors
 	// in every mode; the SSB-8k path keeps its in-processSSB feed
 	// (identical band, avoids running the branch twice).
-	if (c.ft8 != nil || c.rtty != nil || c.wefax != nil || c.cw != nil) && !(c.mode.SSB && c.outRate == SSBRate) {
+	if (c.ft8 != nil || c.rtty != nil || c.wefax != nil || c.cw != nil || c.sstv != nil) && !(c.mode.SSB && c.outRate == SSBRate) {
 		c.feedMonitors()
 	}
 
@@ -760,7 +761,13 @@ func (c *Chain) feedMonitors() {
 	if c.cw != nil {
 		c.cw.Feed(buf)
 	}
+	if c.sstv != nil {
+		c.sstv.Feed(buf)
+	}
 }
+
+// SetSSTVDecoder attaches (nil detaches) the SSTV monitor.
+func (c *Chain) SetSSTVDecoder(d *SSTVDecoder) { c.sstv = d }
 
 // SetAPRSMonitor attaches (nil detaches) the APRS AFSK monitor and
 // (re)builds its FM branch taps for the current IF2 rate.

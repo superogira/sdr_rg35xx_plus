@@ -357,6 +357,7 @@ func (s *Server) startLocked() {
 	mux.HandleFunc("/api/flag/", s.handleFlag)
 	mux.HandleFunc("/api/spec", s.handleSpec)
 	mux.HandleFunc("/api/wefaximg", s.handleWefaxImg)
+	mux.HandleFunc("/api/sstvimg", s.handleSSTVImg)
 	mux.HandleFunc("/api/layers", s.handleLayers)
 	mux.HandleFunc("/api/audio", s.handleAudio)
 	mux.HandleFunc("/tiles/", s.handleTile)
@@ -410,6 +411,7 @@ type state struct {
 	Ppm       int       `json:"ppm"`
 	PpmOff    bool      `json:"ppmOff"`
 	FT8       bool      `json:"ft8"`
+	SSTV      bool      `json:"sstv"`
 	AISRF     bool      `json:"aisrf"`
 	LocalMute bool      `json:"localmute"`
 	Reboot    bool      `json:"reboot"`
@@ -471,7 +473,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		GainDb: radio.GainDb(), AGC: radio.AGCEnabled(), Vol: radio.Volume(),
 		SqlDb: radio.SquelchDb(), BwHz: radio.Bandwidth(), Bws: radio.Bandwidths(),
 		Ppm: radio.Ppm(), PpmOff: radio.PpmOff(),
-		FT8: radio.FT8Enabled(), AISRF: radio.AISRFEnabled(), LocalMute: radio.LocalMuted(),
+		FT8: radio.FT8Enabled(), AISRF: radio.AISRFEnabled(), LocalMute: radio.LocalMuted(), SSTV: radio.SSTVEnabled(),
 		IQRate: radio.IQRate(), Rates: dsp.SampleRates,
 		Reboot:    s.rebooting(),
 		Connected: snap.Connected, Host: radio.Hostname(),
@@ -657,6 +659,10 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 		msg := fn(action, v)
 		writeJSON(w, map[string]any{"ok": true, "msg": msg})
 		return
+	case "sstv":
+		if c.On != nil {
+			radio.SetSSTVEnabled(*c.On)
+		}
 	case "wfxshift":
 		if s.radio != nil && s.radio.WefaxEnabled() {
 			s.radio.Wefax().Shift(float64(int(c.V)) / 100)
@@ -862,6 +868,26 @@ const specMaxFFT = 65536
 
 // handleWefaxImg serves the current fax image downscaled (grayscale
 // PNG, newest rows at the bottom). 204 while nothing is received.
+// handleSSTVImg serves the in-progress or last SSTV raster as PNG.
+func (s *Server) handleSSTVImg(w http.ResponseWriter, r *http.Request) {
+	radio := s.radio
+	if radio == nil || !radio.SSTVEnabled() {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	img, name, line, total, _ := radio.SSTV().Snapshot(-1)
+	if img == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-SSTV-Status", fmt.Sprintf("%s %d/%d", name, line, total))
+	if err := png.Encode(w, img); err != nil {
+		http.Error(w, err.Error(), 500)
+	}
+}
+
 func (s *Server) handleWefaxImg(w http.ResponseWriter, r *http.Request) {
 	if !s.radio.WefaxEnabled() {
 		w.WriteHeader(http.StatusNoContent)

@@ -465,6 +465,9 @@ const (
 	menuWefaxAuto
 	menuCWDec
 	menuCWClear
+	menuSSTV
+	menuSSTVView
+	menuSSTVClear
 	menuADSBHost
 	menuADSBLat
 	menuADSBLon
@@ -521,7 +524,7 @@ var pageItems = [][]int{
 	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSIgate, menuAPRSGateLim, menuAPRSSrc, menuAPRSFixLat, menuAPRSFixLon, menuAPRSNow},
-	{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear},
+	{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuSSTV, menuSSTVView, menuSSTVClear},
 	{menuCall, menuGrid, menuAnt, menuRig, menuPSK},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuShot, menuUpdate},
 }
@@ -1076,6 +1079,8 @@ func main() {
 	aprsLastBeacon := time.Now().Add(-time.Hour)
 	aprsLastCourse := -1.0
 	aprsLogTab := 0
+	sstvVer := -1
+	var sstvCache *image.NRGBA
 	aprsLogScroll := 0
 	// LAN web control (opt-in via System menu; ini web=on/webport=N).
 	webPort := 8080
@@ -1164,6 +1169,9 @@ func main() {
 		aisLogMu.Unlock()
 	})
 	r.SetAPRSFreq(aprsFreq)
+	if cfg["sstv"] == "on" {
+		r.SetSSTVEnabled(true)
+	}
 	if cfg["aprs"] == "on" {
 		r.SetAPRSEnabled(true)
 	}
@@ -1750,6 +1758,7 @@ func main() {
 		uiHostList
 		uiAISLog
 		uiAPRSLog
+		uiSSTV
 		uiBeastList
 		uiAISList
 		uiFT8Log
@@ -2403,6 +2412,14 @@ func main() {
 			radarSel.On = false
 			radarSel.ID = ""
 			uiMode = uiADSB
+		case menuSSTV:
+			r.SetSSTVEnabled(!r.SSTVEnabled())
+			cfg["sstv"] = map[bool]string{true: "on", false: "off"}[r.SSTVEnabled()]
+			saveNow()
+		case menuSSTVView:
+			uiMode = uiSSTV
+		case menuSSTVClear:
+			r.SSTV().Clear()
 		case menuAPRSLog:
 			aprsLogScroll = 0
 			uiMode = uiAPRSLog
@@ -2955,6 +2972,11 @@ func main() {
 				aisScroll--
 			case input.B, input.Start, input.Select:
 				uiMode, menuPage, menuSel = uiMenu, pageADSB, menuRow(pageADSB, menuAISLog)
+			}
+		case uiSSTV:
+			switch b {
+			case input.B, input.Start, input.Select:
+				uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuSSTVView)
 			}
 		case uiAPRSLog:
 			switch b {
@@ -3945,7 +3967,10 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_wefaxauto"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxAutoSave()]},
 					ui.MenuItem{Label: i18n.T("m_wefaxclear"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_cwdec"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.CWDecodeEnabled()]},
-					ui.MenuItem{Label: i18n.T("m_cwclear"), Value: i18n.T("press_a")})
+					ui.MenuItem{Label: i18n.T("m_cwclear"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_sstv"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.SSTVEnabled()]},
+					ui.MenuItem{Label: i18n.T("m_sstvview"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_sstvclear"), Value: i18n.T("press_a")})
 			case pageStation:
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_call"), Value: myCall},
@@ -4225,6 +4250,16 @@ func main() {
 				return out
 			}
 			u.DrawAPRSLog(aprsLogTab, stations, mk(aprsStore.RxLog()), mk(aprsStore.TxLog()), aprsLogScroll, flagDir)
+		} else if uiMode == uiSSTV {
+			img, name, line, total, ver := r.SSTV().Snapshot(sstvVer)
+			if ver != sstvVer {
+				sstvVer = ver
+				sstvCache = img
+			}
+			if sstvCache != nil {
+				img = sstvCache
+			}
+			u.DrawSSTV(img, name, line, total)
 		} else if uiMode == uiAISLog {
 			aisLogMu.Lock()
 			view := make([]ui.AISEntry, len(aisLog))
@@ -4922,6 +4957,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["aprspre"]; ok {
 		fmt.Fprintf(f, "aprspre=%s\n", v)
+	}
+	if v, ok := cfg["sstv"]; ok {
+		fmt.Fprintf(f, "sstv=%s\n", v)
 	}
 	if v, ok := cfg["aprssrc"]; ok {
 		fmt.Fprintf(f, "aprssrc=%s\n", v)

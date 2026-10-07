@@ -266,11 +266,17 @@ tr:hover td { background:var(--row-hover); }
         </div>
         <img id="wfximg" alt="WEFAX" style="display:block;width:100%;max-height:280px;object-fit:contain;image-rendering:pixelated;background:#000;border-radius:6px;border:1px solid var(--card-border)">
       </div>
+      <div id="sstvbox" hidden>
+        <div class="row" style="margin:6px 0 2px"><label>SSTV</label><span class="val" id="sstvst" style="color:var(--dim)">—</span></div>
+        <img id="sstvimg" alt="SSTV" style="display:block;width:320px;image-rendering:pixelated;background:#000;border-radius:6px;border:1px solid var(--card-border)">
+      </div>
       <div id="cwbox" hidden>
         <div class="row" style="margin:6px 0 2px">
           <label data-i18n="cw">CW</label>
           <span class="val" id="cwst" style="color:var(--dim)"></span>
           <button id="cwclear" data-i18n="wefaxClear">ล้าง</button>
+        <button id="sstv">SSTV</button>
+        <button id="sstvview" data-i18n-title="ttSSTV">📺</button>
         </div>
         <div id="cwtext" style="font-family:monospace;font-size:13px;min-height:34px;max-height:96px;overflow-y:auto;background:#000;color:#bfe6bf;border-radius:6px;border:1px solid var(--card-border);padding:4px 6px;white-space:pre-wrap;word-break:break-all"></div>
       </div>
@@ -356,7 +362,7 @@ const STRINGS = {
     tuneHint: 'กดเพื่อตั้งความถี่',
     signal: 'สัญญาณ', smeterTT: 'มิเตอร์ความแรงสัญญาณ (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
-    ttAprsSrc: 'แหล่งตำแหน่ง beacon: GPS สด หรือพิกัดคงที่', ttWfxShift: 'ขยับจุดเริ่มแถวภาพ FAX ±5%', aprsNowTT: 'ส่ง beacon เดี๋ยวนี้', ttIGate: 'iGate: ส่งต่อสถานีที่รับจาก RF ขึ้น APRS-IS', ttLabel: 'ป้ายชื่อ/ธง', ttMapPop: 'เปิดแผนที่แท็บใหม่', aprsSt: 'สถานี', aprsRxH: 'ประวัติรับ', aprsTxH: 'ประวัติส่ง',
+    ttAprsSrc: 'แหล่งตำแหน่ง beacon: GPS สด หรือพิกัดคงที่', ttWfxShift: 'ขยับจุดเริ่มแถวภาพ FAX ±5%', ttSSTV: 'เปิด/ปิดจอภาพ SSTV', aprsNowTT: 'ส่ง beacon เดี๋ยวนี้', ttIGate: 'iGate: ส่งต่อสถานีที่รับจาก RF ขึ้น APRS-IS', ttLabel: 'ป้ายชื่อ/ธง', ttMapPop: 'เปิดแผนที่แท็บใหม่', aprsSt: 'สถานี', aprsRxH: 'ประวัติรับ', aprsTxH: 'ประวัติส่ง',
     listenOn: '🔊 ฟัง', listenOff: '🔇 ฟัง', compat: ' (compat)',
     devOn: '🔈 เครื่อง', devOff: '🔇 เครื่อง',
     connFail: '○ เว็บไม่ตอบ', connOff: '○ ไม่เชื่อมต่อ ', tuned: 'จูน → ', reset: ' · ดับเบิลคลิกรีเซ็ต',
@@ -393,7 +399,7 @@ const STRINGS = {
     tuneHint: 'Click to set frequency',
     signal: 'Signal', smeterTT: 'Signal strength meter (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
-    ttAprsSrc: 'beacon position: live GPS or fixed coordinates', ttWfxShift: 'nudge FAX line start ±5%', aprsNowTT: 'Send beacon now', ttIGate: 'iGate: forward RF-heard stations to APRS-IS', ttLabel: 'labels/flags', ttMapPop: 'open map in new tab', aprsSt: 'Stations', aprsRxH: 'Receive log', aprsTxH: 'Transmit log',
+    ttAprsSrc: 'beacon position: live GPS or fixed coordinates', ttWfxShift: 'nudge FAX line start ±5%', ttSSTV: 'show/hide the SSTV picture', aprsNowTT: 'Send beacon now', ttIGate: 'iGate: forward RF-heard stations to APRS-IS', ttLabel: 'labels/flags', ttMapPop: 'open map in new tab', aprsSt: 'Stations', aprsRxH: 'Receive log', aprsTxH: 'Transmit log',
     listenOn: '🔊 Listen', listenOff: '🔇 Listen', compat: ' (compat)',
     devOn: '🔈 Device', devOff: '🔇 Device',
     connFail: '○ no response', connOff: '○ offline ', tuned: 'Tuned → ', reset: ' · dbl-click reset',
@@ -514,6 +520,7 @@ function renderState(s) {
   $('aisrf').className = s.aisrf ? 'on' : '';
   $('wefax').className = s.wefax ? 'on' : '';
   $('cwdec').className = s.cw ? 'on' : '';
+  $('sstv').className = s.sstv ? 'on' : '';
   $('cwbox').hidden = !s.cw;
   if (s.cw) {
     $('cwst').textContent = (s.cwWpm > 0 ? s.cwWpm.toFixed(1) + STRINGS[lang].cwwpm : STRINGS[lang].cwnone);
@@ -732,6 +739,8 @@ $('ft8').onclick = () => cmd({cmd:'ft8', on: !st.ft8});
 $('aisrf').onclick = () => cmd({cmd:'aisrf', on: !st.aisrf});
 $('wefax').onclick = () => cmd({cmd:'wefax', on: !st.wefax});
 $('cwdec').onclick = () => cmd({cmd:'cwdec', on: !st.cw});
+  $('sstv').onclick = () => api('/api/cmd', { cmd: 'sstv', on: !$('sstv').classList.contains('on') }).catch(showErr);
+  $('sstvview').onclick = () => { $('cwbox').hidden = true; $('sstvbox').hidden = !$('sstvbox').hidden; if (!$('sstvbox').hidden) sstvPoll(); };
 $('cwclear').onclick = () => cmd({cmd:'cwclear'});
 // Audio filters: HP/LP corners snap to the device's option lists.
 const HP_STEPS = [0, 100, 150, 200, 300, 400, 500, 700, 1000];
@@ -1710,6 +1719,17 @@ async function aprsPoll() {
     $('aprsTx').innerHTML = (d.tx || []).slice(0, 40).map(logRow).join('') || '<tr><td>· · ·</td></tr>';
   } catch (e) {}
 }
+async function sstvPoll() {
+  try {
+    const r = await fetch('/api/sstvimg');
+    if (!r.ok) return;
+    const st = r.headers.get('X-SSTV-Status');
+    if (st) $('sstvst').textContent = st;
+    const blob = await r.blob();
+    $('sstvimg').src = URL.createObjectURL(blob);
+  } catch (e) {}
+}
+setInterval(sstvPoll, 3000);
 setInterval(aprsPoll, 5000);
 poll(); setInterval(poll, 1500);
 </script>

@@ -105,6 +105,8 @@ type Radio struct {
 	aisA, aisB *ais.ChannelDemod
 	aisPay     func(payload []byte, ch int, levelDb float64)
 	aprsDem    *aprs.Demodulator
+	sstvDec    *dsp.SSTVDecoder
+	sstvOn     bool
 	aprsRFOn   bool
 	aprsFreqHz int64     // channel centre the RX branch tracks
 	aprsOff    float64   // current offset applied to the chain
@@ -156,9 +158,11 @@ func New(host string, freqHz int64, mode dsp.Mode, gainDb float64, out AudioSink
 	}
 	rttyDec := dsp.NewRTTYDecoder()
 	aprsDem := aprs.NewDemodulator()
+	sstvDec := dsp.NewSSTVDecoder()
 	r := &Radio{
 		rtty:    rttyDec,
 		aprsDem: aprsDem,
+		sstvDec: sstvDec,
 		wefax:   dsp.NewWefaxDecoder(),
 		cw:      dsp.NewCWDecoder(),
 		Host:    host,
@@ -277,6 +281,9 @@ func (r *Radio) Run(ctx context.Context) {
 		if r.aprsRFOn {
 			r.chain.SetAPRSMonitor(r.aprsDem)
 			r.chain.SetAPRSOffset(r.aprsOff)
+			if r.sstvOn {
+				r.chain.SetSSTVDecoder(r.sstvDec)
+			}
 		}
 		r.mu.Unlock()
 		resumeFade := 0
@@ -426,6 +433,9 @@ func (r *Radio) session(ctx context.Context) error {
 		if r.aprsRFOn {
 			chain.SetAPRSMonitor(r.aprsDem)
 			chain.SetAPRSOffset(r.aprsOff)
+			if r.sstvOn {
+				chain.SetSSTVDecoder(r.sstvDec)
+			}
 		}
 		r.chain = chain
 		r.state = stateStreaming
@@ -931,6 +941,9 @@ func (r *Radio) SetMode(mode dsp.Mode) string {
 	if r.aprsRFOn {
 		r.chain.SetAPRSMonitor(r.aprsDem)
 		r.chain.SetAPRSOffset(r.aprsOff)
+		if r.sstvOn {
+			r.chain.SetSSTVDecoder(r.sstvDec)
+		}
 	}
 	// The fresh chain starts at offset 0 — restore the passband offset
 	// so switching modes mid-scroll keeps listening where the dial says.
@@ -1235,6 +1248,32 @@ func (r *Radio) SetAISRFEnabled(on bool) {
 		r.SetFreq(162_000_000)
 	}
 	fmt.Fprintf(os.Stderr, "radio: AIS RF %v"+string(rune(10)), on)
+}
+
+// SSTV returns the slow-scan TV decoder.
+func (r *Radio) SSTV() *dsp.SSTVDecoder { return r.sstvDec }
+
+// SetSSTVEnabled toggles the SSTV monitor branch.
+func (r *Radio) SetSSTVEnabled(on bool) {
+	r.mu.Lock()
+	r.sstvOn = on
+	chain := r.chain
+	r.mu.Unlock()
+	if chain != nil {
+		if on {
+			chain.SetSSTVDecoder(r.sstvDec)
+		} else {
+			chain.SetSSTVDecoder(nil)
+		}
+	}
+	r.sstvDec.SetEnabled(on)
+}
+
+// SSTVEnabled reports the toggle state.
+func (r *Radio) SSTVEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sstvOn
 }
 
 // APRSEnabled reports whether the over-the-air APRS decoder runs.
@@ -1608,6 +1647,9 @@ func (r *Radio) SetBandwidth(bw float64) {
 	if r.aprsRFOn {
 		r.chain.SetAPRSMonitor(r.aprsDem)
 		r.chain.SetAPRSOffset(r.aprsOff)
+		if r.sstvOn {
+			r.chain.SetSSTVDecoder(r.sstvDec)
+		}
 	}
 	r.chain.SetVolume(r.vol)
 	r.chain.SetSquelchDb(r.sqlDb)
