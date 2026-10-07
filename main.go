@@ -502,6 +502,9 @@ const (
 	menuAPRSLog
 	menuAPRSIgate
 	menuAPRSGateLim
+	menuAPRSSrc
+	menuAPRSFixLat
+	menuAPRSFixLon
 	menuAPRSNow
 	menuExit
 )
@@ -517,7 +520,7 @@ var pageItems = [][]int{
 	{menuSpan, menuWFMin, menuWFMax},
 	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
-	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSIgate, menuAPRSGateLim, menuAPRSNow},
+	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSIgate, menuAPRSGateLim, menuAPRSSrc, menuAPRSFixLat, menuAPRSFixLon, menuAPRSNow},
 	{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear},
 	{menuCall, menuGrid, menuAnt, menuRig, menuPSK},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuShot, menuUpdate},
@@ -541,18 +544,35 @@ const (
 	pageSys
 )
 
+// beaconFix resolves the position a beacon reports: the live GPS fix
+// (fresh within 10 s) or, when the source is set to FIX, the manually
+// entered coordinates as a synthetic fix.
+func beaconFix(src string, gpsRx *gps.Receiver, lat, lon float64) (gps.Fix, bool) {
+	if src == "fix" {
+		if lat == 0 && lon == 0 {
+			return gps.Fix{}, false
+		}
+		return gps.Fix{Lat: lat, Lon: lon, Valid: true, Quality: 1, Updated: time.Now()}, true
+	}
+	f := gpsRx.Snapshot()
+	if !f.Valid || time.Since(f.Updated) > 10*time.Second {
+		return gps.Fix{}, false
+	}
+	return f, true
+}
+
 // sendAPRSNow fires a manual/test beacon immediately (menu row A).
 func sendAPRSNow(r *radio.Radio, gpsRx *gps.Receiver, call, path string, sym struct {
 	i18nKey string
 	table   byte
 	sym     byte
-}, comment string, lvl int, pre float64, isOn bool, iserver string, store *aprs.Store, lastBeacon *time.Time, lastCourse *float64, setMsg func(string)) {
-	f := gpsRx.Snapshot()
+}, comment string, lvl int, pre float64, isOn bool, iserver string, src string, fixLat, fixLon float64, store *aprs.Store, lastBeacon *time.Time, lastCourse *float64, setMsg func(string)) {
 	if call == "" {
 		setMsg(i18n.T("aprs_nocall"))
 		return
 	}
-	if !f.Valid || time.Since(f.Updated) > 10*time.Second {
+	f, have := beaconFix(src, gpsRx, fixLat, fixLon)
+	if !have {
 		setMsg(i18n.T("aprs_nogps"))
 		return
 	}
@@ -1024,6 +1044,17 @@ func main() {
 		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 60 {
 			aprsGateLim = n
 		}
+	}
+	aprsSrc := "gps" // gps | fix
+	if v, ok := cfg["aprssrc"]; ok && (v == "gps" || v == "fix") {
+		aprsSrc = v
+	}
+	var aprsFixLat, aprsFixLon float64
+	if v, ok := cfg["aprsfixlat"]; ok {
+		aprsFixLat, _ = strconv.ParseFloat(v, 64)
+	}
+	if v, ok := cfg["aprsfixlon"]; ok {
+		aprsFixLon, _ = strconv.ParseFloat(v, 64)
 	}
 	var gateMu sync.Mutex
 	gateMinute := time.Time{}
@@ -1542,8 +1573,8 @@ func main() {
 		lg.Rx, lg.Tx = mk(aprsStore.RxLog()), mk(aprsStore.TxLog())
 		return lg
 	})
-	webSrv.SetAPRSState(func() (bool, int, bool, bool, int) {
-		return r.APRSEnabled(), aprsBeaconIdx, aprsISOn, aprsIgateOn, aprsStore.Count()
+	webSrv.SetAPRSState(func() (bool, int, bool, bool, string, int) {
+		return r.APRSEnabled(), aprsBeaconIdx, aprsISOn, aprsIgateOn, aprsSrc, aprsStore.Count()
 	})
 	webSrv.SetAPRSCmd(func(action string, v int) string {
 		switch action {
@@ -1558,6 +1589,14 @@ func main() {
 				cfg["aprsbeacon"] = []string{"off", "1", "2", "5", "10", "30", "smart"}[v]
 				saveNow()
 			}
+		case "src":
+			if v == 1 {
+				aprsSrc = "fix"
+			} else {
+				aprsSrc = "gps"
+			}
+			cfg["aprssrc"] = aprsSrc
+			saveNow()
 		case "igate":
 			aprsIgateOn = v != 0
 			cfg["aprsigate"] = map[bool]string{true: "on", false: "off"}[aprsIgateOn]
@@ -1567,7 +1606,7 @@ func main() {
 			cfg["aprsis"] = map[bool]string{true: "on", false: "off"}[aprsISOn]
 			saveNow()
 		case "now":
-			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, aprsPre, aprsISOn, aprsIServer, aprsStore, &aprsLastBeacon, &aprsLastCourse, setMsg)
+			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, aprsPre, aprsISOn, aprsIServer, aprsSrc, aprsFixLat, aprsFixLon, aprsStore, &aprsLastBeacon, &aprsLastCourse, setMsg)
 			return i18n.T("aprs_sent")
 		}
 		return ""
@@ -1876,6 +1915,10 @@ func main() {
 			return i18n.T("m_aprspath")
 		case "aprsiserver":
 			return i18n.T("m_aprsisrv")
+		case "aprsfixlat":
+			return i18n.T("m_aprsfixlat")
+		case "aprsfixlon":
+			return i18n.T("m_aprsfixlon")
 		case "aprscmt":
 			return i18n.T("m_aprscmt")
 		case "aprsfreq":
@@ -2367,8 +2410,24 @@ func main() {
 			aprsIgateOn = !aprsIgateOn
 			cfg["aprsigate"] = map[bool]string{true: "on", false: "off"}[aprsIgateOn]
 			saveNow()
+		case menuAPRSSrc:
+			if aprsSrc == "gps" {
+				aprsSrc = "fix"
+			} else {
+				aprsSrc = "gps"
+			}
+			cfg["aprssrc"] = aprsSrc
+			saveNow()
+		case menuAPRSFixLat:
+			hostText, kbTarget = fmt.Sprintf("%.5f", aprsFixLat), "aprsfixlat"
+			hostKbR, hostKbC = 0, 0
+			uiMode = uiHostEdit
+		case menuAPRSFixLon:
+			hostText, kbTarget = fmt.Sprintf("%.5f", aprsFixLon), "aprsfixlon"
+			hostKbR, hostKbC = 0, 0
+			uiMode = uiHostEdit
 		case menuAPRSNow:
-			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, aprsPre, aprsISOn, aprsIServer, aprsStore, &aprsLastBeacon, &aprsLastCourse, setMsg)
+			sendAPRSNow(r, gpsRx, aprsCall, aprsPath, aprsSymList[aprsSymIdx], aprsCmt, aprsLvl, aprsPre, aprsISOn, aprsIServer, aprsSrc, aprsFixLat, aprsFixLon, aprsStore, &aprsLastBeacon, &aprsLastCourse, setMsg)
 		case menuAISRF:
 			on := !r.AISRFEnabled()
 			r.SetAISRFEnabled(on)
@@ -3034,6 +3093,22 @@ func main() {
 					}
 					hostText = ""
 					uiMode, menuPage, menuSel = uiMenu, pageAPRS, menuRow(pageAPRS, menuAPRSCall)
+				case "aprsfixlat":
+					if v, err := strconv.ParseFloat(strings.TrimSpace(hostText), 64); err == nil && v >= -90 && v <= 90 {
+						aprsFixLat = v
+						cfg["aprsfixlat"] = fmt.Sprintf("%.5f", v)
+						saveNow()
+					}
+					hostText = ""
+					uiMode, menuPage, menuSel = uiMenu, pageAPRS, menuRow(pageAPRS, menuAPRSFixLat)
+				case "aprsfixlon":
+					if v, err := strconv.ParseFloat(strings.TrimSpace(hostText), 64); err == nil && v >= -180 && v <= 180 {
+						aprsFixLon = v
+						cfg["aprsfixlon"] = fmt.Sprintf("%.5f", v)
+						saveNow()
+					}
+					hostText = ""
+					uiMode, menuPage, menuSel = uiMenu, pageAPRS, menuRow(pageAPRS, menuAPRSFixLon)
 				case "aprsiserver":
 					if t := strings.TrimSpace(hostText); strings.Contains(t, ":") {
 						aprsIServer = t
@@ -3271,9 +3346,9 @@ func main() {
 			aprsStore.ProcessFrame(f)
 		}
 		if aprsBeaconIdx > 0 && !r.BeaconPlaying() {
-			f := gpsRx.Snapshot()
+			f, have := beaconFix(aprsSrc, gpsRx, aprsFixLat, aprsFixLon)
 			due := false
-			if f.Valid && time.Since(f.Updated) < 10*time.Second {
+			if have {
 				iv := []int{0, 60, 120, 300, 600, 1800}[aprsBeaconIdx]
 				if aprsBeaconIdx == 6 {
 					iv = aprs.BeaconInterval(f.SpeedKt, 60, 1800)
@@ -3954,6 +4029,9 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_aprslog"), Value: ">"},
 					ui.MenuItem{Label: i18n.T("m_aprsigate"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[aprsIgateOn]},
 					ui.MenuItem{Label: i18n.T("m_aprsgatelimit"), Value: fmt.Sprintf("%d/min", aprsGateLim)},
+					ui.MenuItem{Label: i18n.T("m_aprssrc"), Value: map[string]string{"gps": "GPS", "fix": "FIX"}[aprsSrc]},
+					ui.MenuItem{Label: i18n.T("m_aprsfixlat"), Value: fmt.Sprintf("%.5f >", aprsFixLat)},
+					ui.MenuItem{Label: i18n.T("m_aprsfixlon"), Value: fmt.Sprintf("%.5f >", aprsFixLon)},
 					ui.MenuItem{Label: i18n.T("m_aprsnow"), Value: i18n.T("press_a")},
 				)
 			case pageGPS:
@@ -4844,6 +4922,15 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["aprspre"]; ok {
 		fmt.Fprintf(f, "aprspre=%s\n", v)
+	}
+	if v, ok := cfg["aprssrc"]; ok {
+		fmt.Fprintf(f, "aprssrc=%s\n", v)
+	}
+	if v, ok := cfg["aprsfixlat"]; ok {
+		fmt.Fprintf(f, "aprsfixlat=%s\n", v)
+	}
+	if v, ok := cfg["aprsfixlon"]; ok {
+		fmt.Fprintf(f, "aprsfixlon=%s\n", v)
 	}
 	if v, ok := cfg["aprsigate"]; ok {
 		fmt.Fprintf(f, "aprsigate=%s\n", v)
