@@ -19,3 +19,9 @@ Fetch instructions (binaries are gitignored, ~40 MB):
   onnxruntime: github.com/microsoft/onnxruntime releases,
   onnxruntime-linux-aarch64-*.tgz (lib/libonnxruntime.so.1.* +
   lib/libonnxruntime_providers_shared.so + include/)
+
+Streaming sidecar (tools/deepcw.c, tools/feeder.c): written for this
+project; the spectrogram/CTC pipeline replicates the AGPL reference
+example. tools/deepcw.c is the shipped sidecar source (built on-device
+or cross-compiled, see tools/build_deepcw_on_device.sh); tools/feeder.c
+is a test-only constant-rate file feeder.
