@@ -23,10 +23,14 @@ type SSTVMode struct {
 	VIS      byte
 	Width    int
 	Height   int
-	PixelSec float64 // one colour pixel duration
-	// segments from line sync, in order; Kind: 0 sync/porch/sep
-	// (ignored), 1/2/3 = G/B/R pixel runs.
+	PixelSec float64 // one colour pixel duration (family 0)
+	Family   int     // 0 cyclic RGB, 1 PD (Y/R/B interlaced), 2 Robot (Y + alternating chroma)
+	// segments from line sync, in order; Kind: 0 sync/porch/sep/gap
+	// (ignored), 1/2/3 = G/B/R pixel runs (family 0); family 1/2 use
+	// the fixed layouts in rasterLinePD/rasterLineRobot.
 	Seg []sstvSeg
+	// family 1/2 timings (ms)
+	SyncMs, BpMs, FpMs, YMs, ChromaMs float64
 }
 
 type sstvSeg struct {
@@ -49,14 +53,35 @@ var (
 	// order from sync is sync, R, G, sep, B, sep.
 	scottieS1 = SSTVMode{Name: "Scottie S1", VIS: 60, Width: 320, Height: 256, PixelSec: 0.4576e-3,
 		Seg: []sstvSeg{px(9), r(146.432), g(146.432), px(1.5), b(146.432), px(1.5)}}
-	scottieS2 = SSTVMode{Name: "Scottie S2", VIS: 61, Width: 320, Height: 256, PixelSec: 0.9152e-3,
+	scottieS2 = SSTVMode{Name: "Scottie S2", VIS: 56, Width: 320, Height: 256, PixelSec: 0.9152e-3,
 		Seg: []sstvSeg{px(9), r(292.864), g(292.864), px(1.5), b(292.864), px(1.5)}}
+	// PD family (ISS/ARISS favourite): one line period carries TWO
+	// display rows — sync, porch, Y(odd), R, B, Y(even), front porch.
+	// G is derived from Y/R/B. 640x496 (PD120/180/240) or 320x256.
+	pd90 = SSTVMode{Name: "PD90", VIS: 99, Family: 1, Width: 320, Height: 256,
+		SyncMs: 20, BpMs: 2.08, FpMs: 2.30, YMs: 169.68, ChromaMs: 169.68}
+	pd120 = SSTVMode{Name: "PD120", VIS: 95, Family: 1, Width: 640, Height: 496,
+		SyncMs: 20, BpMs: 2.08, FpMs: 2.30, YMs: 121.03, ChromaMs: 121.03}
+	pd180 = SSTVMode{Name: "PD180", VIS: 96, Family: 1, Width: 640, Height: 496,
+		SyncMs: 20, BpMs: 2.00, FpMs: 2.30, YMs: 182.50, ChromaMs: 182.50}
+	pd240 = SSTVMode{Name: "PD240", VIS: 225, Family: 1, Width: 640, Height: 496,
+		SyncMs: 20, BpMs: 2.00, FpMs: 2.30, YMs: 243.94, ChromaMs: 243.94}
+	// Robot 36C/72C (the other ISS mode): per line — sync, porch, Y
+	// (full row), a 1500/2300 Hz marker tone naming the chroma that
+	// follows (R-Y on 1500 lines, B-Y on 2300 lines), gap, chroma row.
+	// The missing chroma is held from the previous line that had it.
+	robot36 = SSTVMode{Name: "Robot 36C", VIS: 8, Family: 2, Width: 320, Height: 240,
+		SyncMs: 9, BpMs: 0.4, FpMs: 0, YMs: 89.072, ChromaMs: 44.536}
+	robot72 = SSTVMode{Name: "Robot 72C", VIS: 12, Family: 2, Width: 320, Height: 240,
+		SyncMs: 9, BpMs: 0.4, FpMs: 0.4, YMs: 189.48, ChromaMs: 94.74}
 )
 
 var sstvVISNames = map[byte]string{
-	8: "Robot 36C", 12: "Robot 72C", 44: "Martin M1", 40: "Martin M2",
-	60: "Scottie S1", 61: "Scottie S2", 62: "Scottie S3", 63: "Scottie S4",
-	76: "Scottie DX", 45: "Martin M3", 41: "Martin M4", 95: "PD120", 99: "PD180",
+	12: "Robot 72C", 44: "Martin M1", 40: "Martin M2",
+	60: "Scottie S1", 56: "Scottie S2", 62: "Scottie S3", 63: "Scottie S4",
+	76: "Scottie DX", 45: "Martin M3", 41: "Martin M4",
+	95: "PD120", 99: "PD90", 96: "PD180", 225: "PD240", 226: "PD160", 221: "PD50",
+	8: "Robot 36C",
 }
 
 func sstvModeByVIS(v byte) *SSTVMode {
@@ -67,8 +92,20 @@ func sstvModeByVIS(v byte) *SSTVMode {
 		return &martinM2
 	case 60:
 		return &scottieS1
-	case 61:
+	case 56:
 		return &scottieS2
+	case 99:
+		return &pd90
+	case 95:
+		return &pd120
+	case 96:
+		return &pd180
+	case 225:
+		return &pd240
+	case 8:
+		return &robot36
+	case 12:
+		return &robot72
 	}
 	return nil
 }
@@ -114,6 +151,9 @@ type SSTVDecoder struct {
 
 	done []*image.NRGBA
 	ver  int // bumps on every rastered line (UI caches by it)
+	// Robot chroma rows held between lines (R-Y / B-Y arrive on
+	// alternating lines)
+	lastRY, lastBY []float64
 }
 
 const (
@@ -279,11 +319,33 @@ func (d *SSTVDecoder) beginImage() {
 }
 
 func (d *SSTVDecoder) lineSamples() int {
+	return int(d.lineMs() * 8)
+}
+
+// lineMs is one collection period in ms: one row for family 0, two
+// rows for PD and Robot.
+func (d *SSTVDecoder) lineMs() float64 {
+	m := d.mode
+	switch m.Family {
+	case 1:
+		// two rows: sync+porch+Y,R,B,Y+front-porch each
+		return m.SyncMs*2 + m.BpMs*2 + m.FpMs*2 + m.YMs*8
+	case 2:
+		// two rows: sync+porch+Y+marker/gap+chroma each
+		return m.SyncMs*2 + m.BpMs*2 + m.YMs*2 + m.ChromaMs*2 + m.blankMs()*2
+	}
 	tot := 0.0
-	for _, sg := range d.mode.Seg {
+	for _, sg := range m.Seg {
 		tot += sg.DurMs
 	}
-	return int(tot * 8)
+	return tot
+}
+
+func (m *SSTVMode) blankMs() float64 {
+	if m.Name == "Robot 72C" {
+		return 6.0
+	}
+	return 7.0
 }
 
 func (d *SSTVDecoder) stepImage() {
@@ -292,7 +354,11 @@ func (d *SSTVDecoder) stepImage() {
 		if len(d.lineBuf) >= d.lineNeed+d.lineOffGuard() {
 			d.rasterLine()
 			d.collecting = false
-			d.lineY++
+			if d.mode.Family == 0 {
+				d.lineY++
+			} else {
+				d.lineY += 2
+			}
 			if d.lineY >= d.mode.Height {
 				d.finishImage()
 				return
@@ -325,7 +391,7 @@ func (d *SSTVDecoder) stepImage() {
 	}
 	// First line: hunt the sync — a 1200 Hz run of at least 60% of the
 	// mode's sync segment.
-	syncNeed := int(d.mode.Seg[0].DurMs*8*0.6) + 8
+	syncNeed := int(d.mode.SyncMs*8*0.6) + 8
 	// The VIS stop bit is itself 30 ms of 1200 Hz — longer than any
 	// line sync — so the first line sync is the 1200 run that STARTS
 	// after we entered the image state.
@@ -359,6 +425,14 @@ func (d *SSTVDecoder) lineOffGuard() int {
 func (d *SSTVDecoder) rasterLine() {
 	d.ver++
 	m := d.mode
+	switch m.Family {
+	case 1:
+		d.rasterLinePD()
+		return
+	case 2:
+		d.rasterLineRobot()
+		return
+	}
 	pt := m.PixelSec * 8000 // samples per colour pixel
 	pos := float64(d.lineOff)
 	var chans [3][]float64
@@ -408,6 +482,153 @@ func (d *SSTVDecoder) rasterLine() {
 		bv := pick(chans[1], x)
 		rv := pick(chans[2], x)
 		d.img.SetNRGBA(x, y, color.NRGBA{lvl(rv), lvl(gv), lvl(bv), 255})
+	}
+}
+
+// avgWin averages the middle 70% of one pixel window in the line buffer.
+func (d *SSTVDecoder) avgWin(from, pixSamples float64, p, width int) float64 {
+	a := int(from + pixSamples*float64(p) + 0.15*pixSamples)
+	b := int(from + pixSamples*float64(p+1) - 0.15*pixSamples)
+	if b <= a {
+		b = a + 1
+	}
+	if a < 0 {
+		a = 0
+	}
+	if b > len(d.lineBuf) {
+		b = len(d.lineBuf)
+	}
+	if a >= b {
+		return 1500
+	}
+	var sum float64
+	for i := a; i < b; i++ {
+		sum += d.lineBuf[i]
+	}
+	return sum / float64(b-a)
+}
+
+func (d *SSTVDecoder) lvl(f float64) float64 {
+	v := (f - 1500) / 800 * 255
+	if v < 0 {
+		v = 0
+	}
+	if v > 255 {
+		v = 255
+	}
+	return v
+}
+
+// rasterLinePD decodes one PD line period into two rows: sync, porch,
+// Y(odd), R, B, Y(even), front porch — repeated twice. G is recovered
+// from Y/R/B.
+func (d *SSTVDecoder) rasterLinePD() {
+	m := d.mode
+	w := m.Width
+	pt := m.YMs * 8 / float64(w) // samples per pixel
+	pos := float64(d.lineOff) + m.SyncMs*8 + m.BpMs*8
+	seg := func() []float64 {
+		out := make([]float64, w)
+		for p := 0; p < w; p++ {
+			out[p] = d.avgWin(pos, pt, p, w)
+		}
+		pos += pt * float64(w)
+		return out
+	}
+	y1 := seg()
+	rr := seg()
+	bb := seg()
+	y2 := seg()
+	put := func(y int, Y, R, B []float64) {
+		if y >= m.Height {
+			return
+		}
+		for x := 0; x < w; x++ {
+			yv, rv, bv := d.lvl(Y[x]), d.lvl(R[x]), d.lvl(B[x])
+			gv := 1.7035*yv - 0.5094*rv - 0.1942*bv
+			if gv < 0 {
+				gv = 0
+			}
+			if gv > 255 {
+				gv = 255
+			}
+			d.img.SetNRGBA(x, y, color.NRGBA{uint8(rv), uint8(gv), uint8(bv), 255})
+		}
+	}
+	put(d.lineY, y1, rr, bb)
+	// second row: sync, porch again then Y(even) with the same R/B
+	pos += m.FpMs*8 + m.SyncMs*8 + m.BpMs*8
+	y2b := make([]float64, w)
+	for p := 0; p < w; p++ {
+		y2b[p] = d.avgWin(pos, pt, p, w)
+	}
+	_ = y2
+	put(d.lineY+1, y2b, rr, bb)
+}
+
+// rasterLineRobot decodes one Robot 36C/72C line period (two rows):
+// sync, porch, Y, marker tone (1500 = R-Y follows, 2300 = B-Y), gap,
+// chroma; then the same again for the second row. The chroma not
+// carried on a line is held from the last line that had it.
+func (d *SSTVDecoder) rasterLineRobot() {
+	m := d.mode
+	w := m.Width
+	ptY := m.YMs * 8 / float64(w)
+	ptC := m.ChromaMs * 8 / float64(w)
+	gap := m.blankMs() * 8 / 3
+	pos := float64(d.lineOff)
+	for half := 0; half < 2; half++ {
+		pos += m.SyncMs*8 + m.BpMs*8
+		Y := make([]float64, w)
+		for p := 0; p < w; p++ {
+			Y[p] = d.avgWin(pos, ptY, p, w)
+		}
+		pos += ptY * float64(w)
+		// marker tone: average the middle of the 2/3-blank window
+		mk := 0.0
+		ma := int(pos + gap*0.3)
+		mb := int(pos + gap*1.6)
+		if mb > len(d.lineBuf) {
+			mb = len(d.lineBuf)
+		}
+		if ma < mb {
+			for i := ma; i < mb; i++ {
+				mk += d.lineBuf[i]
+			}
+			mk /= float64(mb - ma)
+		}
+		pos += 2 * gap
+		C := make([]float64, w)
+		for p := 0; p < w; p++ {
+			C[p] = d.avgWin(pos, ptC, p, w)
+		}
+		pos += ptC * float64(w)
+		isRY := mk < 1900
+		if isRY {
+			d.lastRY = C
+		} else {
+			d.lastBY = C
+		}
+		ry, by := d.lastRY, d.lastBY
+		y := d.lineY + half
+		if y < m.Height && ry != nil && by != nil {
+			for x := 0; x < w; x++ {
+				yv := d.lvl(Y[x])
+				rv := yv + (d.lvl(pick(ry, x))-128)*2
+				bv := yv + (d.lvl(pick(by, x))-128)*2
+				gv := yv - 0.509*((d.lvl(pick(ry, x))-128)*2) - 0.194*((d.lvl(pick(by, x))-128)*2)
+				cl := func(v float64) uint8 {
+					if v < 0 {
+						v = 0
+					}
+					if v > 255 {
+						v = 255
+					}
+					return uint8(v)
+				}
+				d.img.SetNRGBA(x, y, color.NRGBA{cl(rv), cl(gv), cl(bv), 255})
+			}
+		}
 	}
 }
 

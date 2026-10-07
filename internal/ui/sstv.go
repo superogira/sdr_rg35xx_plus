@@ -26,11 +26,16 @@ func (u *UI) DrawSSTV(img *image.NRGBA, name string, line, total int) {
 		return
 	}
 	b := img.Bounds()
-	for yy := 0; yy < b.Dy(); yy++ {
-		for xx := 0; xx < b.Dx(); xx++ {
+	// PD modes are 640 wide: halve to fit the 320 px panel.
+	step := 1
+	if b.Dx() > 320 {
+		step = b.Dx() / 320
+	}
+	for yy := 0; yy < b.Dy(); yy += step {
+		for xx := 0; xx < b.Dx(); xx += step {
 			c := img.NRGBAAt(xx, yy)
-			u.setPixel(x+xx, y+yy, color.RGBA{c.R, c.G, c.B, 255})
+			u.setPixel(x+xx/step, y+yy/step, color.RGBA{c.R, c.G, c.B, 255})
 		}
 	}
-	hint.DrawString(u.img, color.RGBA{150, 180, 150, 255}, x, y+b.Dy()+16, "B back")
+	hint.DrawString(u.img, color.RGBA{150, 180, 150, 255}, x, y+b.Dy()/step+16, "B back")
 }
