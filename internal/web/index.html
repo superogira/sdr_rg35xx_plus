@@ -818,6 +818,25 @@ function zoomBadge() {
   }
   el.textContent = wfZoom > 1.01 ? '×' + wfZoom.toFixed(1) + STRINGS[lang].reset : '';
 }
+// Screen-resolution max-hold waterfall history. The 8192-bin rows are
+// ~10x wider than the canvas at full span, and drawImage AVERAGES when
+// downscaling — a signal a few bins wide dissolves to a tenth of its
+// brightness and sinks below the noise floor (the spectrum line stays
+// visible because it max-holds per pixel). This twin history stores one
+// max-held row per screen pixel, so the wide view shows exactly what
+// the line shows; zoomed views keep using the full-bin history.
+let wfMax = null, wfMaxCtx = null, wfMaxRow = null;
+function ensureWfMax(w) {
+  if (w < 2) return;
+  if (wfMax && wfMax.width === w) return;
+  const old = wfMax;
+  wfMax = document.createElement('canvas');
+  wfMax.width = w; wfMax.height = wf.height;
+  wfMaxCtx = wfMax.getContext('2d');
+  wfMaxCtx.fillStyle = wfBg(); wfMaxCtx.fillRect(0, 0, w, wf.height);
+  if (old) wfMaxCtx.drawImage(old, 0, 0);
+  wfMaxRow = null;
+}
 function ensureHist(bins) {
   if (wfHistBins === bins && wfHist) return;
   const old = wfHist;
@@ -875,10 +894,13 @@ function drawView() {
   if (!specState || !wfHist) return;
   const lo = viewLow(), bw = viewBw();
   const fullLo = specState.centreHz - specState.spanHz / 2;
-  const srcX = (lo - fullLo) / specState.spanHz * wfHistBins;
-  const srcW = bw / specState.spanHz * wfHistBins;
-  wctx.imageSmoothingEnabled = true;
-  wctx.drawImage(wfHist, Math.max(0, srcX), 0, Math.max(1, srcW), wf.height, 0, 0, wf.width, wf.height);
+  const useMax = wfZoom <= 1.01 && wfMax && wfMax.width === wf.width;
+  const src = useMax ? wfMax : wfHist;
+  const srcBins = useMax ? wfMax.width : wfHistBins;
+  const srcX = (lo - fullLo) / specState.spanHz * srcBins;
+  const srcW = bw / specState.spanHz * srcBins;
+  wctx.imageSmoothingEnabled = !useMax;
+  wctx.drawImage(src, Math.max(0, srcX), 0, Math.max(1, srcW), wf.height, 0, 0, wf.width, wf.height);
   const n = specState.bins.length;
   const b0 = Math.max(0, Math.floor((lo - fullLo) / specState.spanHz * n));
   const b1 = Math.min(n - 1, Math.ceil((lo + bw - fullLo) / specState.spanHz * n));
@@ -1019,6 +1041,7 @@ async function specPoll() {
       // waterfall looks stuck at the previous width after raising the
       // rate (e.g. ×2 zoom from 1024k kept showing ±512 at 2048k).
       wfZoom = 1; wfPanHz = 0;
+      wfMax = null; // old rows belong to the old span/bin grid
     }
     specState = d;
     clampPan();
@@ -1033,6 +1056,24 @@ async function specPoll() {
       px[q] = LUT8[o]; px[q+1] = LUT8[o+1]; px[q+2] = LUT8[o+2]; px[q+3] = 255;
     }
     wfHistCtx.putImageData(wfRowImg, 0, 0);
+    ensureWfMax(wf.width);
+    if (wfMax) {
+      wfMaxCtx.drawImage(wfMax, 0, 1);
+      if (!wfMaxRow || wfMaxRow.width !== wf.width) wfMaxRow = wfMaxCtx.createImageData(wf.width, 1);
+      const mp = wfMaxRow.data;
+      const nb = d.bins.length;
+      for (let px = 0; px < wf.width; px++) {
+        const c0 = Math.floor(px / wf.width * nb);
+        let c1 = Math.ceil((px + 1) / wf.width * nb);
+        if (c1 <= c0) c1 = c0 + 1;
+        let mx = 0;
+        for (let b = c0; b < c1 && b < nb; b++) if (d.bins[b] > mx) mx = d.bins[b];
+        let v = mx; if (v < 0) v = 0; else if (v > 620) v = 620;
+        const o = (v | 0) * 4, q = px * 4;
+        mp[q] = LUT8[o]; mp[q+1] = LUT8[o+1]; mp[q+2] = LUT8[o+2]; mp[q+3] = 255;
+      }
+      wfMaxCtx.putImageData(wfMaxRow, 0, 0);
+    }
     drawView();
     $('specinfo').textContent = (d.centreHz/1e6).toFixed(4) + ' MHz \u00b1' + (d.spanHz/2000).toFixed(0) + ' kHz';
   } catch (e) {}
