@@ -324,3 +324,59 @@ func velFrame(icao [3]byte, speedKt, trackDeg int) []byte {
 	me[4] |= byte((ns & 7) << 5)
 	return adsb.AppendCRC24(msg)
 }
+
+// TestADSDEnqueueVariableBlocks: ReadIQ returns variable-size blocks; a
+// pooled buffer from an earlier SMALL block must not be re-sliced past
+// its cap when a LARGER block arrives (this panic crashed the app on
+// device: "slice bounds out of range [:65536] with capacity 43776").
+func TestADSDEnqueueVariableBlocks(t *testing.T) {
+	r := NewDemo(dsp.ModeNFM, nil)
+	r.ADSBStore(adsb.NewStore())
+	r.SetCaptureRate(2_400_000)
+	r.SetADSBRFEnabled(true)
+	defer r.SetADSBRFEnabled(false)
+
+	// Drain in the background so the pool actually recycles buffers.
+	r.mu.Lock()
+	q := r.adsbQ
+	r.mu.Unlock()
+	sizes := make(chan int, 64)
+	go func() {
+		for b := range q {
+			sizes <- len(b)
+		}
+	}()
+	// Small block first (goes into the pool via the demod loop), then a
+	// much larger one that must NOT reuse the small buffer's cap. The
+	// queue drops blocks it cannot buffer (by design), so space the
+	// enqueues and assert on the SET of sizes that get through.
+	small := make([]byte, 21760)
+	big := make([]byte, 65536)
+	tiny := make([]byte, 10880)
+	for i := 0; i < 6; i++ {
+		r.adsbEnqueue(small)
+		time.Sleep(2 * time.Millisecond)
+		r.adsbEnqueue(big)
+		time.Sleep(2 * time.Millisecond)
+		r.adsbEnqueue(tiny)
+		time.Sleep(2 * time.Millisecond)
+	}
+	seen := map[int]bool{}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case n := <-sizes:
+			if n != 21760 && n != 65536 && n != 10880 {
+				t.Fatalf("unexpected block size %d", n)
+			}
+			seen[n] = true
+		case <-time.After(200 * time.Millisecond):
+		}
+		if seen[21760] && seen[65536] && seen[10880] {
+			break
+		}
+	}
+	if !seen[21760] || !seen[65536] {
+		t.Fatalf("did not observe both small and large blocks: %v", seen)
+	}
+}

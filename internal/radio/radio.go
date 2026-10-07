@@ -631,24 +631,7 @@ func (r *Radio) session(ctx context.Context) error {
 			// its own goroutine; hand the block over without blocking
 			// the read loop (a noisy band can outrun the demod, and
 			// ADS-B repeats, so a dropped block only delays a track).
-			r.mu.Lock()
-			q := r.adsbQ
-			free := r.adsbFree
-			r.mu.Unlock()
-			if q != nil {
-				var blk []byte
-				select {
-				case blk = <-free:
-				default:
-					blk = make([]byte, n)
-				}
-				blk = blk[:n]
-				copy(blk, buf[:n])
-				select {
-				case q <- blk:
-				default:
-				}
-			}
+			r.adsbEnqueue(buf[:n])
 			// rtl_tcp fan-out: republish the exact bytes to remote hosts.
 			r.mu.Lock()
 			srv := r.srv
@@ -1404,6 +1387,37 @@ func (r *Radio) SetADSBRFEnabled(on bool) {
 		r.SetCaptureRate(rateBk)
 	}
 	fmt.Fprintf(os.Stderr, "radio: ADS-B RF %v"+string(rune(10)), on)
+}
+
+// adsbEnqueue hands one raw IQ block to the demod goroutine without
+// blocking the read loop. ReadIQ returns VARIABLE-size blocks (a partial
+// TCP read can be far smaller than readBufBytes), so a pooled buffer may
+// be too small for the current block — re-slicing past its cap panics
+// (this exact bug crashed the app on device), hence the cap check.
+// Blocks the demod cannot keep up with are dropped: ADS-B repeats
+// ~1 msg/s/aircraft, so a drop delays a track, it never loses the plane.
+func (r *Radio) adsbEnqueue(block []byte) {
+	n := len(block)
+	r.mu.Lock()
+	q, free := r.adsbQ, r.adsbFree
+	r.mu.Unlock()
+	if q == nil {
+		return
+	}
+	var blk []byte
+	select {
+	case blk = <-free:
+	default:
+	}
+	if cap(blk) < n {
+		blk = make([]byte, n)
+	}
+	blk = blk[:n]
+	copy(blk, block)
+	select {
+	case q <- blk:
+	default:
+	}
 }
 
 // adsbLoop feeds queued IQ blocks to the Mode S demodulator on its own
