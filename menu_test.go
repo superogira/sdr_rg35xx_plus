@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"regexp"
+	"strings"
+	"testing"
+)
 
 // TestPageItemsCoverEveryPage: exactly one row list per page id, and
 // the root page exposes one row per subpage — the Audio page row once
@@ -84,5 +89,71 @@ func TestRootRowMapping(t *testing.T) {
 	}
 	if len(pageItems[pageRoot]) != 11 {
 		t.Fatalf("root rows = %d, want 11", len(pageItems[pageRoot]))
+	}
+}
+
+// TestPageADSBRenderMatchesDispatch: the pageADSB rows RENDERED on
+// screen must be in the same order as pageItems[pageADSB], because
+// activateItem dispatches by row INDEX against pageItems — a drift lands
+// every press on the neighbouring row's action (real bug: "Beast
+// server" row toggled ADS-B RF). The render list lives inline in
+// main()'s switch, so this test pins it at the source level.
+func TestPageADSBRenderMatchesDispatch(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Skip("source not available")
+	}
+	s := string(src)
+
+	// Dispatch list for pageADSB.
+	d := strings.Index(s, "menuADSBRadar, menuADSBLat")
+	if d < 0 {
+		t.Fatal("pageItems[pageADSB] row not found in main.go")
+	}
+	line := s[d : strings.IndexByte(s[d:], '\n')+d]
+	var dispatch []string
+	for _, id := range strings.Split(line, ",") {
+		id = strings.TrimSpace(id)
+		id = strings.TrimSuffix(id, "},")
+		id = strings.TrimSuffix(id, "}")
+		if id != "" {
+			dispatch = append(dispatch, id)
+		}
+	}
+	if len(dispatch) != 11 {
+		t.Fatalf("pageItems[pageADSB] has %d rows: %v", len(dispatch), dispatch)
+	}
+	// Render block: labels appear in source order between the case
+	// marker and the next case.
+	begin := strings.Index(s, "case pageADSB:")
+	end := strings.Index(s[begin:], "case pageAPRS:") + begin
+	block := s[begin:end]
+	keyRe := regexp.MustCompile(`i18n\.T\("(m_[a-z]+)"\)`)
+	keyToID := map[string]string{
+		"m_adsbradar":  "menuADSBRadar",
+		"m_adsblat":    "menuADSBLat",
+		"m_adsblon":    "menuADSBLon",
+		"m_adsbrf":     "menuADSBRF",
+		"m_rtlsrv":     "menuRTLSrv",
+		"m_rtlsrvport": "menuRTLSrvPort",
+		"m_adsbhost":   "menuADSBHost",
+		"m_aishost":    "menuAISServer",
+		"m_aisrf":      "menuAISRF",
+		"m_aislog":     "menuAISLog",
+		"m_clearcache": "menuClearMap",
+	}
+	var render []string
+	for _, m := range keyRe.FindAllStringSubmatch(block, -1) {
+		if id, ok := keyToID[m[1]]; ok {
+			render = append(render, id)
+		}
+	}
+	if len(render) != len(dispatch) {
+		t.Fatalf("rendered %d label(s) with known ids, dispatch has %d — unmapped new row?", len(render), len(dispatch))
+	}
+	for i := range dispatch {
+		if render[i] != dispatch[i] {
+			t.Fatalf("row %d: screen shows %s but pressing dispatches %s — render/pageItems drift (presses land on the wrong action!)", i, render[i], dispatch[i])
+		}
 	}
 }

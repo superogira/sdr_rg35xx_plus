@@ -957,7 +957,7 @@ func main() {
 	fmt.Fprintf(os.Stderr, "adsb: beast=%s pos=%.5f,%.5f layer=%d | ais: %s", adsbHost, adsbLat, adsbLon, adsbLayerIdx, aisHost)
 
 	// ADS-B store + Beast feed: created before the radio streams so the
-// in-app RF demodulator can share the same store.
+	// in-app RF demodulator can share the same store.
 	adsbStore := adsb.NewStore()
 	r.ADSBStore(adsbStore)
 	go r.Run(ctx)
@@ -4100,17 +4100,14 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_lmute"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.LocalMuted()]},
 					ui.MenuItem{Label: i18n.T("m_vol"), Value: fmt.Sprintf("%.1f%%", r.Volume()*100)})
 			case pageADSB:
+				// Row order MUST mirror pageItems[pageADSB] exactly —
+				// activateItem dispatches by row index against that
+				// list; a drift here lands presses on the neighbouring
+				// row action.
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_adsbradar"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_adsblat"), Value: fmt.Sprintf("%.5f", adsbLat)},
 					ui.MenuItem{Label: i18n.T("m_adsblon"), Value: fmt.Sprintf("%.5f", adsbLon)},
-					func() ui.MenuItem {
-						v := adsbHost
-						if v == "" {
-							v = "(" + i18n.T("off") + ")"
-						}
-						return ui.MenuItem{Label: i18n.T("m_adsbhost"), Value: v}
-					}(),
 					ui.MenuItem{Label: i18n.T("m_adsbrf"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.ADSBRFEnabled()]},
 					ui.MenuItem{Label: i18n.T("m_rtlsrv"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.RTLSrvEnabled()]},
 					ui.MenuItem{Label: i18n.T("m_rtlsrvport"), Value: func() string {
@@ -4120,6 +4117,13 @@ func main() {
 						}
 						return fmt.Sprintf("%d", p)
 					}()},
+					func() ui.MenuItem {
+						v := adsbHost
+						if v == "" {
+							v = "(" + i18n.T("off") + ")"
+						}
+						return ui.MenuItem{Label: i18n.T("m_adsbhost"), Value: v}
+					}(),
 					func() ui.MenuItem {
 						v := aisHost
 						if v == "" {
