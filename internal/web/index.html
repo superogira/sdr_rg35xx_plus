@@ -208,13 +208,10 @@ tr:hover td { background:var(--row-hover); }
         <div><b id="tcpu">–</b><span data-i18n="cputemp">CPU °C</span></div>
         <div><b id="tgpu">–</b><span data-i18n="gputemp">GPU °C</span></div>
         <div><b id="tddr">–</b><span data-i18n="ddrtemp">DDR °C</span></div>
-        <div><b id="tgt">–</b><span>✈ / ⛵</span></div>
+                <div id="gpstile" style="cursor:pointer" data-i18n-title="gpsTitle"><b id="gpssats">–</b><span>🛰 <span data-i18n="gpsLbl">GPS</span></span></div>
+<div><b id="tgt">–</b><span>✈ / ⛵</span></div>
         <div><b id="upb">–</b><span data-i18n="uptime">UP</span></div>
         <div id="syshistbtn" style="cursor:pointer" data-i18n-title="ttSysHist"><b>📈</b><span data-i18n="sysHistTile">ประวัติ</span></div>
-      </div>
-      <div class="row" id="gpsrow" style="margin-top:10px;cursor:pointer" data-i18n-title="gpsTitle">
-        <label style="font-weight:600">🛰 <span data-i18n="gpsLbl">GPS</span></label>
-        <span class="val" id="gpssum" style="color:var(--dim)">–</span>
       </div>
       <div class="row" style="margin-top:6px">
         <label style="font-weight:600">📡 APRS</label>
@@ -603,14 +600,13 @@ function gpsTimeLabel(g) {
 }
 function updateGPS(g) {
   const T = STRINGS[lang];
-  const sum = $('gpssum');
+  const sats = $('gpssats');
   if (g && g.valid) {
-    sum.textContent = g.lat.toFixed(5) + ', ' + g.lon.toFixed(5) +
-      ' · 🛰 ' + g.satsUsed + '/' + g.satsView;
-    sum.style.color = '';
+    sats.textContent = g.satsUsed + '/' + g.satsView;
+    sats.style.color = '';
   } else {
-    sum.textContent = gpsStatusText(g);
-    sum.style.color = 'var(--dim)';
+    sats.textContent = '–';
+    sats.style.color = 'var(--dim)';
   }
   const modal = $('gpsmodal');
   if (modal.style.display !== 'flex') return;
@@ -644,7 +640,7 @@ function updateGPS(g) {
   $('aprssrc').onclick = () => api('/api/cmd', { cmd: 'aprs', name: 'src', v: $('aprssrc').textContent === 'GPS' ? 1 : 0 }).catch(showErr);
   $('aprsnow').onclick = () => api('/api/cmd', { cmd: 'aprs', name: 'now', v: 0 }).catch(showErr);
 })();
-$('gpsrow').onclick = () => { $('gpsmodal').style.display = 'flex'; };
+$('gpstile').onclick = () => { $('gpsmodal').style.display = 'flex'; };
 $('gpsclose').onclick = () => { $('gpsmodal').style.display = 'none'; };
 $('gpsmodal').addEventListener('click', (e) => {
   if (e.target === $('gpsmodal')) $('gpsmodal').style.display = 'none';
