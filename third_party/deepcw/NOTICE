@@ -1,0 +1,21 @@
+DeepCW CW decoder — third-party components and provenance
+
+- model.onnx, model.onnx.json: the DeepCW Morse-decoding model and its
+  metadata from https://github.com/e04/deepcw-engine, licensed
+  AGPL-3.0-only. The model files are NOT linked into the SDRg35xx
+  binary; they are loaded at runtime by a separate sidecar process
+  (same isolation pattern as the HamNoise and rtl_tcp sidecars), so
+  the AGPL terms apply to that sidecar and its inputs/outputs, not to
+  the main application.
+- ONNX Runtime (libonnxruntime.so.*) from https://github.com/
+  microsoft/onnxruntime, MIT License. Used only by the sidecar.
+- tools/deepcw_bench.c: measurement harness written for this project;
+  its spectrogram/CTC pipeline replicates the reference example in
+  deepcw-engine/examples/python (AGPL-3.0-only) — kept as a standalone
+  tool, not linked into the app.
+
+Fetch instructions (binaries are gitignored, ~40 MB):
+  model + metadata: raw.githubusercontent.com/e04/deepcw-engine/main/
+  onnxruntime: github.com/microsoft/onnxruntime releases,
+  onnxruntime-linux-aarch64-*.tgz (lib/libonnxruntime.so.1.* +
+  lib/libonnxruntime_providers_shared.so + include/)
