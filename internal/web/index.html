@@ -210,6 +210,7 @@ tr:hover td { background:var(--row-hover); }
         <div><b id="tddr">–</b><span data-i18n="ddrtemp">DDR °C</span></div>
         <div><b id="tgt">–</b><span>✈ / ⛵</span></div>
         <div><b id="upb">–</b><span data-i18n="uptime">UP</span></div>
+        <div id="syshistbtn" style="cursor:pointer" data-i18n-title="ttSysHist"><b>📈</b><span data-i18n="sysHistTile">ประวัติ</span></div>
       </div>
       <div class="row" id="gpsrow" style="margin-top:10px;cursor:pointer" data-i18n-title="gpsTitle">
         <label style="font-weight:600">🛰 <span data-i18n="gpsLbl">GPS</span></label>
@@ -227,7 +228,6 @@ tr:hover td { background:var(--row-hover); }
       </div>
       <div class="row" style="margin-top:6px">
         <label data-i18n="panelLbl">หน้าจอ</label>
-        <button id="syshistbtn" data-i18n-title="ttSysHist">📈</button>
         <button id="pan-dim" data-i18n-title="ttPanDim">🔅 <span data-i18n="panelDim">ไฟหรี่</span></button>
         <button id="pan-off" data-i18n-title="ttPanOff">🌑 <span data-i18n="panelOff">ปิดจอ</span></button>
         <button id="pan-on">🌕 <span data-i18n="panelOn">เปิดจอ</span></button>
@@ -375,7 +375,7 @@ const STRINGS = {
     tuneHint: 'กดเพื่อตั้งความถี่',
     signal: 'สัญญาณ', smeterTT: 'มิเตอร์ความแรงสัญญาณ (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
-    ttSysHist: 'กราฟประวัติระบบ (24 ชม.)', sysHist: 'ประวัติระบบ',     ttAprsSrc: 'แหล่งตำแหน่ง beacon: GPS สด หรือพิกัดคงที่', ttWfxShift: 'ขยับจุดเริ่มแถวภาพ FAX ±5%', ttSSTV: 'เปิด/ปิดจอภาพ SSTV', aprsNowTT: 'ส่ง beacon เดี๋ยวนี้', ttIGate: 'iGate: ส่งต่อสถานีที่รับจาก RF ขึ้น APRS-IS', ttLabel: 'ป้ายชื่อ/ธง', ttMapPop: 'เปิดแผนที่แท็บใหม่', aprsSt: 'สถานี', aprsRxH: 'ประวัติรับ', aprsTxH: 'ประวัติส่ง',
+    ttSysHist: 'กราฟประวัติระบบ (24 ชม.)', sysHist: 'ประวัติระบบ', sysHistTile: 'ประวัติ',     ttAprsSrc: 'แหล่งตำแหน่ง beacon: GPS สด หรือพิกัดคงที่', ttWfxShift: 'ขยับจุดเริ่มแถวภาพ FAX ±5%', ttSSTV: 'เปิด/ปิดจอภาพ SSTV', aprsNowTT: 'ส่ง beacon เดี๋ยวนี้', ttIGate: 'iGate: ส่งต่อสถานีที่รับจาก RF ขึ้น APRS-IS', ttLabel: 'ป้ายชื่อ/ธง', ttMapPop: 'เปิดแผนที่แท็บใหม่', aprsSt: 'สถานี', aprsRxH: 'ประวัติรับ', aprsTxH: 'ประวัติส่ง',
     listenOn: '🔊 ฟัง', listenOff: '🔇 ฟัง', compat: ' (compat)',
     devOn: '🔈 เครื่อง', devOff: '🔇 เครื่อง',
     connFail: '○ เว็บไม่ตอบ', connOff: '○ ไม่เชื่อมต่อ ', tuned: 'จูน → ', reset: ' · ดับเบิลคลิกรีเซ็ต',
@@ -412,7 +412,7 @@ const STRINGS = {
     tuneHint: 'Click to set frequency',
     signal: 'Signal', smeterTT: 'Signal strength meter (dBFS) — S9 = −30 dBFS',
     sqlOn: 'SQL 🔊', sqlOff: 'SQL 🔇',
-    ttSysHist: 'system history graph (24 h)', sysHist: 'System history',     ttAprsSrc: 'beacon position: live GPS or fixed coordinates', ttWfxShift: 'nudge FAX line start ±5%', ttSSTV: 'show/hide the SSTV picture', aprsNowTT: 'Send beacon now', ttIGate: 'iGate: forward RF-heard stations to APRS-IS', ttLabel: 'labels/flags', ttMapPop: 'open map in new tab', aprsSt: 'Stations', aprsRxH: 'Receive log', aprsTxH: 'Transmit log',
+    ttSysHist: 'system history graph (24 h)', sysHist: 'System history', sysHistTile: 'HIST',     ttAprsSrc: 'beacon position: live GPS or fixed coordinates', ttWfxShift: 'nudge FAX line start ±5%', ttSSTV: 'show/hide the SSTV picture', aprsNowTT: 'Send beacon now', ttIGate: 'iGate: forward RF-heard stations to APRS-IS', ttLabel: 'labels/flags', ttMapPop: 'open map in new tab', aprsSt: 'Stations', aprsRxH: 'Receive log', aprsTxH: 'Transmit log',
     listenOn: '🔊 Listen', listenOff: '🔇 Listen', compat: ' (compat)',
     devOn: '🔈 Device', devOff: '🔇 Device',
     connFail: '○ no response', connOff: '○ offline ', tuned: 'Tuned → ', reset: ' · dbl-click reset',
