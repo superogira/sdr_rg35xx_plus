@@ -215,7 +215,18 @@ int main(int argc, char **argv) {
         if (len < FFT_LEN) break;
         int fr = 0;
         double ts = now_s();
+#ifdef DEBUG
+        fprintf(stderr, "DBGWIN off=%d len=%d a0=%.4f %.4f %.4f%c", off, len, audio[off], audio[off+1], audio[off+2], 10);
+#endif
         float *spec = spectrogram(audio + off, len, &fr);
+#ifdef DEBUG
+        static int dumped = 0;
+        if (!dumped) {
+            dumped = 1;
+            FILE *df = fopen("/tmp/spec_bench.bin", "wb");
+            if (df) { fwrite(spec, 4, (size_t)fr * NBINS, df); fclose(df); }
+        }
+#endif
         spec_total += now_s() - ts;
 
         int64_t dims[4] = {1, 1, fr, NBINS};
@@ -257,6 +268,21 @@ int main(int argc, char **argv) {
             prev = best;
         }
         text[tlen] = 0;
+#ifdef DEBUG
+        {
+            FILE *df = fopen("/tmp/deepcw/path_bench.txt", "a");
+            if (df) {
+                int prev2 = -1;
+                for (int t = 0; t < T; t++) {
+                    int cur = BLANK; float bv = lp[(size_t)t * NCLASS];
+                    for (int c3 = 1; c3 < NCLASS; c3++) if (lp[(size_t)t * NCLASS + c3] > bv) { bv = lp[(size_t)t * NCLASS + c3]; cur = c3; }
+                    if (cur != prev2) { fprintf(df, "%d:%d ", t, cur); prev2 = cur; }
+                }
+                fprintf(df, "| emit=[%s]%c", text, 10);
+                fclose(df);
+            }
+        }
+#endif
         free(spec);
         ort->ReleaseValue(in);
         ort->ReleaseValue(outv);

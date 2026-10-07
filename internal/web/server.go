@@ -469,6 +469,9 @@ type state struct {
 	WefaxSt   string    `json:"wefaxState"`
 	CW        bool      `json:"cw"`
 	CWText    string    `json:"cwText"`
+	DCW       bool      `json:"dcw"`
+	DCWAvail  bool      `json:"dcwAvail"`
+	DCWText   string    `json:"dcwText"`
 	CWWpm     float64   `json:"cwWpm"`
 }
 
@@ -602,6 +605,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	st.CW = radio.CWDecodeEnabled()
 	if st.CW {
 		st.CWText, st.CWWpm = radio.CW().Text(), radio.CW().WPM()
+		st.DCW, st.DCWAvail, st.DCWText = radio.DeepCWEnabled(), radio.DeepCWAvailable(), radio.DeepCWText()
 	}
 	if st.Wefax {
 		if ln, ws := radio.Wefax().Stats(); true {
@@ -708,6 +712,12 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 		if c.On != nil {
 			radio.SetCWDecodeEnabled(*c.On)
 		}
+	case "deepcw":
+		if c.On != nil {
+			radio.SetDeepCWEnabled(*c.On)
+		}
+	case "deepcwclear":
+		radio.DeepCWClear()
 	case "cwclear":
 		radio.CW().Clear()
 	case "nr":

@@ -28,6 +28,13 @@ SIZE="$(wc -c < "$PKG" | tr -d ' ')"
 # decompress).
 printf 'stamp=%s\nsha256=%s\nsize=%s\n' "$STAMP" "$SHA" "$SIZE" > dist/version.txt
 
+# DeepCW neural CW sidecar bundle (lazy-fetched by the app on first
+# enable; too large for the OTA package itself).
+if [ -f dist/deepcw-bundle-linux-arm64.tar.gz ]; then
+  curl -sfT dist/deepcw-bundle-linux-arm64.tar.gz --ftp-create-dirs "ftp://$FTP_USER:$FTP_PASS@$FTP_HOST${FTP_PATH}sdrg35xx/deepcw-bundle-linux-arm64.tar.gz"
+  echo "== deepcw bundle uploaded =="
+fi
+
 echo "== uploading stamp $STAMP ($SIZE bytes gz) =="
 curl -sfT "$PKG" --ftp-create-dirs "ftp://$FTP_USER:$FTP_PASS@$FTP_HOST${FTP_PATH}sdrg35xx/sdrg35xx-linux-arm64.gz"
 curl -sfT dist/version.txt --ftp-create-dirs "ftp://$FTP_USER:$FTP_PASS@$FTP_HOST${FTP_PATH}sdrg35xx/version.txt"

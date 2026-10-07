@@ -19,6 +19,7 @@ import (
 	"sdr35/internal/ais"
 	"sdr35/internal/aprs"
 	"sdr35/internal/audio"
+	"sdr35/internal/deepcw"
 	"sdr35/internal/dsp"
 	"sdr35/internal/i18n"
 	"sdr35/internal/nr"
@@ -126,6 +127,11 @@ type Radio struct {
 	nrOn       bool
 	nrMode     string
 	nrExeDir   string
+	dcwEng     *deepcw.Engine
+	dcwOn      bool
+	dcwThreads int
+	dcwWindow  int
+	dcwExeDir  string
 	aprsRFOn   bool
 	aprsFreqHz int64     // channel centre the RX branch tracks
 	aprsOff    float64   // current offset applied to the chain
@@ -257,6 +263,9 @@ func (r *Radio) SetCaptureRate(hz int) {
 	r.applyAudioFx()
 	if r.ft8On {
 		r.chain.SetFT8Detector(r.ft8)
+	}
+	if r.dcwOn {
+		r.chain.SetCWTap(r.deepcwTap)
 	}
 	client := r.client
 	r.mu.Unlock()
@@ -482,6 +491,9 @@ func (r *Radio) session(ctx context.Context) error {
 			if r.sstvOn {
 				chain.SetSSTVDecoder(r.sstvDec)
 			}
+		}
+		if r.dcwOn {
+			chain.SetCWTap(r.deepcwTap)
 		}
 		r.chain = chain
 		r.state = stateStreaming
@@ -1007,6 +1019,9 @@ func (r *Radio) SetMode(mode dsp.Mode) string {
 		if r.sstvOn {
 			r.chain.SetSSTVDecoder(r.sstvDec)
 		}
+	}
+	if r.dcwOn {
+		r.chain.SetCWTap(r.deepcwTap)
 	}
 	// The fresh chain starts at offset 0 — restore the passband offset
 	// so switching modes mid-scroll keeps listening where the dial says.
@@ -1564,6 +1579,127 @@ func (r *Radio) SetNREnabled(on bool, mode string) bool {
 	return true
 }
 
+// SetDeepCWDir tells the radio where to look for the deepcw sidecar.
+func (r *Radio) SetDeepCWDir(dir string) {
+	r.mu.Lock()
+	r.dcwExeDir = dir
+	r.mu.Unlock()
+}
+
+// DeepCWAvailable reports whether the sidecar binary and model exist.
+func (r *Radio) DeepCWAvailable() bool {
+	r.mu.Lock()
+	dir := r.dcwExeDir
+	r.mu.Unlock()
+	return deepcw.Available(dir)
+}
+
+// DeepCWEnabled reports the neural CW decoder state.
+func (r *Radio) DeepCWEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.dcwOn
+}
+
+// DeepCWParams returns threads and window seconds.
+func (r *Radio) DeepCWParams() (int, int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.dcwThreads, r.dcwWindow
+}
+
+// SetDeepCWParams tunes the sidecar (takes effect on next enable).
+func (r *Radio) SetDeepCWParams(threads, window int) {
+	r.mu.Lock()
+	if threads >= 1 && threads <= 4 {
+		r.dcwThreads = threads
+	}
+	if window >= 3 && window <= 15 {
+		r.dcwWindow = window
+	}
+	r.mu.Unlock()
+}
+
+// SetDeepCWEnabled starts/stops the DeepCW neural Morse sidecar. The
+// 8 kHz monitor branch is tapped into it regardless of the classic CW
+// decoder's state. Returns false when the sidecar/model is missing.
+func (r *Radio) SetDeepCWEnabled(on bool) bool {
+	r.mu.Lock()
+	if !on {
+		eng := r.dcwEng
+		r.dcwEng = nil
+		r.dcwOn = false
+		r.mu.Unlock()
+		eng.Close()
+		r.retapCW()
+		return true
+	}
+	if r.dcwEng != nil {
+		r.mu.Unlock()
+		return true
+	}
+	dir := r.dcwExeDir
+	th, win := r.dcwThreads, r.dcwWindow
+	if th < 1 {
+		th = 1
+	}
+	if win < 3 {
+		win = 5
+	}
+	r.mu.Unlock()
+	eng := deepcw.Start(dir, th, win)
+	r.mu.Lock()
+	if eng == nil {
+		r.mu.Unlock()
+		return false
+	}
+	r.dcwEng = eng
+	r.dcwOn = true
+	r.mu.Unlock()
+	r.retapCW()
+	return true
+}
+
+// deepcwTap forwards monitor audio to the sidecar (nil-safe).
+func (r *Radio) deepcwTap(x []float64) {
+	r.mu.Lock()
+	eng := r.dcwEng
+	r.mu.Unlock()
+	eng.Feed(x)
+}
+
+// retapCW re-attaches the tap on the live chain after an engine change.
+func (r *Radio) retapCW() {
+	r.mu.Lock()
+	chain := r.chain
+	on := r.dcwOn
+	r.mu.Unlock()
+	if chain == nil {
+		return
+	}
+	if on {
+		chain.SetCWTap(r.deepcwTap)
+	} else {
+		chain.SetCWTap(nil)
+	}
+}
+
+// DeepCWText returns the neural decoder's rolling text.
+func (r *Radio) DeepCWText() string {
+	r.mu.Lock()
+	eng := r.dcwEng
+	r.mu.Unlock()
+	return eng.Text()
+}
+
+// DeepCWClear drops the neural decoder's rolling text.
+func (r *Radio) DeepCWClear() {
+	r.mu.Lock()
+	eng := r.dcwEng
+	r.mu.Unlock()
+	eng.Clear()
+}
+
 // NRAvailable reports whether the sidecar binary exists.
 func (r *Radio) NRAvailable() bool {
 	r.mu.Lock()
@@ -1979,6 +2115,9 @@ func (r *Radio) SetBandwidth(bw float64) {
 	r.applyAudioFx()
 	if r.ft8On {
 		r.chain.SetFT8Detector(r.ft8)
+	}
+	if r.dcwOn {
+		r.chain.SetCWTap(r.deepcwTap)
 	}
 	// Fresh chain = offset 0; keep listening where the dial says.
 	if off := r.freqHz - r.loHz; off != 0 {

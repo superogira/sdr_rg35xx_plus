@@ -14,6 +14,7 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -45,6 +46,7 @@ import (
 	"sdr35/internal/aprs"
 	"sdr35/internal/audio"
 	"sdr35/internal/backlight"
+	"sdr35/internal/deepcw"
 	"sdr35/internal/dsp"
 	"sdr35/internal/geo"
 	"sdr35/internal/gps"
@@ -329,6 +331,67 @@ func fetchSidecar(base, dir, name string) {
 	fmt.Fprintf(os.Stderr, "sidecar: installed %s (%d bytes)\n", name, len(bin))
 }
 
+// fetchDeepCWBundle downloads the DeepCW sidecar bundle (sidecar
+// binary + ONNX Runtime libs + model, ~38 MB gz) next to the app binary
+// on first enable. The model is far too large for the OTA package, so
+// it is fetched lazily — exactly once, and only for users who turn the
+// neural CW decoder on. Best effort: any failure leaves the feature
+// reporting "not installed".
+func fetchDeepCWBundle(base, dir string) {
+	dst := filepath.Join(dir, "deepcw")
+	if deepcw.Available(dir) {
+		return
+	}
+	resp, err := updateGet(base+"/deepcw-bundle-linux-arm64.tar.gz", 300*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "deepcw bundle: fetch failed: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		fmt.Fprintf(os.Stderr, "deepcw bundle: HTTP %d\n", resp.StatusCode)
+		return
+	}
+	zr, err := gzip.NewReader(io.LimitReader(resp.Body, 200<<20))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "deepcw bundle: gzip: %v\n", err)
+		return
+	}
+	tr := tar.NewReader(zr)
+	n := 0
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "deepcw bundle: tar: %v\n", err)
+			return
+		}
+		name := filepath.Base(h.Name) // never honour paths from the archive
+		out := filepath.Join(dir, name)
+		f, err := os.OpenFile(out+".tmp", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "deepcw bundle: open %s: %v\n", name, err)
+			return
+		}
+		if _, err := io.Copy(f, io.LimitReader(tr, 64<<20)); err != nil {
+			f.Close()
+			os.Remove(out + ".tmp")
+			fmt.Fprintf(os.Stderr, "deepcw bundle: copy %s: %v\n", name, err)
+			return
+		}
+		f.Close()
+		if err := os.Rename(out+".tmp", out); err != nil {
+			fmt.Fprintf(os.Stderr, "deepcw bundle: rename %s: %v\n", name, err)
+			return
+		}
+		n++
+	}
+	fmt.Fprintf(os.Stderr, "deepcw bundle: installed %d files\n", n)
+	_ = dst
+}
+
 // syncDir flushes the SD card buffers as far as the OS allows.
 func syncDir(dir string) {
 	if f, err := os.Open(dir); err == nil {
@@ -466,6 +529,10 @@ const (
 	menuWefaxAuto
 	menuCWDec
 	menuCWClear
+	menuDeepCW
+	menuDeepCWThreads
+	menuDeepCWWindow
+	menuDeepCWClear
 	menuSSTV
 	menuSSTVView
 	menuSSTVClear
@@ -528,7 +595,7 @@ var pageItems = [][]int{
 	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBRF, menuRTLSrv, menuRTLSrvPort, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSIgate, menuAPRSGateLim, menuAPRSSrc, menuAPRSFixLat, menuAPRSFixLon, menuAPRSNow},
-	{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuSSTV, menuSSTVView, menuSSTVClear},
+	{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuDeepCW, menuDeepCWThreads, menuDeepCWWindow, menuDeepCWClear, menuSSTV, menuSSTVView, menuSSTVClear},
 	{menuCall, menuGrid, menuAnt, menuRig, menuPSK},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuShot, menuUpdate},
 }
@@ -864,6 +931,8 @@ func main() {
 		}
 	}
 	adsbConnected := false
+	// DeepCW neural Morse decoder window choices (seconds).
+	deepcwWindows := []int{3, 5, 8, 12}
 	// rtl_tcp fan-out server: share the live IQ with other hosts.
 	rtlSrvPort := 1235
 	if v, ok := cfg["rtlsrvport"]; ok {
@@ -1199,6 +1268,24 @@ func main() {
 	}
 	if cfg["adsbrf"] == "on" {
 		r.SetADSBRFEnabled(true)
+	}
+	if ex, err := os.Executable(); err == nil {
+		r.SetDeepCWDir(filepath.Dir(ex))
+	}
+	if v, ok := cfg["deepcwth"]; ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			_, w := r.DeepCWParams()
+			r.SetDeepCWParams(n, w)
+		}
+	}
+	if v, ok := cfg["deepcwwin"]; ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			t, _ := r.DeepCWParams()
+			r.SetDeepCWParams(t, n)
+		}
+	}
+	if cfg["deepcw"] == "on" && r.DeepCWAvailable() {
+		r.SetDeepCWEnabled(true)
 	}
 	r.SetRTLSrvPort(rtlSrvPort)
 	if cfg["rtlsrv"] == "on" {
@@ -2413,6 +2500,55 @@ func main() {
 			fmt.Fprintf(os.Stderr, "cw: decode %s\n", cfg["cwdec"])
 		case menuCWClear:
 			r.CW().Clear()
+		case menuDeepCW:
+			if r.DeepCWEnabled() {
+				r.SetDeepCWEnabled(false)
+				cfg["deepcw"] = "off"
+				saveNow()
+				break
+			}
+			if !r.DeepCWAvailable() {
+				// First enable: fetch the ~40 MB sidecar bundle in the
+				// background, then start it.
+				setMsg(i18n.T("deepcw_fetching"))
+				go func() {
+					fetchDeepCWBundle(defaultUpdateBase, filepath.Dir(mustExe()))
+					if r.SetDeepCWEnabled(true) {
+						cfg["deepcw"] = "on"
+						saveNow()
+					} else {
+						setMsg(i18n.T("deepcw_missing"))
+					}
+				}()
+				break
+			}
+			if r.SetDeepCWEnabled(true) {
+				cfg["deepcw"] = "on"
+			} else {
+				cfg["deepcw"] = "off"
+				setMsg(i18n.T("deepcw_missing"))
+			}
+			saveNow()
+		case menuDeepCWThreads:
+			t, w := r.DeepCWParams()
+			t = t%4 + 1
+			r.SetDeepCWParams(t, w)
+			cfg["deepcwth"] = fmt.Sprintf("%d", t)
+			saveNow()
+		case menuDeepCWWindow:
+			t, w := r.DeepCWParams()
+			idx := 0
+			for i, v := range deepcwWindows {
+				if v == w {
+					idx = i
+				}
+			}
+			w = deepcwWindows[(idx+1)%len(deepcwWindows)]
+			r.SetDeepCWParams(t, w)
+			cfg["deepcwwin"] = fmt.Sprintf("%d", w)
+			saveNow()
+		case menuDeepCWClear:
+			r.DeepCWClear()
 		case menuADSBHost:
 			beastSel = 0
 			uiMode = uiBeastList
@@ -4055,6 +4191,27 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_wefaxclear"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_cwdec"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.CWDecodeEnabled()]},
 					ui.MenuItem{Label: i18n.T("m_cwclear"), Value: i18n.T("press_a")},
+					func() ui.MenuItem {
+						if !r.DeepCWAvailable() {
+							return ui.MenuItem{Label: i18n.T("m_deepcw"), Value: i18n.T("deepcw_missing")}
+						}
+						return ui.MenuItem{Label: i18n.T("m_deepcw"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.DeepCWEnabled()]}
+					}(),
+					ui.MenuItem{Label: i18n.T("m_deepcwth"), Value: func() string {
+						t, _ := r.DeepCWParams()
+						if t < 1 {
+							t = 1
+						}
+						return fmt.Sprintf("%d", t)
+					}()},
+					ui.MenuItem{Label: i18n.T("m_deepcwwin"), Value: func() string {
+						_, w := r.DeepCWParams()
+						if w < 3 {
+							w = 5
+						}
+						return fmt.Sprintf("%d s", w)
+					}()},
+					ui.MenuItem{Label: i18n.T("m_deepcwclear"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_sstv"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.SSTVEnabled()]},
 					ui.MenuItem{Label: i18n.T("m_sstvview"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_sstvclear"), Value: i18n.T("press_a")})
@@ -5003,6 +5160,12 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["rtlsrvport"]; ok {
 		fmt.Fprintf(f, "rtlsrvport=%s\n", v)
+	}
+
+	for _, k := range []string{"deepcw", "deepcwth", "deepcwwin"} {
+		if v, ok := cfg[k]; ok {
+			fmt.Fprintf(f, "%s=%s\n", k, v)
+		}
 	}
 	if v, ok := cfg["update"]; ok {
 		fmt.Fprintf(f, "update=%s\n", v)

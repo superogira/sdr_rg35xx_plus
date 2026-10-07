@@ -273,14 +273,15 @@ type Chain struct {
 	// IF2 sample and is kept in [0, 2π).
 	offsetHz float64
 	ncoPhase float64
-	amDc     float64       // AM envelope DC tracker
-	fmDc     float64       // FM discriminator DC tracker (LO/ppm offset)
-	fx       *audProc      // user audio effects: NR + HP/LP
-	rtty     *RTTYDecoder  // RTTY monitor (fed alongside the FT8 branch)
-	wefax    *WefaxDecoder // WEFAX monitor (same 8 kHz branch)
-	cw       *CWDecoder    // Morse monitor (same branch)
-	aprs     APRSMonitor   // APRS AFSK monitor (own FM branch)
-	sstv     *SSTVDecoder  // slow-scan TV monitor (same 8 kHz branch)
+	amDc     float64         // AM envelope DC tracker
+	fmDc     float64         // FM discriminator DC tracker (LO/ppm offset)
+	fx       *audProc        // user audio effects: NR + HP/LP
+	rtty     *RTTYDecoder    // RTTY monitor (fed alongside the FT8 branch)
+	wefax    *WefaxDecoder   // WEFAX monitor (same 8 kHz branch)
+	cw       *CWDecoder      // Morse monitor (same branch)
+	cwTap    func([]float64) // raw 8k monitor copy (deepcw sidecar)
+	aprs     APRSMonitor     // APRS AFSK monitor (own FM branch)
+	sstv     *SSTVDecoder    // slow-scan TV monitor (same 8 kHz branch)
 	// APRS FM branch state (see feedAPRS)
 	aprsOff     float64 // channel offset from LO, Hz (0 = at LO)
 	aprsNco     float64
@@ -710,7 +711,7 @@ func (c *Chain) processSSB(out *[]float32) {
 
 	// FT8/RTTY expect 8 kHz audio — the wide 16 kHz SSB branches cannot
 	// feed them (the detectors' timing assumes 8 k).
-	if (c.ft8 != nil || c.rtty != nil || c.wefax != nil || c.cw != nil) && c.outRate == SSBRate {
+	if (c.ft8 != nil || c.rtty != nil || c.wefax != nil || c.cw != nil || c.cwTap != nil) && c.outRate == SSBRate {
 		fbuf := make([]float64, 0, len(side))
 		for _, z := range side {
 			fbuf = append(fbuf, real(z)*3.0)
@@ -725,7 +726,12 @@ func (c *Chain) processSSB(out *[]float32) {
 			c.wefax.Feed(fbuf)
 		}
 		if c.cw != nil {
-			c.cw.Feed(fbuf)
+			if c.cw != nil {
+				c.cw.Feed(fbuf)
+			}
+			if c.cwTap != nil {
+				c.cwTap(fbuf)
+			}
 		}
 	}
 	for _, z := range side {
@@ -781,6 +787,9 @@ func (c *Chain) feedMonitors() {
 	}
 	if c.cw != nil {
 		c.cw.Feed(buf)
+	}
+	if c.cwTap != nil {
+		c.cwTap(buf)
 	}
 	if c.sstv != nil {
 		c.sstv.Feed(buf)
@@ -1064,6 +1073,10 @@ func (c *Chain) SetWefaxDecoder(d *WefaxDecoder) { c.wefax = d }
 
 // SetCWDecoder attaches the Morse monitor (nil detaches).
 func (c *Chain) SetCWDecoder(d *CWDecoder) { c.cw = d }
+
+// SetCWTap attaches a raw tap on the 8 kHz monitor branch (the same
+// buffer the CW decoder consumes) — the deepcw sidecar listens here.
+func (c *Chain) SetCWTap(f func([]float64)) { c.cwTap = f }
 
 // measure updates the power meter and squelch state from one IF block.
 func (c *Chain) measureIF(block []complex128) {
