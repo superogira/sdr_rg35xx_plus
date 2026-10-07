@@ -1,0 +1,9 @@
+HamNoise — neural noise reduction for radio communications
+Copyright (c) e04 (github.com/e04/HamNoise)
+License: GNU Affero General Public License v3.0 (see LICENSE)
+
+Vendored here UNMODIFIED except for the sidecar wrapper tools/hamnoise.c
+(which is part of SDRg35xx, not of HamNoise). The compiled 'hamnoise'
+sidecar binary runs as a SEPARATE PROCESS from SDRg35xx; no AGPL code
+is linked into the SDRg35xx binary. Source of the vendored core:
+https://github.com/e04/HamNoise (core/ at the vendored commit).
