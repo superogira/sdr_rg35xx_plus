@@ -794,6 +794,7 @@ let specState = null;
 let wfZoom = 1, wfPanHz = 0;
 let wfHist = null, wfHistCtx = null, wfHistBins = 0, wfRowImg = null;
 let dragOn = false, dragX0 = 0, dragPan0 = 0, dragMoved = false;
+let curX = null; // cursor column in wf.width px (crosshair)
 const ZOOM_MAX = 128;
 function viewLow() {
   if (!specState) return 0;
@@ -1015,6 +1016,32 @@ function drawOverlays() {
   woctx.clearRect(0, 0, wov.width, wov.height);
   drawChanBw(woctx, wov.width, wov.height);
   if (specState.wefax) drawWefaxGuides(woctx, wov.width, wov.height, false);
+  // Cursor crosshair with a live frequency chip on both plots.
+  if (curX != null) {
+    const hz = viewHzofX(curX);
+    const bw = viewBw();
+    const lbl = bw <= 200e3 ? (hz/1e3).toFixed(2) + ' kHz'
+              : bw <= 3e6 ? (hz/1e3).toFixed(1) + ' kHz'
+              : (hz/1e6).toFixed(3) + ' MHz';
+    for (const pair of [[soctx, sov], [woctx, wov]]) {
+      const ctx = pair[0], cv = pair[1];
+      const x = curX / wf.width * cv.width;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,.5)';
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, cv.height); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = '10px system-ui';
+      const w = ctx.measureText(lbl).width + 8;
+      let bx = x + 4;
+      if (bx + w > cv.width) bx = x - 4 - w;
+      ctx.fillStyle = 'rgba(0,0,0,.72)';
+      ctx.fillRect(bx, 2, w, 13);
+      ctx.fillStyle = '#ffd166';
+      ctx.fillText(lbl, bx + 4, 12);
+      ctx.restore();
+    }
+  }
   zoomBadge();
 }
 function niceStep(raw) {
@@ -1118,10 +1145,14 @@ for (const cv of [spc, wf]) {
       drawView();
     }
     const hz = canvasFreq(e, cv);
-    if (hz) $('clickhz').textContent = (hz/1e6).toFixed(4) + ' MHz';
+    if (hz) {
+      $('clickhz').textContent = (hz/1e6).toFixed(4) + ' MHz';
+      const r = cv.getBoundingClientRect();
+      curX = (e.clientX - r.left) / r.width * wf.width;
+    }
   });
   cv.addEventListener('mouseup', () => { dragOn = false; });
-  cv.addEventListener('mouseleave', () => { dragOn = false; });
+  cv.addEventListener('mouseleave', () => { dragOn = false; curX = null; });
   // Touch: 1-finger drag pans (a stationary tap still tunes via the
   // synthetic click; dragMoved guards drags), 2-finger pinch zooms
   // anchored at the pinch midpoint — moving the midpoint pans too,
