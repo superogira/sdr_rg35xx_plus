@@ -283,10 +283,10 @@ tr:hover td { background:var(--row-hover); }
     </div>
     <div class="card" style="margin-top:12px">
       <div class="tabs">
-        <button id="tab-tgt" data-i18n="targets">Targets</button>
+        <button id="tab-tgt" data-i18n="targets" class="on">Targets</button>
         <button id="tab-ais">AIS</button>
         <button id="tab-aprs">APRS</button>
-        <button id="tab-ft8" class="on">FT8</button>
+        <button id="tab-ft8">FT8</button>
         <button id="tab-map" data-i18n="map">Map</button>
       </div>
       <div id="pane-map" hidden>
@@ -306,9 +306,9 @@ tr:hover td { background:var(--row-hover); }
         <h3 style="margin:8px 0 4px" data-i18n="aprsTxH">ประวัติส่ง</h3>
         <div style="max-height:150px;overflow-y:auto"><table><tbody id="aprsTx"></tbody></table></div>
       </div>
-      <div id="pane-ft8"><table><thead><tr><th data-i18n="time">เวลา</th><th>SNR</th><th>Hz</th><th data-i18n="msg">ข้อความ</th><th data-i18n="ctry">ประเทศ/ระยะ</th></tr></thead><tbody id="ft8b"></tbody></table></div>
+      <div id="pane-ft8" hidden><table><thead><tr><th data-i18n="time">เวลา</th><th>SNR</th><th>Hz</th><th data-i18n="msg">ข้อความ</th><th data-i18n="ctry">ประเทศ/ระยะ</th></tr></thead><tbody id="ft8b"></tbody></table></div>
       <div id="pane-ais" hidden><table><thead><tr><th data-i18n="time">เวลา</th><th>ch</th><th>dB</th><th data-i18n="msg">ข้อความ</th></tr></thead><tbody id="aisb"></tbody></table></div>
-      <div id="pane-tgt" hidden><table><thead><tr><th data-i18n="kind">ชนิด</th><th data-i18n="name">ชื่อ/ทะเบียน</th><th data-i18n="pos">พิกัด</th><th data-i18n="altspd">สูง/เร็ว</th><th data-i18n="dir">ทิศ</th><th data-i18n="age">อายุ</th></tr></thead><tbody id="tgtb"></tbody></table></div>
+      <div id="pane-tgt"><table><thead><tr><th data-i18n="kind">ชนิด</th><th data-i18n="name">ชื่อ/ทะเบียน</th><th data-i18n="pos">พิกัด</th><th data-i18n="altspd">สูง/เร็ว</th><th data-i18n="dir">ทิศ</th><th data-i18n="age">อายุ</th></tr></thead><tbody id="tgtb"></tbody></table></div>
     </div>
   </section>
 </main>
@@ -465,7 +465,7 @@ $('theme').onclick = () => {
   if (typeof wf !== 'undefined' && wctx) { wctx.fillStyle = wfBg(); wctx.fillRect(0, 0, wf.width, wf.height); }
   if (typeof drawOverlays === 'function') drawOverlays();
 };
-let st = null, tab = 'ft8', rebootPending = false;
+let st = null, tab = 'tgt', rebootPending = false;
 const fmtMHz = hz => (hz/1e6).toFixed(4);
 
 async function api(path, body, signal) {
