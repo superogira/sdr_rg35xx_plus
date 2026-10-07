@@ -433,6 +433,7 @@ type state struct {
 	NRNN      string    `json:"nrnn"`
 	NRAvail   bool      `json:"nrAvail"`
 	AISRF     bool      `json:"aisrf"`
+	ADSBRF    bool      `json:"adsbrf"`
 	LocalMute bool      `json:"localmute"`
 	Reboot    bool      `json:"reboot"`
 	IQRate    int       `json:"iqRate"`
@@ -540,7 +541,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		GainDb: radio.GainDb(), AGC: radio.AGCEnabled(), Vol: radio.Volume(),
 		SqlDb: radio.SquelchDb(), BwHz: radio.Bandwidth(), Bws: radio.Bandwidths(),
 		Ppm: radio.Ppm(), PpmOff: radio.PpmOff(),
-		FT8: radio.FT8Enabled(), AISRF: radio.AISRFEnabled(), LocalMute: radio.LocalMuted(), SSTV: radio.SSTVEnabled(),
+		FT8: radio.FT8Enabled(), AISRF: radio.AISRFEnabled(), ADSBRF: radio.ADSBRFEnabled(), LocalMute: radio.LocalMuted(), SSTV: radio.SSTVEnabled(),
 		NRNN: func() string {
 			on, m := radio.NREnabled()
 			if !on {
@@ -677,6 +678,10 @@ func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
 	case "aisrf":
 		if c.On != nil {
 			radio.SetAISRFEnabled(*c.On)
+		}
+	case "adsbrf":
+		if c.On != nil {
+			radio.SetADSBRFEnabled(*c.On)
 		}
 	case "wefax":
 		if c.On != nil {

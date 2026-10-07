@@ -30,7 +30,7 @@ var (
 
 // SampleRates are the capture rates the app offers (hardware list
 // filtered to what our DSP chain supports).
-var SampleRates = []int{256_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000}
+var SampleRates = []int{256_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_400_000, 2_560_000, 2_880_000, 3_200_000}
 
 // SetIQRate re-dimensions the DSP for a new capture rate. It must run
 // BEFORE NewChain (filters are designed from these values).
@@ -39,16 +39,37 @@ func SetIQRate(hz int) bool {
 		return false
 	}
 	IQRate = hz
-	// Low IQ rates use a gentler IF decimation (÷4) so the passband
-	// tuning window stays usable: at 640k with ÷8, IF2=80k limits the
-	// offset to ±15.5 kHz — a 12.5 kHz step pair already forces a LO
-	// retune that looks like the waterfall jumping. With ÷4, IF2=160k
-	// gives ±43.5 kHz of scroll room.
+	// IF2 must divide the IQ rate (an integer decimation) AND itself be a
+	// multiple of 8 kHz so the channel→audio decimation lands on an exact
+	// integer (a truncated auD pitch-shifts every voice). Prefer hz/8
+	// (hz/4 for low rates, keeping the passband tuning window wide), but
+	// walk to the nearest divisor of hz that stays 8k-divisible: 2.4M
+	// (ADS-B) has no hz/8 that qualifies, so it uses 240 kHz.
+	prefer := hz / 8
 	if hz <= 640_000 {
-		IF2Rate = hz / 4
-	} else {
-		IF2Rate = hz / 8
+		prefer = hz / 4
 	}
+	best, bestDist := 0, 1<<62
+	for d := 1; d <= hz/8_000; d++ {
+		if hz%d != 0 {
+			continue
+		}
+		if2 := hz / d
+		if if2%8_000 != 0 || if2 < 32_000 {
+			continue
+		}
+		dist := if2 - prefer
+		if dist < 0 {
+			dist = -dist
+		}
+		if dist < bestDist || (dist == bestDist && if2 > best) {
+			best, bestDist = if2, dist
+		}
+	}
+	if best == 0 {
+		best = prefer // no 8k-divisible IF2 (not a supported rate)
+	}
+	IF2Rate = best
 	AudioRate = IF2Rate / 4
 	DisplaySpanHz = IF2Rate / 2
 	return true

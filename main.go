@@ -470,6 +470,7 @@ const (
 	menuSSTVView
 	menuSSTVClear
 	menuADSBHost
+	menuADSBRF
 	menuADSBLat
 	menuADSBLon
 	menuADSBRadar
@@ -522,7 +523,7 @@ var pageItems = [][]int{
 	{menuHost, menuSample, menuFreq, menuStep, menuPPM, menuMode, menuGain, menuSQL, menuBW, menuDS, menuAGC},
 	{menuAF, menuNR, menuHP, menuLP, menuNRNN, menuLocalMute, menuVolume},
 	{menuSpan, menuWFMin, menuWFMax},
-	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
+	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBRF, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSIgate, menuAPRSGateLim, menuAPRSSrc, menuAPRSFixLat, menuAPRSFixLon, menuAPRSNow},
 	{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuSSTV, menuSSTVView, menuSSTVClear},
@@ -946,9 +947,11 @@ func main() {
 	aisLogMu := sync.Mutex{}
 	fmt.Fprintf(os.Stderr, "adsb: beast=%s pos=%.5f,%.5f layer=%d | ais: %s", adsbHost, adsbLat, adsbLon, adsbLayerIdx, aisHost)
 
-	go r.Run(ctx)
-	// ADS-B: Beast TCP feed → decode → store, independent of the radio.
+	// ADS-B store + Beast feed: created before the radio streams so the
+// in-app RF demodulator can share the same store.
 	adsbStore := adsb.NewStore()
+	r.ADSBStore(adsbStore)
+	go r.Run(ctx)
 	adsbRegs := adsb.NewRegDB(filepath.Join(filepath.Dir(mustExe()), "adsbreg.txt"))
 	flagDir := filepath.Join(filepath.Dir(mustExe()), "flags")
 	adsbClient := adsb.NewClient(adsbHost)
@@ -1184,6 +1187,9 @@ func main() {
 	}
 	if cfg["aisrf"] == "on" {
 		r.SetAISRFEnabled(true)
+	}
+	if cfg["adsbrf"] == "on" {
+		r.SetADSBRFEnabled(true)
 	}
 	defer func() {
 		if out != nil {
@@ -2102,7 +2108,7 @@ func main() {
 			// 640 kHz was dropped — this server streams it broken.
 			// The change reconnects with the new rate as the
 			// connection's first command.
-			rates := []int{256_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000}
+			rates := []int{256_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_400_000, 2_560_000, 2_880_000, 3_200_000}
 			cur := r.IQRate()
 			idx := 0
 			for i, v := range rates {
@@ -2482,6 +2488,11 @@ func main() {
 			on := !r.AISRFEnabled()
 			r.SetAISRFEnabled(on)
 			cfg["aisrf"] = map[bool]string{true: "on", false: "off"}[on]
+		case menuADSBRF:
+			on := !r.ADSBRFEnabled()
+			r.SetADSBRFEnabled(on)
+			cfg["adsbrf"] = map[bool]string{true: "on", false: "off"}[on]
+			saveNow()
 		case menuAISLog:
 			aisScroll = 0
 			uiMode = uiAISLog
@@ -4057,6 +4068,7 @@ func main() {
 						}
 						return ui.MenuItem{Label: i18n.T("m_adsbhost"), Value: v}
 					}(),
+					ui.MenuItem{Label: i18n.T("m_adsbrf"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.ADSBRFEnabled()]},
 					func() ui.MenuItem {
 						v := aisHost
 						if v == "" {
@@ -4927,6 +4939,9 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 	if v, ok := cfg["aisrf"]; ok {
 		fmt.Fprintf(f, "aisrf=%s\n", v)
+	}
+	if v, ok := cfg["adsbrf"]; ok {
+		fmt.Fprintf(f, "adsbrf=%s\n", v)
 	}
 	if v, ok := cfg["update"]; ok {
 		fmt.Fprintf(f, "update=%s\n", v)

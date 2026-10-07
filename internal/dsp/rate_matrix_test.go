@@ -11,7 +11,7 @@ import (
 // 9.33 kHz audio into the 8 kHz resampler at IF2 224 kHz (IQ 1.792M),
 // pitch-shifting every voice.
 func TestChannelRateMatrix(t *testing.T) {
-	rates := []int{256_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000}
+	rates := []int{256_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_400_000, 2_560_000, 2_880_000, 3_200_000}
 	for _, iq := range rates {
 		SetIQRate(iq)
 		for _, m := range []Mode{ModeNFM, ModeAM} {

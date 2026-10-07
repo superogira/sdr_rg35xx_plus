@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"sdr35/internal/adsb"
 	"sdr35/internal/ais"
 	"sdr35/internal/aprs"
 	"sdr35/internal/audio"
@@ -101,6 +102,10 @@ type Radio struct {
 	ft8On      bool
 	ft8        *dsp.FT8Detector
 	aisRFOn    bool
+	adsbRFOn   bool          // in-app Mode S decode from raw 2.4M IQ
+	adsbDem    *adsb.ModeSDemod
+	adsbStore  *adsb.Store
+	adsbRateBk int // capture rate to restore when ADS-B RF is turned off
 	audioTap   func(mono []float32, rate int) // web audio stream tap
 	localMute  bool                           // speaker off; web tap still live
 	aisA, aisB *ais.ChannelDemod
@@ -221,8 +226,8 @@ func (r *Radio) SetCaptureRate(hz int) {
 	// our DSP needs IQRate divisible by 64 kHz (SSB: /8→/8 to 8 kHz).
 	// Lower rates halve the network load — useful on mobile hotspots.
 	if hz != 256_000 && hz != 1_024_000 && hz != 1_536_000 &&
-		hz != 1_792_000 && hz != 2_048_000 && hz != 2_560_000 &&
-		hz != 2_880_000 && hz != 3_200_000 {
+		hz != 1_792_000 && hz != 2_048_000 && hz != 2_400_000 &&
+		hz != 2_560_000 && hz != 2_880_000 && hz != 3_200_000 {
 		return
 	}
 	r.mu.Lock()
@@ -596,6 +601,16 @@ func (r *Radio) session(ctx context.Context) error {
 			r.mu.Unlock()
 			audioBuf = audioBuf[:0]
 			chain.Process(buf[:n], &audioBuf)
+			// In-app Mode S decoding eats the RAW 2.4M IQ (it is not an
+			// audio-branch demod like FT8/AIS/APRS): feed the demod the
+			// same u8 block the chain just consumed.
+			r.mu.Lock()
+			adsbDem := r.adsbDem
+			adsbOn := r.adsbRFOn
+			r.mu.Unlock()
+			if adsbOn && adsbDem != nil {
+				adsbDem.FeedIQ(buf[:n])
+			}
 			r.mu.Lock()
 			tap := r.audioTap
 			rate := r.mode.AudioOutRate()
@@ -669,7 +684,7 @@ func (r *Radio) session(ctx context.Context) error {
 					// slower — every mode then played time-stretched
 					// by the mismatch (FT8 slots audibly >15 s).
 					snap := 0
-					for _, known := range []int{256_000, 640_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_560_000, 2_880_000, 3_200_000} {
+					for _, known := range []int{256_000, 640_000, 1_024_000, 1_536_000, 1_792_000, 2_048_000, 2_400_000, 2_560_000, 2_880_000, 3_200_000} {
 						if actual >= float64(known)*0.85 && actual <= float64(known)*1.15 {
 							snap = known
 							break
@@ -1268,6 +1283,63 @@ func (r *Radio) SetAISRFEnabled(on bool) {
 		r.SetFreq(162_000_000)
 	}
 	fmt.Fprintf(os.Stderr, "radio: AIS RF %v"+string(rune(10)), on)
+}
+
+// ADSBStore sets the aircraft store the in-app demodulator feeds. It is
+// the same Store the Beast client and the web/radar pages read.
+func (r *Radio) ADSBStore(store *adsb.Store) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.adsbStore = store
+}
+
+// ADSBRFEnabled reports whether the in-app Mode S demodulator runs.
+func (r *Radio) ADSBRFEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.adsbRFOn
+}
+
+// SetADSBRFEnabled toggles native Mode S decoding straight off the RTL's
+// IQ stream (no external dump1090/readsb). Mode S is a 1 Mbit/s PPM
+// signal at 1090 MHz, so enabling it retunes the LO to 1090 MHz and
+// forces the capture rate to 2.4 MSPS — the rate the demodulator (and
+// readsb) require. AIS RF and FT8 are turned off first: all three fight
+// over the single tuner. Turning it off restores the previous rate.
+func (r *Radio) SetADSBRFEnabled(on bool) {
+	if on {
+		if r.FT8Enabled() {
+			r.SetFT8Enabled(false)
+		}
+		if r.AISRFEnabled() {
+			r.SetAISRFEnabled(false)
+		}
+	}
+	r.mu.Lock()
+	r.adsbRFOn = on
+	if r.adsbDem == nil || r.adsbDem.Rate() != 2.4e6 {
+		r.adsbDem = adsb.NewModeSDemod(2.4e6, r.adsbStore)
+	}
+	rateBk := r.adsbRateBk
+	curRate := r.iqRate
+	if on && rateBk == 0 {
+		r.adsbRateBk = curRate
+	}
+	if !on && rateBk != 0 {
+		r.adsbRateBk = 0
+	}
+	r.mu.Unlock()
+	if on {
+		if dsp.IQRate != 2_400_000 {
+			r.SetCaptureRate(2_400_000)
+		}
+		if r.LO() != 1_090_000_000 {
+			r.SetFreq(1_090_000_000)
+		}
+	} else if rateBk != 0 && curRate == 2_400_000 {
+		r.SetCaptureRate(rateBk)
+	}
+	fmt.Fprintf(os.Stderr, "radio: ADS-B RF %v"+string(rune(10)), on)
 }
 
 // SetNRDir tells the radio where to look for the hamnoise sidecar.

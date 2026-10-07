@@ -145,6 +145,9 @@ var sliceTables = [5][8][2]int{
 	{{4, 0}, {1, 3}, {3, 5}, {0, 8}, {2, 10}, {4, 12}, {1, 15}, {3, 17}},
 }
 
+// Rate returns the configured capture rate this demod was built for.
+func (d *ModeSDemod) Rate() float64 { return d.rate }
+
 // FeedIQ consumes one block of interleaved u8 IQ.
 //
 // The magnitude stream is resampled onto the exact 2.4 MSPS grid the
@@ -193,6 +196,12 @@ func (d *ModeSDemod) FeedIQ(buf []byte) {
 			v := d.at(i0)*(1-f) + d.at(i0+1)*f
 			d.emit24(v)
 			d.srcPos += sps
+			// Scan as we go: a 64 KB read at 2.4M is 32768 samples, far
+			// more than the ring holds, so scanning only once per block
+			// would discard most of it before the cursor reached it.
+			if d.abs24-d.scanAt >= 256 {
+				d.scan24()
+			}
 		}
 	}
 	d.scan24()

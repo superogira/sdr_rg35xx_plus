@@ -124,6 +124,7 @@ var strings = map[string][2]string{
 	"m_adsblat":          {"ละติจูดจุดรับ", "Receiver latitude"},
 	"m_adsblon":          {"ลองจิจูดจุดรับ", "Receiver longitude"},
 	"m_adsbradar":        {"จอเรดาร์ >", "Radar view >"},
+	"m_adsbrf":           {"รับ ADS-B จากคลื่น (RF)", "ADS-B RF decode"},
 	"radar_conn":         {"เชื่อมต่อแล้ว", "connected"},
 	"hdr_planes":         {"บิน", "planes"},
 	"hdr_ships":          {"เรือ", "ships"},

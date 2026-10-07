@@ -91,8 +91,8 @@ func TestModeSDemodDecodes(t *testing.T) {
 		// it before it can be read.
 		air = append(air, idle...)
 		d := NewModeSDemod(rate, s)
-		for i := 0; i < len(air); i += 16384 {
-			end := i + 16384
+		for i := 0; i < len(air); i += 65536 {
+			end := i + 65536
 			if end > len(air) {
 				end = len(air)
 			}

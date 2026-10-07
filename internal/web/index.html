@@ -190,6 +190,7 @@ tr:hover td { background:var(--row-hover); }
         <button id="agc">AGC</button>
         <button id="ft8">FT8</button>
         <button id="aisrf">AIS RF</button>
+        <button id="adsbrf" title="ADS-B RF (2.4M, 1090 MHz)">ADS-B RF</button>
         <button id="wefax">FAX</button>
         <button id="cwdec">CW</button>
         <button id="listen" data-i18n-title="ttListen">🔇 ฟัง</button>
@@ -529,6 +530,7 @@ function renderState(s) {
   $('agc').className = s.agc ? 'on' : '';
   $('ft8').className = s.ft8 ? 'on' : '';
   $('aisrf').className = s.aisrf ? 'on' : '';
+  $('adsbrf').className = s.adsbrf ? 'on' : '';
   $('wefax').className = s.wefax ? 'on' : '';
   $('cwdec').className = s.cw ? 'on' : '';
   $('sstv').className = s.sstv ? 'on' : '';
@@ -750,6 +752,7 @@ $('ppmoff').onclick = () => cmd({cmd:'ppmoff', on: !st.ppmOff});
 $('agc').onclick = () => cmd({cmd:'agc', on: !st.agc});
 $('ft8').onclick = () => cmd({cmd:'ft8', on: !st.ft8});
 $('aisrf').onclick = () => cmd({cmd:'aisrf', on: !st.aisrf});
+$('adsbrf').onclick = () => cmd({cmd:'adsbrf', on: !st.adsbrf});
 $('wefax').onclick = () => cmd({cmd:'wefax', on: !st.wefax});
 $('cwdec').onclick = () => cmd({cmd:'cwdec', on: !st.cw});
   $('nrnn').onclick = () => {
