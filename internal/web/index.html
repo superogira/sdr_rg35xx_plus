@@ -283,10 +283,11 @@ tr:hover td { background:var(--row-hover); }
     </div>
     <div class="card" style="margin-top:12px">
       <div class="tabs">
-        <button id="tab-ft8" class="on">FT8</button>
-        <button id="tab-ais">AIS</button>
         <button id="tab-tgt" data-i18n="targets">Targets</button>
-        <button id="tab-map" data-i18n="map">Map</button><button id="tab-aprs">APRS</button>
+        <button id="tab-ais">AIS</button>
+        <button id="tab-aprs">APRS</button>
+        <button id="tab-ft8" class="on">FT8</button>
+        <button id="tab-map" data-i18n="map">Map</button>
       </div>
       <div id="pane-map" hidden>
         <div id="map" style="height:420px;border-radius:8px;background:#0b1410"></div>
@@ -552,6 +553,7 @@ function renderState(s) {
   $('aprsrx').className = s.aprsRx ? 'on' : '';
   $('aprsis').className = s.aprsIs ? 'on' : '';
   $('aprssrc').textContent = s.aprsSrc === 'fix' ? 'FIX' : 'GPS';
+  $('aprssrc').className = s.aprsSrc === 'gps' ? 'on' : '';
   $('aprsig').className = s.aprsIgate ? 'on' : '';
   $('aprsbeac').value = String(s.aprsBeac);
   $('aprscount').textContent = s.aprsCount;
