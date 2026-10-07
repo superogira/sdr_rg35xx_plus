@@ -894,12 +894,19 @@ function drawView() {
   if (!specState || !wfHist) return;
   const lo = viewLow(), bw = viewBw();
   const fullLo = specState.centreHz - specState.spanHz / 2;
-  const useMax = wfZoom <= 1.01 && wfMax && wfMax.width === wf.width;
+  // OpenWebRX's rule: never average bins into pixels. While the view
+  // is still coarser than one bin per pixel (zoom < bins/width), draw
+  // the screen-res max-hold history (peaks survive, like the spectrum
+  // line); once zoom reaches 1 bin/px, draw the full-bin history with
+  // nearest sampling for true detail. Both sources are peak-bright,
+  // so the handover has no brightness jump.
+  const binsPerPx = wfHistBins / Math.max(1, wf.width);
+  const useMax = wfMax && wfMax.width === wf.width && wfZoom < binsPerPx;
   const src = useMax ? wfMax : wfHist;
   const srcBins = useMax ? wfMax.width : wfHistBins;
   const srcX = (lo - fullLo) / specState.spanHz * srcBins;
   const srcW = bw / specState.spanHz * srcBins;
-  wctx.imageSmoothingEnabled = !useMax;
+  wctx.imageSmoothingEnabled = useMax;
   wctx.drawImage(src, Math.max(0, srcX), 0, Math.max(1, srcW), wf.height, 0, 0, wf.width, wf.height);
   const n = specState.bins.length;
   const b0 = Math.max(0, Math.floor((lo - fullLo) / specState.spanHz * n));
