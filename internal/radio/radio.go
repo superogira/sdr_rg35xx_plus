@@ -21,6 +21,7 @@ import (
 	"sdr35/internal/audio"
 	"sdr35/internal/deepcw"
 	"sdr35/internal/dsp"
+	"sdr35/internal/ft8ts"
 	"sdr35/internal/i18n"
 	"sdr35/internal/nr"
 	"sdr35/internal/rtltcp"
@@ -132,6 +133,13 @@ type Radio struct {
 	dcwThreads int
 	dcwWindow  int
 	dcwExeDir  string
+	f8tsEng    *ft8ts.Engine
+	f8tsOn     bool
+	f8tsDepth  int
+	f8tsTh     int
+	f8tsLow    int
+	f8tsHigh   int
+	f8tsExeDir string
 	aprsRFOn   bool
 	aprsFreqHz int64     // channel centre the RX branch tracks
 	aprsOff    float64   // current offset applied to the chain
@@ -266,6 +274,9 @@ func (r *Radio) SetCaptureRate(hz int) {
 	}
 	if r.dcwOn {
 		r.chain.SetCWTap(r.deepcwTap)
+	}
+	if r.f8tsOn {
+		r.chain.SetFT8TSTap(r.f8tsTap)
 	}
 	client := r.client
 	r.mu.Unlock()
@@ -494,6 +505,9 @@ func (r *Radio) session(ctx context.Context) error {
 		}
 		if r.dcwOn {
 			chain.SetCWTap(r.deepcwTap)
+		}
+		if r.f8tsOn {
+			chain.SetFT8TSTap(r.f8tsTap)
 		}
 		r.chain = chain
 		r.state = stateStreaming
@@ -1022,6 +1036,9 @@ func (r *Radio) SetMode(mode dsp.Mode) string {
 	}
 	if r.dcwOn {
 		r.chain.SetCWTap(r.deepcwTap)
+	}
+	if r.f8tsOn {
+		r.chain.SetFT8TSTap(r.f8tsTap)
 	}
 	// The fresh chain starts at offset 0 — restore the passband offset
 	// so switching modes mid-scroll keeps listening where the dial says.
@@ -1700,6 +1717,122 @@ func (r *Radio) DeepCWClear() {
 	eng.Clear()
 }
 
+// SetFT8TSDir tells the radio where the ft8ts bundle lives.
+func (r *Radio) SetFT8TSDir(dir string) {
+	r.mu.Lock()
+	r.f8tsExeDir = dir
+	r.mu.Unlock()
+}
+
+// FT8TSAvailable reports whether the ft8ts bundle is installed.
+func (r *Radio) FT8TSAvailable() bool {
+	r.mu.Lock()
+	dir := r.f8tsExeDir
+	r.mu.Unlock()
+	return ft8ts.Available(dir)
+}
+
+// FT8TSEnabled reports the alternative FT8 decoder state.
+func (r *Radio) FT8TSEnabled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.f8tsOn
+}
+
+// FT8TSParams returns depth, threads, low and high audio Hz.
+func (r *Radio) FT8TSParams() (depth, threads, low, high int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.f8tsDepth, r.f8tsTh, r.f8tsLow, r.f8tsHigh
+}
+
+// SetFT8TSParams tunes the sidecar (applies on next enable).
+func (r *Radio) SetFT8TSParams(depth, threads, low, high int) {
+	r.mu.Lock()
+	if depth >= 1 && depth <= 3 {
+		r.f8tsDepth = depth
+	}
+	if threads >= 1 && threads <= 4 {
+		r.f8tsTh = threads
+	}
+	if low >= 50 && low <= 3000 {
+		r.f8tsLow = low
+	}
+	if high >= 500 && high <= 4000 {
+		r.f8tsHigh = high
+	}
+	r.mu.Unlock()
+}
+
+// SetFT8TSEnabled starts/stops the ft8ts sidecar. Its decodes merge
+// into the same message queue as the built-in detector, so the FT8
+// log, world map and web table show both sources. Returns false when
+// the bundle is missing.
+func (r *Radio) SetFT8TSEnabled(on bool) bool {
+	r.mu.Lock()
+	if !on {
+		eng := r.f8tsEng
+		r.f8tsEng = nil
+		r.f8tsOn = false
+		r.mu.Unlock()
+		eng.Close()
+		r.retapFT8TS()
+		return true
+	}
+	if r.f8tsEng != nil {
+		r.mu.Unlock()
+		return true
+	}
+	dir := r.f8tsExeDir
+	d, th, lo, hi := r.f8tsDepth, r.f8tsTh, r.f8tsLow, r.f8tsHigh
+	if d < 1 {
+		d = 2
+	}
+	if th < 1 {
+		th = 1
+	}
+	if lo < 50 {
+		lo = 200
+	}
+	if hi < 500 {
+		hi = 3000
+	}
+	r.mu.Unlock()
+	eng := ft8ts.Start(dir, 8000, d, th, lo, hi)
+	r.mu.Lock()
+	if eng == nil {
+		r.mu.Unlock()
+		return false
+	}
+	r.f8tsEng = eng
+	r.f8tsOn = true
+	r.mu.Unlock()
+	r.retapFT8TS()
+	return true
+}
+
+func (r *Radio) f8tsTap(x []float64) {
+	r.mu.Lock()
+	eng := r.f8tsEng
+	r.mu.Unlock()
+	eng.Feed(x)
+}
+
+func (r *Radio) retapFT8TS() {
+	r.mu.Lock()
+	chain := r.chain
+	on := r.f8tsOn
+	r.mu.Unlock()
+	if chain == nil {
+		return
+	}
+	if on {
+		chain.SetFT8TSTap(r.f8tsTap)
+	} else {
+		chain.SetFT8TSTap(nil)
+	}
+}
+
 // NRAvailable reports whether the sidecar binary exists.
 func (r *Radio) NRAvailable() bool {
 	r.mu.Lock()
@@ -1937,11 +2070,21 @@ func (r *Radio) FT8Results() []dsp.FT8Detection {
 func (r *Radio) FT8TakeMessages() []dsp.FT8Message {
 	r.mu.Lock()
 	det := r.ft8
+	eng := r.f8tsEng
 	r.mu.Unlock()
-	if det == nil {
-		return nil
+	var out []dsp.FT8Message
+	if det != nil {
+		out = det.TakeMessages()
 	}
-	return det.TakeMessages()
+	for _, m := range eng.Take() {
+		out = append(out, dsp.FT8Message{
+			Text:   m.Text,
+			Valid:  true,
+			SNRDb:  m.SNR,
+			FreqHz: m.Freq,
+		})
+	}
+	return out
 }
 
 var ft8Busy bool
@@ -2118,6 +2261,9 @@ func (r *Radio) SetBandwidth(bw float64) {
 	}
 	if r.dcwOn {
 		r.chain.SetCWTap(r.deepcwTap)
+	}
+	if r.f8tsOn {
+		r.chain.SetFT8TSTap(r.f8tsTap)
 	}
 	// Fresh chain = offset 0; keep listening where the dial says.
 	if off := r.freqHz - r.loHz; off != 0 {

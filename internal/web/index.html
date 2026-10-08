@@ -189,6 +189,7 @@ tr:hover td { background:var(--row-hover); }
       <div class="row">
         <button id="agc">AGC</button>
         <button id="ft8">FT8</button>
+        <button id="ft8ts" title="Alt FT8 engine (ft8ts)">FT8+</button>
         <button id="aisrf">AIS RF</button>
         <button id="adsbrf" title="ADS-B RF (2.4M, 1090 MHz)">ADS-B RF</button>
         <button id="rtlsrv" title="Share IQ (rtl_tcp server)">IQ Share</button>
@@ -532,6 +533,9 @@ function renderState(s) {
   $('ppmoff').className = s.ppmOff ? 'on' : '';
   $('agc').className = s.agc ? 'on' : '';
   $('ft8').className = s.ft8 ? 'on' : '';
+  const f8b = $('ft8ts');
+  f8b.className = s.ft8ts ? 'on' : '';
+  f8b.style.display = s.ft8tsAvail ? '' : 'none';
   $('aisrf').className = s.aisrf ? 'on' : '';
   $('adsbrf').className = s.adsbrf ? 'on' : '';
   $('rtlsrv').className = s.rtlsrv ? 'on' : '';
@@ -765,6 +769,7 @@ $('wfmax').oninput = e => { $('wfmaxv').textContent = e.target.value + ' dB'; cm
 $('ppmoff').onclick = () => cmd({cmd:'ppmoff', on: !st.ppmOff});
 $('agc').onclick = () => cmd({cmd:'agc', on: !st.agc});
 $('ft8').onclick = () => cmd({cmd:'ft8', on: !st.ft8});
+$('ft8ts').onclick = () => cmd({cmd:'ft8ts', on: !st.ft8ts});
 $('aisrf').onclick = () => cmd({cmd:'aisrf', on: !st.aisrf});
 $('adsbrf').onclick = () => cmd({cmd:'adsbrf', on: !st.adsbrf});
 $('rtlsrv').onclick = () => cmd({cmd:'rtlsrv', on: !st.rtlsrv});

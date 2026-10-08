@@ -22,3 +22,11 @@ third_party/deepcw/model.onnx
 third_party/deepcw/ort/
 
 sdr35.exe
+
+# ft8ts bundle inputs (fetched separately)
+third_party/ft8ts/ft8ts.mjs
+third_party/ft8ts/ft8ts-worker-node.mjs
+third_party/ft8ts/ft8ts.d.ts
+third_party/ft8ts/package.json
+third_party/ft8ts/bench/*.raw
+.webtest/nodestage/

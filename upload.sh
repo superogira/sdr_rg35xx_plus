@@ -35,6 +35,12 @@ if [ -f dist/deepcw-bundle-linux-arm64.tar.gz ]; then
   echo "== deepcw bundle uploaded =="
 fi
 
+# ft8ts (alt FT8 engine) sidecar bundle, lazy-fetched like deepcw.
+if [ -f dist/ft8ts-bundle-linux-arm64.tar.gz ]; then
+  curl -sfT dist/ft8ts-bundle-linux-arm64.tar.gz --ftp-create-dirs "ftp://$FTP_USER:$FTP_PASS@$FTP_HOST${FTP_PATH}sdrg35xx/ft8ts-bundle-linux-arm64.tar.gz"
+  echo "== ft8ts bundle uploaded =="
+fi
+
 echo "== uploading stamp $STAMP ($SIZE bytes gz) =="
 curl -sfT "$PKG" --ftp-create-dirs "ftp://$FTP_USER:$FTP_PASS@$FTP_HOST${FTP_PATH}sdrg35xx/sdrg35xx-linux-arm64.gz"
 curl -sfT dist/version.txt --ftp-create-dirs "ftp://$FTP_USER:$FTP_PASS@$FTP_HOST${FTP_PATH}sdrg35xx/version.txt"

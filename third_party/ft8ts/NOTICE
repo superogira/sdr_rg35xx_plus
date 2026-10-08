@@ -1,0 +1,19 @@
+ft8ts — third-party components and provenance
+
+- ft8ts.mjs / ft8ts-worker-node.mjs: FT8/FT4 encoder+decoder library,
+  a pure-TypeScript port of the WSJT-X v3.0.1 Fortran implementation,
+  from https://github.com/e04/ft8ts, licensed GPL-3.0. Used unmodified
+  (prebuilt dist bundles).
+- ft8ts-node: Node.js v22.14.0 linux-arm64 runtime
+  (https://nodejs.org, Node.js license / MIT-family), used only to
+  execute the sidecar.
+- tools/ft8ts_sidecar.mjs: glue written for this project (slot
+  alignment, pipe protocol); the GPL-3.0 library runs in this separate
+  sidecar process and never links into the SDRg35xx binary.
+- third_party/ft8ts/bench/{gen,dec}.mjs: measurement harnesses written
+  for this project (gen uses the library's own encoder).
+
+Fetch instructions (binaries are gitignored):
+  node: nodejs.org/dist/v22.14.0/node-v22.14.0-linux-arm64.tar.xz
+        (extract bin/node only)
+  ft8ts dist: raw.githubusercontent.com/e04/ft8ts/main/dist/

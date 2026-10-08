@@ -48,6 +48,7 @@ import (
 	"sdr35/internal/backlight"
 	"sdr35/internal/deepcw"
 	"sdr35/internal/dsp"
+	"sdr35/internal/ft8ts"
 	"sdr35/internal/geo"
 	"sdr35/internal/gps"
 	"sdr35/internal/i18n"
@@ -392,6 +393,63 @@ func fetchDeepCWBundle(base, dir string) {
 	_ = dst
 }
 
+// fetchFT8TSBundle downloads the ft8ts sidecar bundle (node runtime +
+// ft8ts library + sidecar script, ~30 MB gz) next to the app binary on
+// first enable. GPL-3.0 code stays in the sidecar process; the bundle
+// is far too large for the OTA package, so it is fetched lazily.
+func fetchFT8TSBundle(base, dir string) {
+	if ft8ts.Available(dir) {
+		return
+	}
+	resp, err := updateGet(base+"/ft8ts-bundle-linux-arm64.tar.gz", 300*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ft8ts bundle: fetch failed: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		fmt.Fprintf(os.Stderr, "ft8ts bundle: HTTP %d\n", resp.StatusCode)
+		return
+	}
+	zr, err := gzip.NewReader(io.LimitReader(resp.Body, 200<<20))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ft8ts bundle: gzip: %v\n", err)
+		return
+	}
+	tr := tar.NewReader(zr)
+	n := 0
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ft8ts bundle: tar: %v\n", err)
+			return
+		}
+		name := filepath.Base(h.Name)
+		out := filepath.Join(dir, name)
+		f, err := os.OpenFile(out+".tmp", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ft8ts bundle: open %s: %v\n", name, err)
+			return
+		}
+		if _, err := io.Copy(f, io.LimitReader(tr, 128<<20)); err != nil {
+			f.Close()
+			os.Remove(out + ".tmp")
+			fmt.Fprintf(os.Stderr, "ft8ts bundle: copy %s: %v\n", name, err)
+			return
+		}
+		f.Close()
+		if err := os.Rename(out+".tmp", out); err != nil {
+			fmt.Fprintf(os.Stderr, "ft8ts bundle: rename %s: %v\n", name, err)
+			return
+		}
+		n++
+	}
+	fmt.Fprintf(os.Stderr, "ft8ts bundle: installed %d files\n", n)
+}
+
 // syncDir flushes the SD card buffers as far as the OS allows.
 func syncDir(dir string) {
 	if f, err := os.Open(dir); err == nil {
@@ -533,6 +591,10 @@ const (
 	menuDeepCWThreads
 	menuDeepCWWindow
 	menuDeepCWClear
+	menuFT8TS
+	menuFT8TSDepth
+	menuFT8TSThreads
+	menuFT8TSBand
 	menuSSTV
 	menuSSTVView
 	menuSSTVClear
@@ -595,7 +657,7 @@ var pageItems = [][]int{
 	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBRF, menuRTLSrv, menuRTLSrvPort, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSIgate, menuAPRSGateLim, menuAPRSSrc, menuAPRSFixLat, menuAPRSFixLon, menuAPRSNow},
-	{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuDeepCW, menuDeepCWThreads, menuDeepCWWindow, menuDeepCWClear, menuSSTV, menuSSTVView, menuSSTVClear},
+	{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuDeepCW, menuDeepCWThreads, menuDeepCWWindow, menuDeepCWClear, menuFT8TS, menuFT8TSDepth, menuFT8TSThreads, menuFT8TSBand, menuSSTV, menuSSTVView, menuSSTVClear},
 	{menuCall, menuGrid, menuAnt, menuRig, menuPSK},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuShot, menuUpdate},
 }
@@ -933,6 +995,8 @@ func main() {
 	adsbConnected := false
 	// DeepCW neural Morse decoder window choices (seconds).
 	deepcwWindows := []int{3, 5, 8, 12}
+	// ft8ts audio-band presets (low-high Hz).
+	ft8tsBands := [][2]int{{200, 3000}, {200, 1000}, {1000, 3000}, {500, 2500}}
 	// rtl_tcp fan-out server: share the live IQ with other hosts.
 	rtlSrvPort := 1235
 	if v, ok := cfg["rtlsrvport"]; ok {
@@ -1286,6 +1350,28 @@ func main() {
 	}
 	if cfg["deepcw"] == "on" && r.DeepCWAvailable() {
 		r.SetDeepCWEnabled(true)
+	}
+	if v, ok := cfg["ft8tsdepth"]; ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			_, t, lo, hi := r.FT8TSParams()
+			r.SetFT8TSParams(n, t, lo, hi)
+		}
+	}
+	if v, ok := cfg["ft8tsth"]; ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			d, _, lo, hi := r.FT8TSParams()
+			r.SetFT8TSParams(d, n, lo, hi)
+		}
+	}
+	if v, ok := cfg["ft8tsband"]; ok {
+		var lo, hi int
+		if _, err := fmt.Sscanf(v, "%d-%d", &lo, &hi); err == nil {
+			d, t, _, _ := r.FT8TSParams()
+			r.SetFT8TSParams(d, t, lo, hi)
+		}
+	}
+	if cfg["ft8ts"] == "on" && r.FT8TSAvailable() {
+		r.SetFT8TSEnabled(true)
 	}
 	r.SetRTLSrvPort(rtlSrvPort)
 	if cfg["rtlsrv"] == "on" {
@@ -2549,6 +2635,60 @@ func main() {
 			saveNow()
 		case menuDeepCWClear:
 			r.DeepCWClear()
+		case menuFT8TS:
+			if r.FT8TSEnabled() {
+				r.SetFT8TSEnabled(false)
+				cfg["ft8ts"] = "off"
+				saveNow()
+				break
+			}
+			if !r.FT8TSAvailable() {
+				setMsg(i18n.T("ft8ts_fetching"))
+				go func() {
+					fetchFT8TSBundle(defaultUpdateBase, filepath.Dir(mustExe()))
+					if r.SetFT8TSEnabled(true) {
+						cfg["ft8ts"] = "on"
+						saveNow()
+					} else {
+						setMsg(i18n.T("ft8ts_missing"))
+					}
+				}()
+				break
+			}
+			if r.SetFT8TSEnabled(true) {
+				cfg["ft8ts"] = "on"
+			} else {
+				cfg["ft8ts"] = "off"
+				setMsg(i18n.T("ft8ts_missing"))
+			}
+			saveNow()
+		case menuFT8TSDepth:
+			d, t, lo, hi := r.FT8TSParams()
+			d = d%3 + 1
+			r.SetFT8TSParams(d, t, lo, hi)
+			cfg["ft8tsdepth"] = fmt.Sprintf("%d", d)
+			saveNow()
+		case menuFT8TSThreads:
+			d, t, lo, hi := r.FT8TSParams()
+			t = t%4 + 1
+			r.SetFT8TSParams(d, t, lo, hi)
+			cfg["ft8tsth"] = fmt.Sprintf("%d", t)
+			saveNow()
+		case menuFT8TSBand:
+			d, t, lo, hi := r.FT8TSParams()
+			if lo < 50 {
+				lo, hi = 200, 3000
+			}
+			idx := 0
+			for i, b := range ft8tsBands {
+				if b[0] == lo && b[1] == hi {
+					idx = i
+				}
+			}
+			nb := ft8tsBands[(idx+1)%len(ft8tsBands)]
+			r.SetFT8TSParams(d, t, nb[0], nb[1])
+			cfg["ft8tsband"] = fmt.Sprintf("%d-%d", nb[0], nb[1])
+			saveNow()
 		case menuADSBHost:
 			beastSel = 0
 			uiMode = uiBeastList
@@ -4212,6 +4352,36 @@ func main() {
 						return fmt.Sprintf("%d s", w)
 					}()},
 					ui.MenuItem{Label: i18n.T("m_deepcwclear"), Value: i18n.T("press_a")},
+					func() ui.MenuItem {
+						if !r.FT8TSAvailable() {
+							return ui.MenuItem{Label: i18n.T("m_ft8ts"), Value: i18n.T("ft8ts_missing")}
+						}
+						return ui.MenuItem{Label: i18n.T("m_ft8ts"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.FT8TSEnabled()]}
+					}(),
+					ui.MenuItem{Label: i18n.T("m_ft8tsdepth"), Value: func() string {
+						d, _, _, _ := r.FT8TSParams()
+						if d < 1 {
+							d = 2
+						}
+						return fmt.Sprintf("%d", d)
+					}()},
+					ui.MenuItem{Label: i18n.T("m_ft8tsth"), Value: func() string {
+						_, t, _, _ := r.FT8TSParams()
+						if t < 1 {
+							t = 1
+						}
+						return fmt.Sprintf("%d", t)
+					}()},
+					ui.MenuItem{Label: i18n.T("m_ft8tsband"), Value: func() string {
+						_, _, lo, hi := r.FT8TSParams()
+						if lo < 50 {
+							lo = 200
+						}
+						if hi < 500 {
+							hi = 3000
+						}
+						return fmt.Sprintf("%d-%d Hz", lo, hi)
+					}()},
 					ui.MenuItem{Label: i18n.T("m_sstv"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.SSTVEnabled()]},
 					ui.MenuItem{Label: i18n.T("m_sstvview"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_sstvclear"), Value: i18n.T("press_a")})
@@ -5162,7 +5332,7 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 		fmt.Fprintf(f, "rtlsrvport=%s\n", v)
 	}
 
-	for _, k := range []string{"deepcw", "deepcwth", "deepcwwin"} {
+	for _, k := range []string{"deepcw", "deepcwth", "deepcwwin", "ft8ts", "ft8tsdepth", "ft8tsth", "ft8tsband"} {
 		if v, ok := cfg[k]; ok {
 			fmt.Fprintf(f, "%s=%s\n", k, v)
 		}
