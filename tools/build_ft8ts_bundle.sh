@@ -21,7 +21,7 @@ cp third_party/ft8ts/ft8ts-worker-node.mjs "$STAGE/"
 cp tools/ft8ts_sidecar.mjs "$STAGE/"
 # revision marker - must match internal/ft8ts Rev so stale bundles
 # (e.g. the gap-deadlock sidecar) re-download on next enable
-echo r2 > "$STAGE/ft8ts.rev"
+echo r3 > "$STAGE/ft8ts.rev"
 tar czf dist/ft8ts-bundle-linux-arm64.tar.gz -C "$STAGE" \
   ft8ts-node ft8ts.mjs ft8ts-worker-node.mjs ft8ts_sidecar.mjs ft8ts.rev
 ls -la dist/ft8ts-bundle-linux-arm64.tar.gz

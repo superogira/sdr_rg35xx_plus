@@ -39,6 +39,8 @@ let buf = new Float32Array(0);
 let bufStartMs = 0; // wall-clock ms of buf[0]
 let carry = Buffer.alloc(0); // stdin bytes awaiting a full float32
 let bytesIn = 0;
+let lagStart = 0; // wall ms when a >2 s lag was first seen
+let anchored = false;
 
 const slotStartFor = (ms) => Math.floor(ms / SLOT_MS) * SLOT_MS;
 
@@ -53,10 +55,16 @@ const decodeSlot = (doneSlot) => {
   const bMs = doneSlot + SLOT_MS - bufStartMs;
   const a = Math.round((aMs / 1000) * rate);
   const b = Math.round((bMs / 1000) * rate);
-  if (a < 0 || b > buf.length) return false;
+  if (a < 0 || b > buf.length) {
+    if (process.env.FT8DBG) process.stderr.write(`skip slot=${doneSlot} a=${a} b=${b} buf=${buf.length} start=${Math.round(bufStartMs)}
+`);
+    return false;
+  }
   const samples = buf.slice(a, b);
   buf = buf.slice(b);
   bufStartMs += (b / rate) * 1000;
+  if (process.env.FT8DBG) process.stderr.write(`dec slot=${doneSlot} a=${a} b=${b}
+`);
   const t0 = Date.now();
   let out = [];
   try {
@@ -102,24 +110,51 @@ process.stdin.on("data", (chunk) => {
     const f = new Float32Array(carry.buffer.slice(carry.byteOffset, carry.byteOffset + n * 4));
     carry = carry.subarray(n * 4);
     const now = Date.now();
-    if (buf.length === 0) bufStartMs = now - (n / rate) * 1000;
-
-    // Audio-end vs wall clock: a gap (reconnect, chain rebuild, radio
-    // stall) leaves bufStartMs anchored before the hole and the needed
-    // slots never become coverable. Resync to the live edge instead.
-    const lagMs = now - (bufStartMs + (buf.length / rate) * 1000);
-    if (lagMs > 2000 && buf.length > 0) {
-      process.stderr.write(`gap ${((lagMs - (n / rate) * 1000) / 1000).toFixed(1)}s — resync`+String.fromCharCode(10));
-      buf = new Float32Array(0);
+    // Anchor ONCE (and after a gap resync): the audio is continuous,
+    // so the end of consumed data is exactly the start of new data.
+    // Re-anchoring on every empty buffer (which happens right after
+    // each decode drains it) shifts bufStartMs to the chunk ARRIVAL
+    // time — a few ms late — and the just-ended slot's window then
+    // starts before the buffer (a<0), skipping it forever while the
+    // 30 s trim eats its samples.
+    if (!anchored) {
       bufStartMs = now - (n / rate) * 1000;
+      anchored = true;
+    }
+
+    // Audio-end vs wall clock. A REAL gap (reconnect, chain rebuild,
+    // radio stall) keeps the lag constant once audio resumes at real
+    // time. A pipe BACKLOG (audio that piled up in the OS buffer while
+    // a long decode blocked ingestion) drains in a burst: the lag
+    // shrinks to zero within a few chunks. Resync only on lag that
+    // SUSTAINS for 3 s — dropping a draining backlog throws away the
+    // next slot's signal.
+    const lagMs = now - (bufStartMs + (buf.length / rate) * 1000);
+    if (lagMs > 2000) {
+      if (lagStart === 0) lagStart = now;
+      else if (now - lagStart > 3000 && buf.length > 0) {
+        process.stderr.write(`gap ${((lagMs - (n / rate) * 1000) / 1000).toFixed(1)}s — resync`+String.fromCharCode(10));
+        buf = new Float32Array(0);
+        bufStartMs = now - (n / rate) * 1000;
+        anchored = true;
+        lagStart = 0;
+      }
+    } else {
+      lagStart = 0;
     }
     const merged = new Float32Array(buf.length + n);
     merged.set(buf, 0);
     merged.set(f, buf.length);
     buf = merged;
-    const maxKeep = slotSamples * 2;
-    if (buf.length > maxKeep) {
-      const drop = buf.length - maxKeep;
+    // Trim to bound memory, but NEVER past the start of the slot that
+    // is next to decode: dropping even a few samples of its window
+    // makes a<0 and the slot is skipped forever while its tail keeps
+    // the buffer full.
+    const doneNow = slotStartFor(Date.now()) - SLOT_MS;
+    let keepFrom = Math.round(((doneNow - bufStartMs) / 1000) * rate);
+    if (keepFrom < 0) keepFrom = 0;
+    const drop = Math.min(keepFrom, buf.length - slotSamples);
+    if (drop > 0) {
       buf = buf.slice(drop);
       bufStartMs += (drop / rate) * 1000;
     }

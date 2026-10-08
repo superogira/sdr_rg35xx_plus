@@ -47,7 +47,7 @@ type Engine struct {
 // bundle's ft8ts.rev by tools/build_ft8ts_bundle.sh). A stale bundle —
 // like the first sidecar, which deadlocked on stream gaps — re-downloads
 // on the next enable instead of running the broken code forever.
-const Rev = "r2"
+const Rev = "r3"
 
 // Files the bundle installs next to the app binary.
 func bundleFiles(dir string) []string {
@@ -96,6 +96,11 @@ func Start(dir string, rate, depth, threads, low, high int) *Engine {
 		fmt.Fprintf(os.Stderr, "ft8ts: stdout pipe: %v\n", err)
 		return nil
 	}
+	// A deep decode can block ingestion for several seconds; the audio
+	// arriving meanwhile must SURVIVE in the OS pipe buffer (the
+	// sidecar resyncs only on sustained lag, so a draining backlog is
+	// real signal). 1 MB holds ~30 s of 8 kHz float32.
+	enlargePipe(stdin)
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "ft8ts: start node: %v\n", err)
 		return nil
@@ -228,4 +233,16 @@ func (e *Engine) Close() {
 			_ = cmd.Process.Kill()
 		}
 	})
+}
+
+// enlargePipe raises the OS pipe capacity so audio that arrives while a
+// deep decode blocks ingestion is buffered by the kernel instead of
+// dropped. Linux-only (F_SETPIPE_SZ); best effort — the default 64 KB
+// still works, it just survives shorter stalls.
+func enlargePipe(w io.WriteCloser) {
+	f, ok := w.(*os.File)
+	if !ok {
+		return
+	}
+	_, _ = fcntlSetPipeSz(f.Fd(), 1<<20)
 }
