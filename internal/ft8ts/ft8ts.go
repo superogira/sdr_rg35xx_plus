@@ -48,7 +48,7 @@ type Engine struct {
 // bundle's ft8ts.rev by tools/build_ft8ts_bundle.sh). A stale bundle —
 // like the first sidecar, which deadlocked on stream gaps — re-downloads
 // on the next enable instead of running the broken code forever.
-const Rev = "r3"
+const Rev = "r4"
 
 // nodePath finds the bundled runtime: plain name on Linux (the only
 // production target), .exe alongside for dev machines on Windows.
