@@ -8,6 +8,7 @@ package ft8ts
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -62,8 +63,11 @@ func Available(dir string) bool {
 }
 
 // Start launches node + sidecar. rate is the monitor audio rate in Hz.
+// Failure reasons go to stderr (the device log) — a silent nil here
+// once left "cannot enable" with nothing to diagnose.
 func Start(dir string, rate, depth, threads, low, high int) *Engine {
 	if !Available(dir) {
+		fmt.Fprintf(os.Stderr, "ft8ts: bundle incomplete in %s\n", dir)
 		return nil
 	}
 	node := filepath.Join(dir, "ft8ts-node")
@@ -75,13 +79,16 @@ func Start(dir string, rate, depth, threads, low, high int) *Engine {
 	cmd.Stderr = os.Stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "ft8ts: stdin pipe: %v\n", err)
 		return nil
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "ft8ts: stdout pipe: %v\n", err)
 		return nil
 	}
 	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "ft8ts: start node: %v\n", err)
 		return nil
 	}
 	e := &Engine{cmd: cmd, in: stdin, quit: make(chan struct{}), q: make(chan []float64, 64)}

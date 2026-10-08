@@ -343,7 +343,7 @@ func fetchDeepCWBundle(base, dir string) {
 	if deepcw.Available(dir) {
 		return
 	}
-	resp, err := updateGet(base+"/deepcw-bundle-linux-arm64.tar.gz", 300*time.Second)
+	resp, err := updateGet(base+"/deepcw-bundle-linux-arm64.tar.gz", 15*time.Minute)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "deepcw bundle: fetch failed: %v\n", err)
 		return
@@ -397,57 +397,117 @@ func fetchDeepCWBundle(base, dir string) {
 // ft8ts library + sidecar script, ~30 MB gz) next to the app binary on
 // first enable. GPL-3.0 code stays in the sidecar process; the bundle
 // is far too large for the OTA package, so it is fetched lazily.
+// ft8tsDLStatus carries the live download state to the menu row (the
+// row value renders it every frame, so a slow first-enable download
+// shows progress instead of looking dead).
+var ft8tsDLStatus string
+
+func setFT8TSStatus(f string, a ...any) {
+	ft8tsDLStatus = fmt.Sprintf(f, a...)
+	fmt.Fprintf(os.Stderr, "ft8ts: %s\n", ft8tsDLStatus)
+}
+
+// fetchFT8TSBundle downloads the ft8ts bundle with retries and progress.
+// Field networks (the device log showed 40% sample drops) need far more
+// than one 300 s attempt for ~40 MB.
 func fetchFT8TSBundle(base, dir string) {
 	if ft8ts.Available(dir) {
 		return
 	}
-	resp, err := updateGet(base+"/ft8ts-bundle-linux-arm64.tar.gz", 300*time.Second)
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		setFT8TSStatus("dl %d/3...", attempt)
+		err := downloadFT8TSBundle(base, dir)
+		if err == nil {
+			setFT8TSStatus("")
+			return
+		}
+		lastErr = err
+		fmt.Fprintf(os.Stderr, "ft8ts bundle: attempt %d failed: %v\n", attempt, err)
+	}
+	msg := lastErr.Error()
+	if len(msg) > 24 {
+		msg = msg[:24]
+	}
+	setFT8TSStatus("ERR %s", msg)
+}
+
+func downloadFT8TSBundle(base, dir string) error {
+	resp, err := updateGet(base+"/ft8ts-bundle-linux-arm64.tar.gz", 15*time.Minute)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ft8ts bundle: fetch failed: %v\n", err)
-		return
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		fmt.Fprintf(os.Stderr, "ft8ts bundle: HTTP %d\n", resp.StatusCode)
-		return
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	zr, err := gzip.NewReader(io.LimitReader(resp.Body, 200<<20))
+	total := int64(0)
+	if resp.ContentLength > 0 {
+		total = resp.ContentLength
+	}
+	var gz []byte
+	buf := make([]byte, 256<<10)
+	var got int64
+	lastPct := -1
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			gz = append(gz, buf[:n]...)
+			got += int64(n)
+			if len(gz) > 200<<20 {
+				return fmt.Errorf("oversized download")
+			}
+			if total > 0 {
+				pct := int(got * 100 / total)
+				if pct != lastPct && pct%2 == 0 {
+					lastPct = pct
+					setFT8TSStatus("%d%% %.1fMB", pct, float64(got)/(1<<20))
+				}
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return rerr
+		}
+	}
+	if len(gz) < 1<<20 {
+		return fmt.Errorf("bad download (%d bytes)", len(gz))
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(gz))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ft8ts bundle: gzip: %v\n", err)
-		return
+		return err
 	}
 	tr := tar.NewReader(zr)
-	n := 0
+	nfiles := 0
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "ft8ts bundle: tar: %v\n", err)
-			return
+			return err
 		}
-		name := filepath.Base(h.Name)
+		name := filepath.Base(h.Name) // never honour paths from the archive
 		out := filepath.Join(dir, name)
 		f, err := os.OpenFile(out+".tmp", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "ft8ts bundle: open %s: %v\n", name, err)
-			return
+			return err
 		}
 		if _, err := io.Copy(f, io.LimitReader(tr, 128<<20)); err != nil {
 			f.Close()
 			os.Remove(out + ".tmp")
-			fmt.Fprintf(os.Stderr, "ft8ts bundle: copy %s: %v\n", name, err)
-			return
+			return err
 		}
 		f.Close()
 		if err := os.Rename(out+".tmp", out); err != nil {
-			fmt.Fprintf(os.Stderr, "ft8ts bundle: rename %s: %v\n", name, err)
-			return
+			return err
 		}
-		n++
+		nfiles++
 	}
-	fmt.Fprintf(os.Stderr, "ft8ts bundle: installed %d files\n", n)
+	fmt.Fprintf(os.Stderr, "ft8ts bundle: installed %d files (%.1f MB gz)\n", nfiles, float64(len(gz))/(1<<20))
+	return nil
 }
 
 // syncDir flushes the SD card buffers as far as the OS allows.
@@ -2643,18 +2703,22 @@ func main() {
 				break
 			}
 			if !r.FT8TSAvailable() {
-				setMsg(i18n.T("ft8ts_fetching"))
+				setFT8TSStatus("%s", i18n.T("ft8ts_fetching"))
 				go func() {
 					fetchFT8TSBundle(defaultUpdateBase, filepath.Dir(mustExe()))
+					if strings.HasPrefix(ft8tsDLStatus, "ERR") {
+						return // the row keeps the error; press again to retry
+					}
 					if r.SetFT8TSEnabled(true) {
 						cfg["ft8ts"] = "on"
 						saveNow()
 					} else {
-						setMsg(i18n.T("ft8ts_missing"))
+						setFT8TSStatus("%s", i18n.T("ft8ts_missing"))
 					}
 				}()
 				break
 			}
+			ft8tsDLStatus = ""
 			if r.SetFT8TSEnabled(true) {
 				cfg["ft8ts"] = "on"
 			} else {
@@ -4353,6 +4417,9 @@ func main() {
 					}()},
 					ui.MenuItem{Label: i18n.T("m_deepcwclear"), Value: i18n.T("press_a")},
 					func() ui.MenuItem {
+						if ft8tsDLStatus != "" {
+							return ui.MenuItem{Label: i18n.T("m_ft8ts"), Value: ft8tsDLStatus}
+						}
 						if !r.FT8TSAvailable() {
 							return ui.MenuItem{Label: i18n.T("m_ft8ts"), Value: i18n.T("ft8ts_missing")}
 						}

@@ -13,15 +13,9 @@ if [ ! -f "$NODE" ]; then
   exit 1
 fi
 cp "$NODE" "$STAGE/ft8ts-node"
-# the official node binary carries ~70 MB of symbols; stripping cuts
-# the gz bundle substantially
-if command -v aarch64-linux-gnu-strip >/dev/null 2>&1; then
-  aarch64-linux-gnu-strip "$STAGE/ft8ts-node"
-else
-  P=$(pwd)
-  POSIXDIR="//mnt/${P:1:1}${P:2}"
-  wsl -d Ubuntu-22.04 -- aarch64-linux-gnu-strip "$POSIXDIR/$STAGE/ft8ts-node"
-fi
+# ship the EXACT node binary that was benchmarked on the device —
+# a stripped copy was never runtime-tested there, and a broken node
+# would kill the feature on first enable
 cp third_party/ft8ts/ft8ts.mjs "$STAGE/"
 cp third_party/ft8ts/ft8ts-worker-node.mjs "$STAGE/"
 cp tools/ft8ts_sidecar.mjs "$STAGE/"
