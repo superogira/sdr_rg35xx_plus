@@ -78,3 +78,38 @@ func splitLines(text string, n int) []string {
 	}
 	return out
 }
+
+// DrawDeepCWLog draws the neural (DeepCW) decoder's rolling text in the
+// same corner as the classic CW window, stacked above it so both can
+// show at once. Orange accents mark it as the AI engine.
+func (u *UI) DrawDeepCWLog(text string) {
+	tf := Face(11, false)
+	const lh = 15
+	lines := splitLines(text, 40)
+	maxShow := 2
+	if len(lines) > maxShow {
+		lines = lines[len(lines)-maxShow:]
+	}
+	pw := 330
+	ph := len(lines)*lh + 8
+	px := u.W - pw - 4
+	// stacked above the classic CW window's slot (its max height 38 +
+	// the 4 px gap), so the two never overlap when both run
+	py := u.WaterfallRows - 4 - 16 - 4 - 18 - 4 - ph - 4 - 42
+	if py < 4 {
+		py = 4
+	}
+	u.fillBlend(px, py, pw, ph, 0, 0, 0, 180)
+	tf.DrawString(u.img, color.RGBA{255, 165, 60, 255}, px+4, py+13, "CW AI")
+	if len(lines) == 0 {
+		return
+	}
+	x0 := px + 52
+	for i, ln := range lines {
+		y := py + 14 + i*lh
+		for tf.TextWidth(ln) > px+pw-6-x0 && len(ln) > 4 {
+			ln = ln[:len(ln)-2] + "…"
+		}
+		tf.DrawString(u.img, color.RGBA{255, 230, 190, 255}, x0, y, ln)
+	}
+}

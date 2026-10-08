@@ -5304,6 +5304,9 @@ func main() {
 		if r.CWDecodeEnabled() && uiMode == uiMain {
 			u.DrawCWLog(r.CW().Text(), r.CW().WPM())
 		}
+		if r.DeepCWEnabled() && uiMode == uiMain {
+			u.DrawDeepCWLog(r.DeepCWText())
+		}
 		if r.WefaxEnabled() {
 			// Auto-save on APT stop — on any screen, so a chart that
 			// finishes while a menu is open is never lost.
