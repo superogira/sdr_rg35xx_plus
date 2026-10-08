@@ -724,10 +724,13 @@ func (u *UI) NewSpectrumRow(tap, rawTap *dsp.SpectrumTap) bool {
 // scroll down together — if the sync is right, signal traces begin
 // exactly under each line.
 func (u *UI) MarkFT8Slot(stamp string) {
+	// Black backdrop only behind the timestamp itself — a full-width
+	// band hides the waterfall signals of the whole row.
 	const stripRows = 12
+	tw := Face(10, false).TextWidth(stamp)
 	for row := 0; row < stripRows && row < u.WaterfallRows; row++ {
 		off := row * u.wf.Stride
-		for x := 0; x < u.W; x++ {
+		for x := 0; x < tw+8 && x < u.W; x++ {
 			o := off + x*4
 			u.wf.Pix[o] = 10
 			u.wf.Pix[o+1] = 10

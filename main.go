@@ -3023,8 +3023,10 @@ func main() {
 				saveWefax()
 				return
 			}
-			if r.FT8Enabled() {
-				r.SyncFT8()
+			if r.FT8Enabled() || r.FT8TSEnabled() {
+				if r.FT8Enabled() {
+					r.SyncFT8()
+				}
 				capturedMsg = i18n.T("ft8_synced")
 				capturedAt = time.Now()
 				// Slot boundaries for the red waterfall markers: Y is
@@ -4144,10 +4146,8 @@ func main() {
 		}
 
 		// FT8 slot boundary: mark the newest waterfall row red once per
-		// 15 s slot after a Y sync (pending until a fresh row arrives).
-		if r.FT8TSEnabled() && ft8SyncWall.IsZero() {
-			ft8SyncWall = time.Now()
-		}
+		// 15 s slot after a MANUAL Y sync (pending until a fresh row
+		// arrives) — either engine running keeps the cadence alive.
 		if (r.FT8Enabled() || r.FT8TSEnabled()) && !ft8SyncWall.IsZero() {
 			if idx := int(time.Since(ft8SyncWall) / (15 * time.Second)); idx > ft8SlotIdx {
 				ft8SlotIdx = idx
