@@ -12,13 +12,21 @@
 ### รับสัญญาณและจอภาพ
 - โหมดรับ: WFM (วิทยุ FM), NFM, AM, USB, LSB, CW
 - น้ำตก + สเปกตรัม บนจอเครื่อง (ซูม span ด้วย L1/R1, สเต็ปจูน L2/R2)
-  และบนเว็บ (แตะ/ลาก/ซูม 2 นิ้ว, ขยายเต็มจอ)
+  และบนเว็บ (แตะ/ลาก/ซูม 2 นิ้ว, ขยายเต็มจอ) — หน้าต่างประวัติเต็มจอแบบ
+  เลื่อนดูได้สำหรับ FT8 (SELECT), CW สองตัวถอดแบ่งครึ่งจอ (SELECT), AIS และ APRS
 - S-meter (dBFS + S-unit) ทั้งบนจอเครื่องและเว็บ, squelch แบบ absolute dBFS
 - ปรับความสว่างจอด้วย MENU+Vol, ปิด/หรี่จอจากปุ่ม power หรือจากเว็บ
 - ถ่ายภาพหน้าจอด้วย MENU+START
 
 ### ถอดรหัสดิจิทัล
 - **FT8** — แผนที่โลก 21 แบบ, ส่งรายงาน PSK Reporter, log + รายละเอียดสถานี
+- **CW นิวรัล (AI)** — ตัวถอดมอร์สแบบ neural network (DeepCW) เป็น
+  sidecar แยก เปิด/ปิดอิสระจากตัวถอด CW เดิม, ตั้งเธรด/ความยาวหน้าต่างได้,
+  ทนสัญญาณอ่อนและ noise สูงมาก (ถอดได้ที่ SNR −6 dB), ข้อความแสดงทั้งบนจอ
+  (หน้าต่างเล็ก + หน้าต่างใหญ่แบ่งครึ่งสองตัวถอด เลื่อนย้อนหลังได้) และบนเว็บ
+- **FT8 สำรอง (ft8ts)** — ตัวถอด FT8/FT4 พอร์ตของ WSJT-X v3.0.1 เป็น sidecar
+  node แยก เปิดคู่หรือแทนตัวเดิมได้, ตั้ง depth 1–3 / threads / ย่านเสียง,
+  ผลถอดรวมเข้า log/แผนที่/เว็บ/PSK Reporter เดียวกันพร้อมป้ายแหล่งถอด (app/alt)
 - **RTTY** (Baudot 45.45), **CW** (ความเร็วเรียนรู้เอง 12–45 wpm),
   **WEFAX/HF-FAX** (บันทึกรูปอัตโนมัติได้, ขยับจุดเริ่มแถวภาพได้),
   **SSTV** (Martin M1/M2, Scottie S1/S2, PD90/120/180/240, Robot 36C/72C —
@@ -163,6 +171,39 @@ static librtlsdr (link แค่ libusb/libudev ของระบบ) — ด�
 คอมเมนต์ต้นไฟล์ `build-rg35xx.sh`; `gpsread` build จาก
 `tools/gpsread.c` (libusb) สำหรับ GPS ที่เคอร์เนลไม่มี driver
 
+## เครดิตและคำขอบคุณ
+
+โปรเจกต์นี้ยืนอยู่บนบ่าของงานโอเพนซอร์สที่ยอดเยี่ยมจำนวนมาก — ขอบคุณผู้พัฒนา
+ทุกท่านที่เผยแพร่งานและเครื่องมือที่ทำให้แอปนี้เป็นไปได้:
+
+| งาน | ผู้พัฒนา | ใช้ทำอะไร | License |
+|---|---|---|---|
+| [rtl-sdr-blog](https://github.com/rtlsdrblog/rtl-sdr-blog) | RTL-SDR Blog (rtlsdrblog) | `rtl_tcp` sidecar สำหรับ dongle USB | GPL-2.0 |
+| [readsb](https://github.com/wiedehopf/readsb) | wiedehopf | อัลกอริทึมถอด Mode S/ADS-B (`demod_2400.c`) ที่พอร์ตมาในตัวแอป | GPL-2.0+ |
+| [ft8_lib](https://github.com/kgoba/ft8_lib) | Karlis Goba (KG7NAB / kgoba) | ตาราง LDPC/CRC ของตัวถอด FT8 ในแอป | MIT/BSL (ดูไฟล์) |
+| [AIS-catcher](https://github.com/jvde-github/AIS-catcher) | jvde-github | สถาปัตยกรรม GMSK demod ของ AIS RF ที่พอร์ตมา | GPL-3.0 |
+| [ft8ts](https://github.com/e04/ft8ts) | e04 | ตัวถอด FT8/FT4 สำรอง (พอร์ต TypeScript ของ WSJT-X v3.0.1) | GPL-3.0 |
+| [DeepCW / deepcw-engine](https://github.com/e04/deepcw-engine) | e04 | โมเดล ONNX + ตัวอย่าง inference ของตัวถอด CW นิวรัล | AGPL-3.0-only |
+| [HamNoise](https://github.com/e04/HamNoise) | e04 | Neural noise reduction sidecar (voice/CW) | AGPL-3.0 |
+| [ONNX Runtime](https://github.com/microsoft/onnxruntime) | Microsoft | runtime รันโมเดล DeepCW ใน sidecar | MIT |
+| [Node.js](https://github.com/nodejs/node) | Node.js contributors / OpenJS Foundation | runtime รัน sidecar ft8ts | Node.js License |
+| [WSJT-X](https://wsjt.sourceforge.io/) | Joe Taylor (K1JT) และทีม | ต้นฉบับอัลกอริทึม FT8/FT4 ที่ ft8ts พอร์ตมา | GPL-3.0 |
+| [Leaflet](https://leafletjs.com/) | Vladimir Agafonkin และผู้ร่วมพัฒนา | แผนที่บนเว็บ | BSD-2 |
+| [OpenStreetMap / ไทล์ผู้ให้บริการ](https://www.openstreetmap.org/copyright) | ผู้ร่วมสมทบ OSM | แผนที่พื้นหลังเรดาร์ (OSM/OpenTopoMap/ESRI) | ODbL / เงื่อนไขผู้ให้บริการ |
+| [country-flag-icons](https://github.com/catamphetamine/country-flag-icons) | catamphetamine | ไอคอนธงประเทศ | MIT |
+| [Sarabun](https://github.com/cadsondemak/Sarabun) | Cadson Demak | ฟอนต์ไทยบนจอเครื่อง | OFL-1.1 |
+| [libusb](https://libusb.info/) | libusb contributors | `gpsread` sidecar สำหรับ GPS ที่เคอร์เนลไม่มี driver | LGPL-2.1 |
+| [tar1090](https://github.com/wiedehopf/tar1090) | wiedehopf | แรงบันดาลใจ/แบบแผนสีและ UI ของจอเรดาร์ ADS-B | GPL-3.0 |
+
+ขอบคุณเป็นพิเศษ: ชุมชนวิทยุสมัครเล่นที่ส่งสัญญาณจริงให้ทดสอบทุกวัน,
+ผู้ดูแล tile server ทุกแห่งที่อนุญาตให้ใช้ฟรี, และทุกคนที่รายงานบั๊กจาก
+สนามจริง — log และคำบรรยายอาการของคุณคือสิ่งที่ทำให้อุปกรณ์พกพาเครื่องนี้
+ถอดรหัสได้แม่นขึ้นเรื่อย ๆ
+
+ข้อความ license ฉบับเต็มของแต่ละงานอยู่ในโฟลเดอร์ [`Licenses/`](Licenses)
+(และ `third_party/*/LICENSE`, `NOTICE` สำหรับส่วนที่ vendored)
+
 ## License
 
-See [Licenses](Licenses).
+See [Licenses](Licenses) — ข้อความ license ฉบับเต็มของงาน third-party
+ทั้งหมดที่แอปนี้ใช้/พอร์ต/รันร่วม (ตารางข้างบน) รวมอยู่ในโฟลเดอร์นั้น
