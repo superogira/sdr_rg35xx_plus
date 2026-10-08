@@ -77,8 +77,13 @@ func (u *UI) DrawFT8Log(entries []FT8Entry, flagDir string) {
 	for i, e := range entries {
 		y := py + 14 + i*lh
 		tf.DrawString(u.img, color.RGBA{150, 180, 150, 255}, px+4, y, e.Time)
-		tf.DrawString(u.img, color.RGBA{120, 200, 255, 255}, px+52, y, fmt.Sprintf("%3.0f", e.SNRDb))
-		tf.DrawString(u.img, color.RGBA{170, 200, 170, 255}, px+76, y, fmt.Sprintf("%4.0f", e.FreqHz))
+		srcCol := color.RGBA{90, 160, 120, 255}
+		if e.Src == "alt" {
+			srcCol = color.RGBA{255, 165, 60, 255}
+		}
+		u.fillBlend(px+50, y-9, 3, 10, srcCol.R, srcCol.G, srcCol.B, 255)
+		tf.DrawString(u.img, color.RGBA{120, 200, 255, 255}, px+58, y, fmt.Sprintf("%3.0f", e.SNRDb))
+		tf.DrawString(u.img, color.RGBA{170, 200, 170, 255}, px+82, y, fmt.Sprintf("%4.0f", e.FreqHz))
 		// The annotation block (flag + text) is right-aligned; the
 		// message is clipped to whatever room is left so the two can
 		// never collide on a long callsign list.
@@ -87,15 +92,10 @@ func (u *UI) DrawFT8Log(entries []FT8Entry, flagDir string) {
 			rightEdge = px + pw - 22 // flag zone
 		}
 		txt := e.Text
-		for tf.TextWidth(txt) > rightEdge-(px+106) && len(txt) > 4 {
+		for tf.TextWidth(txt) > rightEdge-(px+112) && len(txt) > 4 {
 			txt = txt[:len(txt)-2] + "…"
 		}
-		srcCol := color.RGBA{90, 160, 120, 255}
-		if e.Src == "alt" {
-			srcCol = color.RGBA{255, 165, 60, 255}
-		}
-		u.fillBlend(px+98, y-9, 3, 10, srcCol.R, srcCol.G, srcCol.B, 255)
-		tf.DrawString(u.img, ft8TextColor(e.Text), px+106, y, txt)
+		tf.DrawString(u.img, ft8TextColor(e.Text), px+112, y, txt)
 		if e.Anno != "" {
 			aw := tf.TextWidth(e.Anno)
 			// Country flag trails the annotation (after the distance).
@@ -165,13 +165,13 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int, flagDir string) {
 		e := entries[i]
 		yy := y + lh + 22 + (i-top)*lh
 		lineF.DrawString(u.img, gray, x+10, yy, e.Time)
-		lineF.DrawString(u.img, color.RGBA{120, 200, 255, 255}, x+78, yy, fmt.Sprintf("%4.0f dB", e.SNRDb))
-		lineF.DrawString(u.img, color.RGBA{170, 200, 170, 255}, x+140, yy, fmt.Sprintf("%5.0f Hz", e.FreqHz))
 		srcTxt, srcCol := "app", color.RGBA{90, 160, 120, 255}
 		if e.Src == "alt" {
 			srcTxt, srcCol = "alt", color.RGBA{255, 165, 60, 255}
 		}
-		lineF.DrawString(u.img, srcCol, x+205, yy, srcTxt)
+		lineF.DrawString(u.img, srcCol, x+78, yy, srcTxt)
+		lineF.DrawString(u.img, color.RGBA{120, 200, 255, 255}, x+108, yy, fmt.Sprintf("%4.0f dB", e.SNRDb))
+		lineF.DrawString(u.img, color.RGBA{170, 200, 170, 255}, x+170, yy, fmt.Sprintf("%5.0f Hz", e.FreqHz))
 		lineF.DrawString(u.img, ft8TextColor(e.Text), x+240, yy, e.Text)
 		if e.Anno != "" {
 			aw := lineF.TextWidth(e.Anno)

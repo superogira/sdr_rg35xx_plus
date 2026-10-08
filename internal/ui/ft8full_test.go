@@ -37,7 +37,7 @@ func TestFT8MiniWindowFits(t *testing.T) {
 	for _, c := range cases {
 		txtW := tf.TextWidth(c.text)
 		annoW := tf.TextWidth(c.anno)
-		need := 106 + txtW + 8 + annoW + 3 + 18 + 6 // columns..gap..anno..gap..flag..pad
+		need := 112 + txtW + 8 + annoW + 3 + 18 + 6 // columns..gap..anno..gap..flag..pad
 		if need > pw {
 			t.Errorf("%q + %q needs %dpx > %dpx", c.text, c.anno, need, pw)
 		}
