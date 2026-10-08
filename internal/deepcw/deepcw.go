@@ -62,7 +62,7 @@ func Start(exeDir string, threads, window int) *Engine {
 	if err := cmd.Start(); err != nil {
 		return nil
 	}
-	e := &Engine{cmd: cmd, in: stdin, q: make(chan []float64, 64), quit: make(chan struct{}), maxRunes: 4000}
+	e := &Engine{cmd: cmd, in: stdin, q: make(chan []float64, 64), quit: make(chan struct{}), maxRunes: 20000}
 	go e.readLoop(stdout)
 	go e.writeLoop()
 	go func() {

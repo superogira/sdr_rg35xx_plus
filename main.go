@@ -1567,6 +1567,10 @@ func main() {
 	// Scroll position of the big FT8 history window (entries hidden
 	// below the bottom of the view; 0 = newest at the bottom).
 	ft8Scroll := 0
+	cwScroll := 0
+	cwLogDemo := false
+	demoClassic := "CQ CQ DE HS0ABC HS0ABC K RST 599 QTH BANGKOK NAME SOMCHAI TNX FB RIG IC7300 ANT DP PSE K"
+	demoAI := "CQ CQ DE HS0ABC HS0ABC K R 5NN R 5NN BK TNX FER CALL 73 GL SK E E"
 	// Tuning step for left/right (up/down is ×10), settable in the menu.
 	stepSteps := []int64{10, 50, 100, 500, 1_000, 5_000, 10_000, 12_500, 25_000, 100_000}
 	stepHz := int64(12_500)
@@ -2046,6 +2050,7 @@ func main() {
 		uiFreqEdit
 		uiHostEdit
 		uiHostList
+		uiCWLog
 		uiAISLog
 		uiAPRSLog
 		uiSSTV
@@ -2097,6 +2102,9 @@ func main() {
 		uiMode, menuPage = uiMenu, pageFT8Sub
 	case "ft8log":
 		uiMode = uiFT8Log
+	case "cwlog":
+		uiMode = uiCWLog
+		cwLogDemo = true
 	case "stationpage":
 		uiMode, menuPage = uiMenu, pageStation
 	case "aprspage":
@@ -3034,9 +3042,12 @@ func main() {
 			}
 			autoStep(m)
 		case input.Select:
-			// Big scrollable history window (FT8 or, when the AIS RF
-			// decoder runs, the AIS messages).
-			if r.FT8Enabled() || r.FT8TSEnabled() {
+			// Big scrollable history windows: CW (when either Morse
+			// decoder runs), then FT8, then AIS.
+			if r.CWDecodeEnabled() || r.DeepCWEnabled() {
+				cwScroll = 0
+				uiMode = uiCWLog
+			} else if r.FT8Enabled() || r.FT8TSEnabled() {
 				ft8Scroll = 0
 				uiMode = uiFT8Log
 			} else if r.AISRFEnabled() {
@@ -3118,6 +3129,30 @@ func main() {
 				} else {
 					uiMode = uiMain
 				}
+			}
+		case uiCWLog:
+			// D-pad scrolls both CW panels together: up/down one line,
+			// left/right one page (8 lines).
+			page := 8
+			switch b {
+			case input.Up:
+				cwScroll += 1
+			case input.Down:
+				cwScroll -= 1
+			case input.Left:
+				cwScroll += page
+			case input.Right:
+				cwScroll -= page
+			case input.Select:
+				// chain to the FT8 big window when it has content
+				if r.FT8Enabled() || r.FT8TSEnabled() {
+					ft8Scroll = 0
+					uiMode = uiFT8Log
+				} else {
+					uiMode = uiMain
+				}
+			case input.B, input.Start:
+				uiMode = uiMain
 			}
 		case uiFT8Log:
 			// D-pad scrolls the big FT8 history: up/down one line,
@@ -4825,6 +4860,12 @@ func main() {
 				}
 			}
 			u.DrawBookmarkList(labels, bmSel, active, r.Mode().Name)
+		} else if uiMode == uiCWLog {
+			classic, ai := r.CW().Text(), r.DeepCWText()
+			if cwLogDemo {
+				classic, ai = demoClassic, demoAI
+			}
+			u.DrawCWLogFull(classic, ai, cwScroll)
 		} else if uiMode == uiFT8Log {
 			u.DrawFT8LogFull(ft8Log, ft8Scroll, flagDir)
 		} else if uiMode == uiAPRSLog {

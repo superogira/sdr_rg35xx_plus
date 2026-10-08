@@ -19,7 +19,7 @@ import (
 
 const (
 	cwBeatHz   = 700.0
-	cwMaxChars = 160
+	cwMaxChars = 1200 // rolling history; the big CW window reads it
 )
 
 // CWDecoder decodes on-off keyed Morse.

@@ -1,7 +1,10 @@
 package ui
 
 import (
+	"fmt"
 	"image/color"
+
+	"sdr35/internal/i18n"
 )
 
 // DrawCWLog draws the live Morse decode as a small window on the
@@ -112,4 +115,69 @@ func (u *UI) DrawDeepCWLog(text string) {
 		}
 		tf.DrawString(u.img, color.RGBA{255, 230, 190, 255}, x0, y, ln)
 	}
+}
+
+// DrawCWLogFull renders a full-screen, scrollable CW history split into
+// two panels: the classic decoder on the left, the neural (DeepCW)
+// decoder on the right. scroll is how many lines are hidden below the
+// view in BOTH panels (0 = newest at the bottom), matching the FT8 big
+// window's convention.
+func (u *UI) DrawCWLogFull(classic, ai string, scroll int) {
+	lh := 15
+	x, y := 12, 8
+	w := u.W - 24
+	h := u.WaterfallRows - 16
+	if h < 6*lh {
+		return
+	}
+	u.fillBlend(x, y, w, h, 0, 0, 0, 215)
+	u.fillBlend(x, y, w, 2, 200, 60, 60, 255)
+	u.fillBlend(x, y+h-2, w, 2, 200, 60, 60, 255)
+	// centre divider
+	u.fillBlend(x+w/2, y+2, 1, h-4, 90, 90, 90, 255)
+
+	titleF := Face(14, true)
+	lineF := Face(12, false)
+	hintF := Face(11, false)
+	white := color.RGBA{235, 235, 235, 255}
+	gray := color.RGBA{150, 180, 150, 255}
+	orange := color.RGBA{255, 165, 60, 255}
+	green := color.RGBA{180, 230, 180, 255}
+
+	titleF.DrawString(u.img, white, x+10, y+20, "CW")
+	pos := fmt.Sprintf("%d+%d", len(splitLines(classic, 34)), len(splitLines(ai, 34)))
+	lineF.DrawString(u.img, gray, x+w-10-lineF.TextWidth(pos), y+20, pos)
+
+	panel := func(px, pw int, text string, hdr string, hdrCol, txtCol color.RGBA) {
+		lineF.DrawString(u.img, hdrCol, px+6, y+20+lh, hdr)
+		lines := splitLines(text, 34)
+		vis := (h - 3*lh - 14) / lh
+		if vis < 1 {
+			vis = 1
+		}
+		// clamp BEFORE the vis fill: an empty panel must not index
+		// past its (zero) lines
+		bottom := len(lines) - scroll
+		if bottom > len(lines) {
+			bottom = len(lines)
+		}
+		if bottom < 0 {
+			bottom = 0
+		}
+		top := bottom - vis
+		if top < 0 {
+			top = 0
+		}
+		for i := top; i < bottom; i++ {
+			yy := y + 2*lh + 14 + (i-top)*lh
+			ln := lines[i]
+			for lineF.TextWidth(ln) > pw-12 && len(ln) > 4 {
+				ln = ln[:len(ln)-2] + "…"
+			}
+			lineF.DrawString(u.img, txtCol, px+6, yy, ln)
+		}
+	}
+	panel(x+4, w/2-10, classic, "CW", color.RGBA{120, 220, 255, 255}, green)
+	panel(x+w/2+6, w/2-10, ai, "CW AI", orange, color.RGBA{255, 230, 190, 255})
+	hintF.DrawString(u.img, gray, x+10, y+h-12, i18n.T("ft8_scroll"))
 }

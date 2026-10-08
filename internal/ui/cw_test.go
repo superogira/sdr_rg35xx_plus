@@ -15,3 +15,19 @@ func TestCWWindowsDoNotOverlap(t *testing.T) {
 		t.Fatalf("AI window bottom %d overlaps CW window top %d", aiBottom, cwTop)
 	}
 }
+
+// TestDrawCWLogFullNoPanic: empty panels and out-of-range scroll must
+// not index past zero lines (a real crash: bottom=vis with len(lines)=0).
+func TestDrawCWLogFullNoPanic(t *testing.T) {
+	u := New(640, 480)
+	u.DrawCWLogFull("", "", 0)
+	u.DrawCWLogFull("", "", 50)
+	u.DrawCWLogFull("CQ CQ DE HS0ABC", "", 3)
+	u.DrawCWLogFull("", "CQ CQ DE HS0ABC K", 99)
+	long := ""
+	for i := 0; i < 40; i++ {
+		long += "CQ CQ DE HS0ABC HS0ABC K RST 599 "
+	}
+	u.DrawCWLogFull(long, long, 0)
+	u.DrawCWLogFull(long, long, 200)
+}
