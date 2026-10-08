@@ -33,7 +33,7 @@ func TestDownloadFT8TSBundleExtracts(t *testing.T) {
 	if !ft8ts.Available(dir) {
 		t.Fatalf("bundle not available after fetch (status %q)", sidecarStatus("ft8ts"))
 	}
-	for _, f := range []string{"ft8ts-node", "ft8ts.mjs", "ft8ts-worker-node.mjs", "ft8ts_sidecar.mjs"} {
+	for _, f := range []string{"ft8ts-node", "ft8ts.mjs", "ft8ts-worker-node.mjs", "ft8ts_sidecar.mjs", "ft8ts.rev"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("missing %s: %v", f, err)
 		}

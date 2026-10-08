@@ -7,12 +7,20 @@
 //   stdout: one JSON line per decoded message:
 //           {"slot":<ms>,"freq":<Hz>,"snr":<dB>,"msg":"...","kind":<n>,"ms":<decode ms>}
 //           plus quiet-slot heartbeats {"slot":<ms>,"n":0,"ms":<decode ms>}
-//   stderr: "READY ..." and errors
+//   stderr: "READY ...", per-slot heartbeats "slot <ms> n=<n> ms=<dt>",
+//           byte counter every 30 s and errors — enough to diagnose a
+//           silent field failure from the device log alone.
 //
 // Slots are aligned to the wall clock (15 s from the unix epoch, as
 // FT8 transmissions are), buffered, and decoded right after each slot
 // ends. The same FT8History is passed across slots so depth-3 "a7"
 // decoding works like WSJT-X.
+//
+// The stdin byte stream is reassembled through a small carry buffer:
+// TCP chunk boundaries split float32 samples arbitrarily, and dropping
+// the tail bytes of a chunk both corrupts the stream and makes
+// Float32Array(chunk.buffer, chunk.byteOffset) throw when the offset
+// is unaligned.
 //
 // usage: node ft8ts_sidecar.mjs lib.mjs rate depth threads low high
 const { decodeFT8, FT8History } = await import(process.argv[2]);
@@ -29,68 +37,101 @@ const history = new FT8History();
 
 let buf = new Float32Array(0);
 let bufStartMs = 0; // wall-clock ms of buf[0]
+let carry = Buffer.alloc(0); // stdin bytes awaiting a full float32
+let bytesIn = 0;
 
 const slotStartFor = (ms) => Math.floor(ms / SLOT_MS) * SLOT_MS;
 
+setInterval(() => {
+  process.stderr.write(`stream ${(bytesIn / 1e6).toFixed(1)}MB buffered=${(buf.length / rate).toFixed(1)}s\n`);
+}, 30000).unref();
+
 process.stderr.write(`READY ${rate} ${depth} ${threads}\n`);
 
-process.stdin.on("data", (chunk) => {
-  const n = Math.floor(chunk.length / 4);
-  if (n <= 0) return;
-  const f = new Float32Array(chunk.buffer, chunk.byteOffset, n);
-  const now = Date.now();
-  if (buf.length === 0) bufStartMs = now - (n / rate) * 1000;
-  const merged = new Float32Array(buf.length + n);
-  merged.set(buf, 0);
-  merged.set(f, buf.length);
-  buf = merged;
-  const maxKeep = slotSamples * 2;
-  if (buf.length > maxKeep) {
-    const drop = buf.length - maxKeep;
-    buf = buf.slice(drop);
-    bufStartMs += (drop / rate) * 1000;
+const decodeSlot = (doneSlot) => {
+  const aMs = doneSlot - bufStartMs;
+  const bMs = doneSlot + SLOT_MS - bufStartMs;
+  const a = Math.round((aMs / 1000) * rate);
+  const b = Math.round((bMs / 1000) * rate);
+  if (a < 0 || b > buf.length) return false;
+  const samples = buf.slice(a, b);
+  buf = buf.slice(b);
+  bufStartMs += (b / rate) * 1000;
+  const t0 = Date.now();
+  let out = [];
+  try {
+    out = decodeFT8(samples, {
+      sampleRate: rate,
+      freqLow,
+      freqHigh,
+      depth,
+      history,
+      slotStart: doneSlot,
+    });
+  } catch (e) {
+    process.stderr.write(`decode error: ${e}\n`);
   }
-  // decode every 15 s slot that has fully ended and is fully buffered
-  for (;;) {
-    const doneSlot = slotStartFor(Date.now()) - SLOT_MS;
-    const aMs = doneSlot - bufStartMs;
-    const bMs = doneSlot + SLOT_MS - bufStartMs;
-    const a = Math.round((aMs / 1000) * rate);
-    const b = Math.round((bMs / 1000) * rate);
-    if (a < 0 || b > buf.length) break;
-    const samples = buf.slice(a, b);
-    buf = buf.slice(b);
-    bufStartMs += (b / rate) * 1000;
-    const t0 = Date.now();
-    let out = [];
-    try {
-      out = decodeFT8(samples, {
-        sampleRate: rate,
-        freqLow,
-        freqHigh,
-        depth,
-        history,
-        slotStart: doneSlot,
-      });
-    } catch (e) {
-      process.stderr.write(`decode error: ${e}\n`);
+  const dt = Date.now() - t0;
+  for (const d of out) {
+    process.stdout.write(
+      JSON.stringify({
+        slot: doneSlot,
+        freq: d.freq,
+        snr: d.snr,
+        msg: d.msg,
+        kind: d.kind ?? 0,
+        ms: dt,
+      }) + "\n"
+    );
+  }
+  if (out.length === 0) {
+    process.stdout.write(JSON.stringify({ slot: doneSlot, n: 0, ms: dt }) + "\n");
+  }
+  process.stderr.write(`slot ${doneSlot} n=${out.length} ms=${dt}\n`);
+  return true;
+};
+
+process.stdin.on("data", (chunk) => {
+  try {
+    bytesIn += chunk.length;
+    carry = carry.length ? Buffer.concat([carry, chunk]) : chunk;
+    const n = Math.floor(carry.length / 4);
+    if (n <= 0) return;
+    // copy into a fresh aligned ArrayBuffer — the chunk's own buffer
+    // can be unaligned and Float32Array would throw on it
+    const f = new Float32Array(carry.buffer.slice(carry.byteOffset, carry.byteOffset + n * 4));
+    carry = carry.subarray(n * 4);
+    const now = Date.now();
+    if (buf.length === 0) bufStartMs = now - (n / rate) * 1000;
+
+    // Audio-end vs wall clock: a gap (reconnect, chain rebuild, radio
+    // stall) leaves bufStartMs anchored before the hole and the needed
+    // slots never become coverable. Resync to the live edge instead.
+    const lagMs = now - (bufStartMs + (buf.length / rate) * 1000);
+    if (lagMs > 2000 && buf.length > 0) {
+      process.stderr.write(`gap ${((lagMs - (n / rate) * 1000) / 1000).toFixed(1)}s — resync`+String.fromCharCode(10));
+      buf = new Float32Array(0);
+      bufStartMs = now - (n / rate) * 1000;
     }
-    const dt = Date.now() - t0;
-    for (const d of out) {
-      process.stdout.write(
-        JSON.stringify({
-          slot: doneSlot,
-          freq: d.freq,
-          snr: d.snr,
-          msg: d.msg,
-          kind: d.kind ?? 0,
-          ms: dt,
-        }) + "\n"
-      );
+    const merged = new Float32Array(buf.length + n);
+    merged.set(buf, 0);
+    merged.set(f, buf.length);
+    buf = merged;
+    const maxKeep = slotSamples * 2;
+    if (buf.length > maxKeep) {
+      const drop = buf.length - maxKeep;
+      buf = buf.slice(drop);
+      bufStartMs += (drop / rate) * 1000;
     }
-    if (out.length === 0) {
-      process.stdout.write(JSON.stringify({ slot: doneSlot, n: 0, ms: dt }) + "\n");
+    // decode every 15 s slot that has fully ended and is fully
+    // buffered (during fill-up doneSlot predating the buffer start is
+    // normal — waiting; real holes were resynced above)
+    for (;;) {
+      const doneSlot = slotStartFor(Date.now()) - SLOT_MS;
+      if (!decodeSlot(doneSlot)) break;
     }
+  } catch (e) {
+    process.stderr.write(`stdin error: ${e}\n`);
   }
 });
 process.stdin.on("end", () => {

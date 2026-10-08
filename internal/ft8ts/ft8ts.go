@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -42,6 +43,12 @@ type Engine struct {
 	msgs []Msg // undrained decodes
 }
 
+// Rev is the sidecar revision this build expects (written into the
+// bundle's ft8ts.rev by tools/build_ft8ts_bundle.sh). A stale bundle —
+// like the first sidecar, which deadlocked on stream gaps — re-downloads
+// on the next enable instead of running the broken code forever.
+const Rev = "r2"
+
 // Files the bundle installs next to the app binary.
 func bundleFiles(dir string) []string {
 	return []string{
@@ -49,17 +56,19 @@ func bundleFiles(dir string) []string {
 		filepath.Join(dir, "ft8ts.mjs"),
 		filepath.Join(dir, "ft8ts-worker-node.mjs"),
 		filepath.Join(dir, "ft8ts_sidecar.mjs"),
+		filepath.Join(dir, "ft8ts.rev"),
 	}
 }
 
-// Available reports whether the sidecar bundle is installed.
+// Available reports whether the sidecar bundle is installed and current.
 func Available(dir string) bool {
 	for _, f := range bundleFiles(dir) {
 		if st, err := os.Stat(f); err != nil || st.IsDir() {
 			return false
 		}
 	}
-	return true
+	rev, err := os.ReadFile(filepath.Join(dir, "ft8ts.rev"))
+	return err == nil && strings.TrimSpace(string(rev)) == Rev
 }
 
 // Start launches node + sidecar. rate is the monitor audio rate in Hz.
