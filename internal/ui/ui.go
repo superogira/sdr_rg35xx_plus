@@ -47,6 +47,7 @@ type FT8Entry struct {
 	Text   string
 	Anno   string // country/distance annotation
 	FlagCC string // ISO 3166-1 alpha-2 code → flag icon before Anno
+	Src    string // "" = built-in detector, "alt" = ft8ts sidecar
 }
 
 // DrawFT8Log renders a semi-transparent log of the latest FT8 decodes
@@ -89,6 +90,11 @@ func (u *UI) DrawFT8Log(entries []FT8Entry, flagDir string) {
 		for tf.TextWidth(txt) > rightEdge-(px+106) && len(txt) > 4 {
 			txt = txt[:len(txt)-2] + "…"
 		}
+		srcCol := color.RGBA{90, 160, 120, 255}
+		if e.Src == "alt" {
+			srcCol = color.RGBA{255, 165, 60, 255}
+		}
+		u.fillBlend(px+98, y-9, 3, 10, srcCol.R, srcCol.G, srcCol.B, 255)
 		tf.DrawString(u.img, ft8TextColor(e.Text), px+106, y, txt)
 		if e.Anno != "" {
 			aw := tf.TextWidth(e.Anno)
@@ -161,7 +167,12 @@ func (u *UI) DrawFT8LogFull(entries []FT8Entry, scroll int, flagDir string) {
 		lineF.DrawString(u.img, gray, x+10, yy, e.Time)
 		lineF.DrawString(u.img, color.RGBA{120, 200, 255, 255}, x+78, yy, fmt.Sprintf("%4.0f dB", e.SNRDb))
 		lineF.DrawString(u.img, color.RGBA{170, 200, 170, 255}, x+140, yy, fmt.Sprintf("%5.0f Hz", e.FreqHz))
-		lineF.DrawString(u.img, ft8TextColor(e.Text), x+210, yy, e.Text)
+		srcTxt, srcCol := "app", color.RGBA{90, 160, 120, 255}
+		if e.Src == "alt" {
+			srcTxt, srcCol = "alt", color.RGBA{255, 165, 60, 255}
+		}
+		lineF.DrawString(u.img, srcCol, x+205, yy, srcTxt)
+		lineF.DrawString(u.img, ft8TextColor(e.Text), x+240, yy, e.Text)
 		if e.Anno != "" {
 			aw := lineF.TextWidth(e.Anno)
 			// Flag trails the annotation (very end, after the distance).

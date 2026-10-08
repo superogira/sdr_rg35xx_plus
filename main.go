@@ -1926,6 +1926,22 @@ func main() {
 	// Screenshot support: the last presented frame and a transient status
 	// message pointing at the saved file (triggered from the menu).
 	ft8Log := make([]ui.FT8Entry, 0, 100)
+	if os.Getenv("SDR_UI") == "ft8log" {
+		// Dev aid: mixed-source entries so the big window's src column
+		// can be eyeballed (app = built-in, alt = ft8ts sidecar).
+		for k, e := range []struct {
+			t, txt, src string
+		}{
+			{"14:00:15", "CQ HS0JR KO85", ""},
+			{"14:00:30", "CQ 9M2XYZ OJ02", "alt"},
+			{"14:01:00", "HS0JR DU1XXX PK04", ""},
+			{"14:01:15", "CQ E21ABC OK03", "alt"},
+			{"14:02:00", "DU1XXX HS0JR R-07", ""},
+			{"14:02:15", "E21ABC HS0JR RR73", "alt"},
+		} {
+			ft8Log = append(ft8Log, ui.FT8Entry{Time: e.t, SNRDb: -float64(k*3 + 4), FreqHz: 500 + float64(k*137), Text: e.txt, Src: e.src})
+		}
+	}
 	// recentFT8 drives the 6 s duplicate window for decoded messages.
 	recentFT8 := make([]ft8Seen, 0, 40)
 	// gridCache remembers each station's grid from their CQ/contact
@@ -2077,6 +2093,8 @@ func main() {
 		uiMode, menuPage = uiMenu, pageFT8
 	case "ft8subpage":
 		uiMode, menuPage = uiMenu, pageFT8Sub
+	case "ft8log":
+		uiMode = uiFT8Log
 	case "stationpage":
 		uiMode, menuPage = uiMenu, pageStation
 	case "aprspage":
@@ -4257,8 +4275,8 @@ func main() {
 			if toks := strings.Fields(m.Text); len(toks) >= 2 {
 				isoCC = geo.CountryISO(toks[1])
 			}
-			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: m.Text, Anno: anno, FlagCC: isoCC})
-			webSrv.AddFT8(web.FT8Line{Time: now.Format("15:04:05"), SNR: m.SNRDb, Hz: m.FreqHz, Text: m.Text, Anno: anno})
+			ft8Log = append(ft8Log, ui.FT8Entry{Time: now.Format("15:04:05"), SNRDb: m.SNRDb, FreqHz: m.FreqHz, Text: m.Text, Anno: anno, FlagCC: isoCC, Src: m.Src})
+			webSrv.AddFT8(web.FT8Line{Time: now.Format("15:04:05"), SNR: m.SNRDb, Hz: m.FreqHz, Text: m.Text, Anno: anno, Src: m.Src})
 			if len(ft8Log) > 100 {
 				ft8Log = ft8Log[len(ft8Log)-100:]
 			}

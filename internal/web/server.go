@@ -42,6 +42,7 @@ type FT8Line struct {
 	Hz   float64 `json:"hz"`
 	Text string  `json:"text"`
 	Anno string  `json:"anno"`
+	Src  string  `json:"src"`
 }
 
 // AISLine is one decoded AIS message (RF or NMEA) for the web tables.

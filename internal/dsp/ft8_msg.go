@@ -15,6 +15,7 @@ type FT8Message struct {
 	Valid  bool
 	SNRDb  float64
 	FreqHz float64
+	Src    string // "" = built-in detector, "alt" = ft8ts sidecar
 }
 
 const (

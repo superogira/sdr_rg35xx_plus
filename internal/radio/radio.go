@@ -1746,22 +1746,35 @@ func (r *Radio) FT8TSParams() (depth, threads, low, high int) {
 	return r.f8tsDepth, r.f8tsTh, r.f8tsLow, r.f8tsHigh
 }
 
-// SetFT8TSParams tunes the sidecar (applies on next enable).
+// SetFT8TSParams tunes the sidecar. While it runs, the process is
+// restarted with the new values (a running sidecar cannot change its
+// own depth/threads): the restart is fast (~0.5 s session load) and the
+// next slot decodes with the new settings.
 func (r *Radio) SetFT8TSParams(depth, threads, low, high int) {
 	r.mu.Lock()
-	if depth >= 1 && depth <= 3 {
+	changed := false
+	if depth >= 1 && depth <= 3 && depth != r.f8tsDepth {
 		r.f8tsDepth = depth
+		changed = true
 	}
-	if threads >= 1 && threads <= 4 {
+	if threads >= 1 && threads <= 4 && threads != r.f8tsTh {
 		r.f8tsTh = threads
+		changed = true
 	}
-	if low >= 50 && low <= 3000 {
+	if low >= 50 && low <= 3000 && low != r.f8tsLow {
 		r.f8tsLow = low
+		changed = true
 	}
-	if high >= 500 && high <= 4000 {
+	if high >= 500 && high <= 4000 && high != r.f8tsHigh {
 		r.f8tsHigh = high
+		changed = true
 	}
+	on := r.f8tsOn
 	r.mu.Unlock()
+	if changed && on {
+		r.SetFT8TSEnabled(false)
+		r.SetFT8TSEnabled(true)
+	}
 }
 
 // SetFT8TSEnabled starts/stops the ft8ts sidecar. Its decodes merge
@@ -2088,6 +2101,7 @@ func (r *Radio) FT8TakeMessages() []dsp.FT8Message {
 			Valid:  true,
 			SNRDb:  m.SNR,
 			FreqHz: m.Freq,
+			Src:    "alt",
 		})
 	}
 	return out

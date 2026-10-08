@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,6 +50,21 @@ type Engine struct {
 // on the next enable instead of running the broken code forever.
 const Rev = "r3"
 
+// nodePath finds the bundled runtime: plain name on Linux (the only
+// production target), .exe alongside for dev machines on Windows.
+func nodePath(dir string) string {
+	p := filepath.Join(dir, "ft8ts-node")
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	if runtime.GOOS == "windows" {
+		if pe := p + ".exe"; func() bool { _, err := os.Stat(pe); return err == nil }() {
+			return pe
+		}
+	}
+	return p
+}
+
 // Files the bundle installs next to the app binary.
 func bundleFiles(dir string) []string {
 	return []string{
@@ -79,9 +95,12 @@ func Start(dir string, rate, depth, threads, low, high int) *Engine {
 		fmt.Fprintf(os.Stderr, "ft8ts: bundle incomplete in %s\n", dir)
 		return nil
 	}
-	node := filepath.Join(dir, "ft8ts-node")
+	node := nodePath(dir)
 	side := filepath.Join(dir, "ft8ts_sidecar.mjs")
-	lib := filepath.Join(dir, "ft8ts.mjs")
+	// node's dynamic import() needs a file:// URL on Windows (a bare
+	// C:\ path is an unsupported scheme); the URL form works on Linux
+	// too.
+	lib := "file://" + filepath.ToSlash(filepath.Join(dir, "ft8ts.mjs"))
 	cmd := exec.Command(node, side, lib,
 		strconv.Itoa(rate), strconv.Itoa(depth), strconv.Itoa(threads),
 		strconv.Itoa(low), strconv.Itoa(high))

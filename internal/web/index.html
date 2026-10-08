@@ -310,7 +310,7 @@ tr:hover td { background:var(--row-hover); }
         <h3 style="margin:8px 0 4px" data-i18n="aprsTxH">ประวัติส่ง</h3>
         <div style="max-height:150px;overflow-y:auto"><table><tbody id="aprsTx"></tbody></table></div>
       </div>
-      <div id="pane-ft8" hidden><table><thead><tr><th data-i18n="time">เวลา</th><th>SNR</th><th>Hz</th><th data-i18n="msg">ข้อความ</th><th data-i18n="ctry">ประเทศ/ระยะ</th></tr></thead><tbody id="ft8b"></tbody></table></div>
+      <div id="pane-ft8" hidden><table><thead><tr><th data-i18n="time">เวลา</th><th>SNR</th><th>Hz</th><th>src</th><th data-i18n="msg">ข้อความ</th><th data-i18n="ctry">ประเทศ/ระยะ</th></tr></thead><tbody id="ft8b"></tbody></table></div>
       <div id="pane-ais" hidden><table><thead><tr><th data-i18n="time">เวลา</th><th>ch</th><th>dB</th><th data-i18n="msg">ข้อความ</th></tr></thead><tbody id="aisb"></tbody></table></div>
       <div id="pane-tgt"><table><thead><tr><th data-i18n="kind">ชนิด</th><th data-i18n="name">ชื่อ/ทะเบียน</th><th data-i18n="pos">พิกัด</th><th data-i18n="altspd">สูง/เร็ว</th><th data-i18n="dir">ทิศ</th><th data-i18n="age">อายุ</th></tr></thead><tbody id="tgtb"></tbody></table></div>
     </div>
@@ -683,7 +683,7 @@ async function poll() {
     if (tab === 'ft8') {
       const rows = await api('/api/ft8');
       $('ft8b').innerHTML = rows.slice().reverse().map(r =>
-        `<tr><td>${r.time}</td><td>${r.snr.toFixed(0)}</td><td>${r.hz.toFixed(0)}</td><td>${esc(r.text)}</td><td>${esc(r.anno)}</td></tr>`).join('');
+        `<tr><td>${r.time}</td><td>${r.snr.toFixed(0)}</td><td>${r.hz.toFixed(0)}</td><td><span style="color:${r.src==='alt'?'#ffa53c':'#5aa078'};font-weight:600">${r.src==='alt'?'alt':'app'}</span></td><td>${esc(r.text)}</td><td>${esc(r.anno)}</td></tr>`).join('');
     } else if (tab === 'ais') {
       const rows = await api('/api/ais');
       $('aisb').innerHTML = rows.slice().reverse().map(r =>
