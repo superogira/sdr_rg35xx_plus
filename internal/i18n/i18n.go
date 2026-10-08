@@ -156,6 +156,7 @@ var strings = map[string][2]string{
 	"nr_voice":           {"เสียงพูด", "Voice"},
 	"nr_cw":              {"CW", "CW"},
 	"nr_missing":         {"(ไม่มีไฟล์ hamnoise)", "(hamnoise missing)"},
+	"nr_fetching":        {"กำลังดาวน์โหลด hamnoise...", "downloading hamnoise..."},
 	"m_sstvview":         {"จอ SSTV", "SSTV screen"},
 	"m_sstvclear":        {"ล้างภาพ SSTV", "Clear SSTV"},
 	"wefax_hint":         {"Y บันทึก · MENU+L1/R1 ขยับแถว", "Y save · MENU+L1/R1 shift line"},

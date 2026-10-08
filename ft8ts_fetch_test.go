@@ -27,9 +27,11 @@ func TestDownloadFT8TSBundleExtracts(t *testing.T) {
 	defer srv.Close()
 
 	dir := t.TempDir()
-	fetchFT8TSBundle(srv.URL, dir) // wrapper retries and clears status
+	if err := fetchFT8TSBundle(srv.URL, dir); err != nil {
+		t.Fatalf("fetch: %v (status %q)", err, sidecarStatus("ft8ts"))
+	}
 	if !ft8ts.Available(dir) {
-		t.Fatalf("bundle not available after fetch (status %q)", ft8tsDLStatus)
+		t.Fatalf("bundle not available after fetch (status %q)", sidecarStatus("ft8ts"))
 	}
 	for _, f := range []string{"ft8ts-node", "ft8ts.mjs", "ft8ts-worker-node.mjs", "ft8ts_sidecar.mjs"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
@@ -42,8 +44,8 @@ func TestDownloadFT8TSBundleExtracts(t *testing.T) {
 		}
 	}
 	// status must have been set during the download and left clean
-	if ft8tsDLStatus != "" {
-		t.Fatalf("status left dirty: %q", ft8tsDLStatus)
+	if v := sidecarStatus("ft8ts"); v != "" {
+		t.Fatalf("status left dirty: %q", v)
 	}
 }
 
@@ -52,7 +54,7 @@ func TestDownloadFT8TSBundleExtracts(t *testing.T) {
 func TestDownloadFT8TSBundleHTTP404(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	defer srv.Close()
-	if err := downloadFT8TSBundle(srv.URL, t.TempDir()); err == nil {
+	if err := fetchTarBundle("ft8ts", srv.URL+"/x.tar.gz", t.TempDir(), ft8ts.Available); err == nil {
 		t.Fatal("404 did not error")
 	}
 }

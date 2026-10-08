@@ -332,108 +332,111 @@ func fetchSidecar(base, dir, name string) {
 	fmt.Fprintf(os.Stderr, "sidecar: installed %s (%d bytes)\n", name, len(bin))
 }
 
-// fetchDeepCWBundle downloads the DeepCW sidecar bundle (sidecar
-// binary + ONNX Runtime libs + model, ~38 MB gz) next to the app binary
-// on first enable. The model is far too large for the OTA package, so
-// it is fetched lazily — exactly once, and only for users who turn the
-// neural CW decoder on. Best effort: any failure leaves the feature
-// reporting "not installed".
-func fetchDeepCWBundle(base, dir string) {
-	dst := filepath.Join(dir, "deepcw")
-	if deepcw.Available(dir) {
-		return
-	}
-	resp, err := updateGet(base+"/deepcw-bundle-linux-arm64.tar.gz", 15*time.Minute)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "deepcw bundle: fetch failed: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		fmt.Fprintf(os.Stderr, "deepcw bundle: HTTP %d\n", resp.StatusCode)
-		return
-	}
-	zr, err := gzip.NewReader(io.LimitReader(resp.Body, 200<<20))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "deepcw bundle: gzip: %v\n", err)
-		return
-	}
-	tr := tar.NewReader(zr)
-	n := 0
-	for {
-		h, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "deepcw bundle: tar: %v\n", err)
-			return
-		}
-		name := filepath.Base(h.Name) // never honour paths from the archive
-		out := filepath.Join(dir, name)
-		f, err := os.OpenFile(out+".tmp", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "deepcw bundle: open %s: %v\n", name, err)
-			return
-		}
-		if _, err := io.Copy(f, io.LimitReader(tr, 64<<20)); err != nil {
-			f.Close()
-			os.Remove(out + ".tmp")
-			fmt.Fprintf(os.Stderr, "deepcw bundle: copy %s: %v\n", name, err)
-			return
-		}
-		f.Close()
-		if err := os.Rename(out+".tmp", out); err != nil {
-			fmt.Fprintf(os.Stderr, "deepcw bundle: rename %s: %v\n", name, err)
-			return
-		}
-		n++
-	}
-	fmt.Fprintf(os.Stderr, "deepcw bundle: installed %d files\n", n)
-	_ = dst
+// sidecarDLStatus carries live download states to menu rows (rows
+// render their value every frame, so a slow first-enable download
+// shows progress on the row itself instead of a dead button).
+var sidecarDLStatus = map[string]string{}
+
+func setSidecarStatus(key, f string, a ...any) {
+	v := fmt.Sprintf(f, a...)
+	sidecarDLStatus[key] = v
+	fmt.Fprintf(os.Stderr, "%s: %s\n", key, v)
 }
 
-// fetchFT8TSBundle downloads the ft8ts sidecar bundle (node runtime +
-// ft8ts library + sidecar script, ~30 MB gz) next to the app binary on
-// first enable. GPL-3.0 code stays in the sidecar process; the bundle
-// is far too large for the OTA package, so it is fetched lazily.
-// ft8tsDLStatus carries the live download state to the menu row (the
-// row value renders it every frame, so a slow first-enable download
-// shows progress instead of looking dead).
-var ft8tsDLStatus string
+func sidecarStatus(key string) string { return sidecarDLStatus[key] }
 
-func setFT8TSStatus(f string, a ...any) {
-	ft8tsDLStatus = fmt.Sprintf(f, a...)
-	fmt.Fprintf(os.Stderr, "ft8ts: %s\n", ft8tsDLStatus)
-}
-
-// fetchFT8TSBundle downloads the ft8ts bundle with retries and progress.
-// Field networks (the device log showed 40% sample drops) need far more
-// than one 300 s attempt for ~40 MB.
-func fetchFT8TSBundle(base, dir string) {
-	if ft8ts.Available(dir) {
-		return
+// fetchHamnoise downloads the small hamnoise sidecar binary (plain
+// gzip, not a tar) with the same retry/row-progress treatment, for
+// installs where the OTA-time fetch missed it or the file was removed.
+func fetchHamnoise(base, dir string) error {
+	dst := filepath.Join(dir, "hamnoise")
+	if st, err := os.Stat(dst); err == nil && !st.IsDir() {
+		return nil
 	}
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
-		setFT8TSStatus("dl %d/3...", attempt)
-		err := downloadFT8TSBundle(base, dir)
+		setSidecarStatus("nr", "dl %d/3...", attempt)
+		err := func() error {
+			resp, err := updateGet(base+"/hamnoise-linux-arm64.gz", 10*time.Minute)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != 200 {
+				return fmt.Errorf("HTTP %d", resp.StatusCode)
+			}
+			zr, err := gzip.NewReader(io.LimitReader(resp.Body, 8<<20))
+			if err != nil {
+				return err
+			}
+			bin, err := io.ReadAll(io.LimitReader(zr, 8<<20))
+			if err != nil {
+				return err
+			}
+			if len(bin) < 100_000 {
+				return fmt.Errorf("bad payload (%d bytes)", len(bin))
+			}
+			tmp := dst + ".tmp"
+			if err := os.WriteFile(tmp, bin, 0o755); err != nil {
+				return err
+			}
+			if err := os.Rename(tmp, dst); err != nil {
+				os.Remove(tmp)
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "sidecar: installed hamnoise (%d bytes)"+string(rune(10)), len(bin))
+			return nil
+		}()
 		if err == nil {
-			setFT8TSStatus("")
-			return
+			setSidecarStatus("nr", "")
+			return nil
 		}
 		lastErr = err
-		fmt.Fprintf(os.Stderr, "ft8ts bundle: attempt %d failed: %v\n", attempt, err)
+		fmt.Fprintf(os.Stderr, "hamnoise: attempt %d failed: %v"+string(rune(10)), attempt, err)
 	}
 	msg := lastErr.Error()
 	if len(msg) > 24 {
 		msg = msg[:24]
 	}
-	setFT8TSStatus("ERR %s", msg)
+	setSidecarStatus("nr", "ERR %s", msg)
+	return lastErr
 }
 
-func downloadFT8TSBundle(base, dir string) error {
-	resp, err := updateGet(base+"/ft8ts-bundle-linux-arm64.tar.gz", 15*time.Minute)
+func fetchFT8TSBundle(base, dir string) error {
+	return fetchTarBundle("ft8ts", base+"/ft8ts-bundle-linux-arm64.tar.gz", dir, ft8ts.Available)
+}
+
+func fetchDeepCWBundle(base, dir string) error {
+	return fetchTarBundle("deepcw", base+"/deepcw-bundle-linux-arm64.tar.gz", dir, deepcw.Available)
+}
+
+// fetchTarBundle downloads a sidecar tar.gz with retries and row
+// progress under `key`; done reports when the bundle is usable.
+func fetchTarBundle(key, url, dir string, done func(string) bool) error {
+	if done(dir) {
+		return nil
+	}
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		setSidecarStatus(key, "dl %d/3...", attempt)
+		err := downloadTarBundle(key, url, dir)
+		if err == nil {
+			setSidecarStatus(key, "")
+			return nil
+		}
+		lastErr = err
+		fmt.Fprintf(os.Stderr, "%s bundle: attempt %d failed: %v"+string(rune(10)), key, attempt, err)
+	}
+	msg := lastErr.Error()
+	if len(msg) > 24 {
+		msg = msg[:24]
+	}
+	setSidecarStatus(key, "ERR %s", msg)
+	return lastErr
+}
+
+func downloadTarBundle(key, url, dir string) error {
+	resp, err := updateGet(url, 15*time.Minute)
 	if err != nil {
 		return err
 	}
@@ -461,7 +464,7 @@ func downloadFT8TSBundle(base, dir string) error {
 				pct := int(got * 100 / total)
 				if pct != lastPct && pct%2 == 0 {
 					lastPct = pct
-					setFT8TSStatus("%d%% %.1fMB", pct, float64(got)/(1<<20))
+					setSidecarStatus(key, "%d%% %.1fMB", pct, float64(got)/(1<<20))
 				}
 			}
 		}
@@ -1375,10 +1378,13 @@ func main() {
 		aisLogMu.Unlock()
 	})
 	r.SetAPRSFreq(aprsFreq)
+	// Sidecar dirs must be set regardless of saved state — the
+	// availability checks read them, and an empty dir made an
+	// INSTALLED hamnoise show "missing".
+	if ex, err := os.Executable(); err == nil {
+		r.SetNRDir(filepath.Dir(ex))
+	}
 	if v := cfg["nrnn"]; v == "voice" || v == "cw" {
-		if ex, err := os.Executable(); err == nil {
-			r.SetNRDir(filepath.Dir(ex))
-		}
 		r.SetNREnabled(true, v)
 	}
 	if cfg["sstv"] == "on" {
@@ -1429,6 +1435,9 @@ func main() {
 			d, t, _, _ := r.FT8TSParams()
 			r.SetFT8TSParams(d, t, lo, hi)
 		}
+	}
+	if ex, err := os.Executable(); err == nil {
+		r.SetFT8TSDir(filepath.Dir(ex))
 	}
 	if cfg["ft8ts"] == "on" && r.FT8TSAvailable() {
 		r.SetFT8TSEnabled(true)
@@ -2520,10 +2529,29 @@ func main() {
 			if next == "" {
 				r.SetNREnabled(false, "")
 				cfg["nrnn"] = "off"
+				setSidecarStatus("nr", "")
 			} else if r.SetNREnabled(true, next) {
 				cfg["nrnn"] = next
+				setSidecarStatus("nr", "")
+			} else if !r.NRAvailable() {
+				// fetch the sidecar in the background, then apply the
+				// mode the press selected (progress shows on the row)
+				want := next
+				setSidecarStatus("nr", "%s", i18n.T("nr_fetching"))
+				go func() {
+					fetchHamnoise(defaultUpdateBase, filepath.Dir(mustExe()))
+					if strings.HasPrefix(sidecarStatus("nr"), "ERR") {
+						return
+					}
+					if r.SetNREnabled(true, want) {
+						cfg["nrnn"] = want
+						saveNow()
+					} else {
+						setSidecarStatus("nr", "%s", i18n.T("nr_missing"))
+					}
+				}()
 			} else {
-				setMsg(i18n.T("nr_missing"))
+				setSidecarStatus("nr", "%s", i18n.T("nr_missing"))
 			}
 			saveNow()
 		case menuAPRSBeacon:
@@ -2650,29 +2678,34 @@ func main() {
 			if r.DeepCWEnabled() {
 				r.SetDeepCWEnabled(false)
 				cfg["deepcw"] = "off"
+				setSidecarStatus("deepcw", "")
 				saveNow()
 				break
 			}
 			if !r.DeepCWAvailable() {
-				// First enable: fetch the ~40 MB sidecar bundle in the
-				// background, then start it.
-				setMsg(i18n.T("deepcw_fetching"))
+				// First enable: fetch the bundle in the background with
+				// the progress on this row, then start it.
+				setSidecarStatus("deepcw", "%s", i18n.T("deepcw_fetching"))
 				go func() {
 					fetchDeepCWBundle(defaultUpdateBase, filepath.Dir(mustExe()))
+					if strings.HasPrefix(sidecarStatus("deepcw"), "ERR") {
+						return // the row keeps the error; press to retry
+					}
 					if r.SetDeepCWEnabled(true) {
 						cfg["deepcw"] = "on"
 						saveNow()
 					} else {
-						setMsg(i18n.T("deepcw_missing"))
+						setSidecarStatus("deepcw", "%s", i18n.T("deepcw_missing"))
 					}
 				}()
 				break
 			}
+			setSidecarStatus("deepcw", "")
 			if r.SetDeepCWEnabled(true) {
 				cfg["deepcw"] = "on"
 			} else {
 				cfg["deepcw"] = "off"
-				setMsg(i18n.T("deepcw_missing"))
+				setSidecarStatus("deepcw", "%s", i18n.T("deepcw_missing"))
 			}
 			saveNow()
 		case menuDeepCWThreads:
@@ -2703,22 +2736,22 @@ func main() {
 				break
 			}
 			if !r.FT8TSAvailable() {
-				setFT8TSStatus("%s", i18n.T("ft8ts_fetching"))
+				setSidecarStatus("ft8ts", "%s", i18n.T("ft8ts_fetching"))
 				go func() {
 					fetchFT8TSBundle(defaultUpdateBase, filepath.Dir(mustExe()))
-					if strings.HasPrefix(ft8tsDLStatus, "ERR") {
+					if strings.HasPrefix(sidecarStatus("ft8ts"), "ERR") {
 						return // the row keeps the error; press again to retry
 					}
 					if r.SetFT8TSEnabled(true) {
 						cfg["ft8ts"] = "on"
 						saveNow()
 					} else {
-						setFT8TSStatus("%s", i18n.T("ft8ts_missing"))
+						setSidecarStatus("ft8ts", "%s", i18n.T("ft8ts_missing"))
 					}
 				}()
 				break
 			}
-			ft8tsDLStatus = ""
+			setSidecarStatus("ft8ts", "")
 			if r.SetFT8TSEnabled(true) {
 				cfg["ft8ts"] = "on"
 			} else {
@@ -3870,10 +3903,17 @@ func main() {
 		if diagOn && time.Since(lastDiagUpload) >= 60*time.Second {
 			lastDiagUpload = time.Now()
 			go func() {
-				logPath := filepath.Join(filepath.Dir(mustExe()), "..", "SDRg35xx-logfile.txt")
-				data, err := os.ReadFile(logPath)
+				logDir := filepath.Join(filepath.Dir(mustExe()), "..")
+				data, err := os.ReadFile(filepath.Join(logDir, "SDRg35xx-logfile.txt"))
 				if err != nil {
 					return
+				}
+				// The launcher rotates the log on every launch (one
+				// .old copy), so a relaunch right after a bug erases
+				// the evidence from the uploaded file — include the
+				// previous session too.
+				if old, err := os.ReadFile(filepath.Join(logDir, "SDRg35xx-logfile.txt.old")); err == nil {
+					data = append(append(old, []byte("\n=== [previous session] ===\n")...), data...)
 				}
 				resp, err := http.Post("https://downloads.catgg.net/sdrg35xx/upload.php", "text/plain", bytes.NewReader(data))
 				if err != nil {
@@ -4396,6 +4436,9 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_cwdec"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.CWDecodeEnabled()]},
 					ui.MenuItem{Label: i18n.T("m_cwclear"), Value: i18n.T("press_a")},
 					func() ui.MenuItem {
+						if v := sidecarStatus("deepcw"); v != "" {
+							return ui.MenuItem{Label: i18n.T("m_deepcw"), Value: v}
+						}
 						if !r.DeepCWAvailable() {
 							return ui.MenuItem{Label: i18n.T("m_deepcw"), Value: i18n.T("deepcw_missing")}
 						}
@@ -4417,8 +4460,8 @@ func main() {
 					}()},
 					ui.MenuItem{Label: i18n.T("m_deepcwclear"), Value: i18n.T("press_a")},
 					func() ui.MenuItem {
-						if ft8tsDLStatus != "" {
-							return ui.MenuItem{Label: i18n.T("m_ft8ts"), Value: ft8tsDLStatus}
+						if v := sidecarStatus("ft8ts"); v != "" {
+							return ui.MenuItem{Label: i18n.T("m_ft8ts"), Value: v}
 						}
 						if !r.FT8TSAvailable() {
 							return ui.MenuItem{Label: i18n.T("m_ft8ts"), Value: i18n.T("ft8ts_missing")}
@@ -4482,6 +4525,9 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_hp"), Value: hpVal},
 					ui.MenuItem{Label: i18n.T("m_lp"), Value: lpVal},
 					func() ui.MenuItem {
+						if v := sidecarStatus("nr"); v != "" {
+							return ui.MenuItem{Label: i18n.T("m_nrnn"), Value: v}
+						}
 						on, mode := r.NREnabled()
 						v := i18n.T("off")
 						if on {
