@@ -655,6 +655,7 @@ const (
 	menuDeepCWWindow
 	menuDeepCWClear
 	menuFT8Sub
+	menuFT8Sens
 	menuFT8TS
 	menuFT8TSDepth
 	menuFT8TSThreads
@@ -725,7 +726,7 @@ var pageItems = [][]int{
 
 	{menuCall, menuGrid, menuAnt, menuRig, menuPSK},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuShot, menuUpdate},
-	{menuFT8, menuBands, menuMap, menuFT8TS, menuFT8TSDepth, menuFT8TSThreads, menuFT8TSBand},
+	{menuFT8, menuFT8Sens, menuBands, menuMap, menuFT8TS, menuFT8TSDepth, menuFT8TSThreads, menuFT8TSBand},
 }
 
 // The flat 16-row menu outgrew the screen, so it is now subpages
@@ -1524,6 +1525,7 @@ func main() {
 	r.SetWefaxEnabled(wefaxOn)
 	r.SetWefaxAutoSave(wefaxAuto)
 	r.SetCWDecodeEnabled(cwDec)
+	r.SetFT8Sensitivity(cfg["ft8sens"] == "high")
 	if bwv, ok := cfg[fmt.Sprintf("bw.%s", r.Mode().Name)]; ok {
 		if f, err := strconv.ParseFloat(bwv, 64); err == nil {
 			r.SetBandwidth(f)
@@ -2961,6 +2963,11 @@ func main() {
 		case menuFT8Sub:
 			menuPage = pageFT8Sub
 			menuSel = 0
+		case menuFT8Sens:
+			high := cfg["ft8sens"] != "high"
+			cfg["ft8sens"] = map[bool]string{true: "high", false: "normal"}[high]
+			r.SetFT8Sensitivity(high)
+			saveNow()
 		case menuMap:
 			mapSel, mapDetail = -1, false
 			uiMode = uiMap
@@ -4500,6 +4507,7 @@ func main() {
 			case pageFT8Sub:
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_ft8"), Value: ft8Label(r.FT8Enabled())},
+					ui.MenuItem{Label: i18n.T("m_ft8sens"), Value: map[bool]string{true: i18n.T("high"), false: i18n.T("normal")}[cfg["ft8sens"] == "high"]},
 					ui.MenuItem{Label: i18n.T("m_bands"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_map"), Value: i18n.T("press_a")},
 					func() ui.MenuItem {
@@ -5485,7 +5493,7 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 		fmt.Fprintf(f, "rtlsrvport=%s\n", v)
 	}
 
-	for _, k := range []string{"deepcw", "deepcwth", "deepcwwin", "ft8ts", "ft8tsdepth", "ft8tsth", "ft8tsband"} {
+	for _, k := range []string{"deepcw", "deepcwth", "deepcwwin", "ft8ts", "ft8tsdepth", "ft8tsth", "ft8tsband", "ft8sens"} {
 		if v, ok := cfg[k]; ok {
 			fmt.Fprintf(f, "%s=%s\n", k, v)
 		}

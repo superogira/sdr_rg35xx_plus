@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"sdr35/internal/dsp"
+	"sdr35/internal/ft8ts"
 )
 
 // TestFT8TSParamChangeRestarts: changing depth/threads/band while the
@@ -45,7 +46,7 @@ func TestFT8TSParamChangeRestarts(t *testing.T) {
 	cp(filepath.Join(repo, "third_party", "ft8ts", "ft8ts.mjs"), filepath.Join(dir, "ft8ts.mjs"))
 	cp(filepath.Join(repo, "third_party", "ft8ts", "ft8ts-worker-node.mjs"), filepath.Join(dir, "ft8ts-worker-node.mjs"))
 	os.WriteFile(filepath.Join(dir, "ft8ts_sidecar.mjs"), side, 0o755)
-	os.WriteFile(filepath.Join(dir, "ft8ts.rev"), []byte("r3\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "ft8ts.rev"), []byte(ft8ts.Rev+"\n"), 0o644)
 
 	r := NewDemo(dsp.ModeUSB, nil)
 	r.SetFT8TSDir(dir)

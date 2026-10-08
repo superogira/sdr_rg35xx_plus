@@ -59,6 +59,13 @@ type FT8Detector struct {
 	// decode only survives there for a scan or two — polling it at
 	// 15 s intervals missed nearly every message.
 	pending []FT8Message
+
+	// Tuning knobs (SetFT8Tuning): candidate search threshold/cap and
+	// the per-slot decode budget. Defaults reproduce the historical
+	// behaviour exactly.
+	candCap  int
+	minScore int
+	budget   int
 }
 
 const ft8RingSamples = 8000 * 15
@@ -72,7 +79,38 @@ var (
 )
 
 func NewFT8Detector() *FT8Detector {
-	return &FT8Detector{wf: newFT8Waterfall(), wfPending: make([]float64, 0, 1024)}
+	return &FT8Detector{
+		wf:        newFT8Waterfall(),
+		wfPending: make([]float64, 0, 1024),
+		candCap:   220,
+		minScore:  7,
+		budget:    10,
+	}
+}
+
+// SetFT8Tuning adjusts the built-in decoder's search: minScore is the
+// Costas sync threshold (lower = more candidates, weaker signals, more
+// CPU), candCap bounds the candidate list, budget bounds decodes per
+// slot. Zero/negative values keep the current setting.
+func (d *FT8Detector) SetFT8Tuning(minScore, candCap, budget int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if minScore >= 1 && minScore <= 20 {
+		d.minScore = minScore
+	}
+	if candCap >= 20 && candCap <= 600 {
+		d.candCap = candCap
+	}
+	if budget >= 1 && budget <= 40 {
+		d.budget = budget
+	}
+}
+
+// FT8Tuning reports the current search settings.
+func (d *FT8Detector) FT8Tuning() (minScore, candCap, budget int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.minScore, d.candCap, d.budget
 }
 
 func (d *FT8Detector) SetEnabled(on bool) {
@@ -146,7 +184,7 @@ func (d *FT8Detector) Process() {
 	d.mu.Unlock()
 
 	var okResults, failResults []FT8Detection
-	cands := wf.findCandidates(220, 7)
+	cands := wf.findCandidates(d.candCap, d.minScore)
 	// Candidates come back sorted by sync score (strongest first), so
 	// with the lowered threshold the noise candidates cannot crowd the
 	// real signals out of the result list — the first failure of the
@@ -154,7 +192,7 @@ func (d *FT8Detector) Process() {
 	// the same transmission; queue each distinct message once.
 	seen := map[string]bool{}
 	for _, c := range cands {
-		if len(okResults) >= 10 {
+		if len(okResults) >= d.budget {
 			break // decode budget spent on the strongest candidates
 		}
 		llr := make([]float64, 174)

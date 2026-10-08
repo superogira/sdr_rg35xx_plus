@@ -176,6 +176,7 @@ func TestPageFT8SubRenderMatchesDispatch(t *testing.T) {
 	keyRe := regexp.MustCompile(`i18n\.T\("(m_[a-z0-9]+)"\)`)
 	keyToID := map[string]string{
 		"m_ft8":        "menuFT8",
+		"m_ft8sens":    "menuFT8Sens",
 		"m_bands":      "menuBands",
 		"m_map":        "menuMap",
 		"m_ft8ts":      "menuFT8TS",
@@ -194,7 +195,7 @@ func TestPageFT8SubRenderMatchesDispatch(t *testing.T) {
 			render = append(render, id)
 		}
 	}
-	dispatch := []string{"menuFT8", "menuBands", "menuMap", "menuFT8TS", "menuFT8TSDepth", "menuFT8TSThreads", "menuFT8TSBand"}
+	dispatch := []string{"menuFT8", "menuFT8Sens", "menuBands", "menuMap", "menuFT8TS", "menuFT8TSDepth", "menuFT8TSThreads", "menuFT8TSBand"}
 	if len(render) != len(dispatch) {
 		t.Fatalf("rendered %d mapped rows, dispatch has %d", len(render), len(dispatch))
 	}

@@ -10,7 +10,16 @@ import "sort"
 // least-reliable MRB positions keeping the candidate closest (Hamming)
 // to the hard decisions. Returns a codeword's 174 bits or nil.
 
-const ft8OSDOrder = 8
+// ft8OSDOrder is the OSD fallback depth (2^order flip candidates).
+// SetFT8OSDOrder raises it for weak-signal work at CPU cost.
+var ft8OSDOrder = 8
+
+// SetFT8OSDOrder sets the OSD fallback order (1..12; default 8).
+func SetFT8OSDOrder(o int) {
+	if o >= 1 && o <= 12 {
+		ft8OSDOrder = o
+	}
+}
 
 // row174 is a packed 174-bit row (192 bits of storage).
 type row174 [3]uint64

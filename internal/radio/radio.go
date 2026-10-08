@@ -2064,6 +2064,25 @@ func (r *Radio) SyncFT8() {
 	}
 }
 
+// SetFT8Sensitivity switches the built-in FT8 detector's search:
+// "high" lowers the Costas sync threshold and widens the candidate and
+// decode budgets (finds weaker signals, ~2x CPU per scan); "normal"
+// restores the defaults. It cannot add interference cancellation — the
+// alt engine remains the stronger decoder on crowded slots.
+func (r *Radio) SetFT8Sensitivity(high bool) {
+	r.mu.Lock()
+	det := r.ft8
+	r.mu.Unlock()
+	if det == nil {
+		return
+	}
+	if high {
+		det.SetFT8Tuning(5, 300, 16)
+	} else {
+		det.SetFT8Tuning(7, 220, 10)
+	}
+}
+
 // FT8Synced reports whether user has synced.
 func (r *Radio) FT8Synced() bool {
 	r.mu.Lock()
