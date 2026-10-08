@@ -618,7 +618,7 @@ func (c *Chain) Process(iq []byte, out *[]float32) {
 	// FT8/RTTY monitor: the dedicated branch below feeds the detectors
 	// in every mode; the SSB-8k path keeps its in-processSSB feed
 	// (identical band, avoids running the branch twice).
-	if (c.ft8 != nil || c.rtty != nil || c.wefax != nil || c.cw != nil || c.sstv != nil) && !(c.mode.SSB && c.outRate == SSBRate) {
+	if (c.ft8 != nil || c.rtty != nil || c.wefax != nil || c.cw != nil || c.sstv != nil || c.cwTap != nil || c.f8tsTap != nil) && !(c.mode.SSB && c.outRate == SSBRate) {
 		c.feedMonitors()
 	}
 
@@ -727,15 +727,13 @@ func (c *Chain) processSSB(out *[]float32) {
 			c.wefax.Feed(fbuf)
 		}
 		if c.cw != nil {
-			if c.cw != nil {
-				c.cw.Feed(fbuf)
-			}
-			if c.cwTap != nil {
-				c.cwTap(fbuf)
-			}
-			if c.f8tsTap != nil {
-				c.f8tsTap(fbuf)
-			}
+			c.cw.Feed(fbuf)
+		}
+		if c.cwTap != nil {
+			c.cwTap(fbuf)
+		}
+		if c.f8tsTap != nil {
+			c.f8tsTap(fbuf)
 		}
 	}
 	for _, z := range side {
