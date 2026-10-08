@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package adsb: Mode S Beast TCP client and ADS-B (DF17/DF18)
 // decoding — aircraft position (CPR), callsign, velocity — feeding a
 // TTL store the radar screen renders.

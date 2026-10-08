@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package sysinfo reads CPU and memory utilization from /proc.
 // Values are cached and updated at most once per second from a
 // background goroutine — the render loop just reads the cache.

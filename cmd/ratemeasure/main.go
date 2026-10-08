@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // ratemeasure: stream-rate and gap profiler for an rtl_tcp source.
 // Usage: ratemeasure <rate> <host:port> [seconds]
 // Prints the average rate, per-read gap histogram (the dropouts that

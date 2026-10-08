@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // rttytest — live RTTY decoder check: connects to the rtl_tcp server,
 // tunes a frequency, captures IQ, replays it through the app's exact
 // USB chain + RTTY monitor, and sweeps the mark tone if the standard

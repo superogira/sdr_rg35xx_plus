@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Mode S demodulation from raw rtl_tcp IQ, ported from wiedehopf/readsb
 // demod_2400.c (GPL-2.0-or-later): magnitude envelope resampled to exactly
 // 2.4 MSPS, preamble pre-check, per-phase slice correlators, CRC-24

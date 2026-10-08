@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package rtltcp speaks the rtl_tcp wire protocol: a 52-byte dongle-info
 // handshake on connect, 5-byte little-endian commands from the client, and
 // an endless stream of unsigned 8-bit I/Q pairs from the server.

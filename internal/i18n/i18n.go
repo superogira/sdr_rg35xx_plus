@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package i18n holds the two UI languages (Thai/English). Lang selects
 // the active language ("th" default, "en"); T returns the string for a
 // key. Kept as plain code so adding a language is adding a column.

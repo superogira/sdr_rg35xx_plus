@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // sdr35 — an RTL-SDR receiver (rtl_tcp client) for the Anbernic RG35XX.
 //
 // Top: 640-wide scrolling spectrum waterfall (±120 kHz around the tuned

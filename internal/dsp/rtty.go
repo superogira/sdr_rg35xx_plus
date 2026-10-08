@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // RTTY decoder: amateur Baudot radioteletype, 45.45 baud / 170 Hz
 // shift, mark 2125 Hz / space 2295 Hz (the universal ham convention in
 // a USB receiver). Demodulation mixes the 8 kHz monitor audio to

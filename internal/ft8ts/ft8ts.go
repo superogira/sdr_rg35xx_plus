@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package ft8ts drives the ft8ts sidecar (GPL-3.0 TypeScript port of
 // the WSJT-X v3.0.1 FT8 decoder, run under Node in a separate process —
 // same isolation pattern as the hamnoise/deepcw sidecars). Protocol:

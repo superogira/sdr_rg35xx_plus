@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package radio owns the rtl_tcp connection lifecycle: connect, configure
 // the dongle, stream IQ through the DSP into the audio pipe, reconnect with
 // backoff, and apply live parameter changes (frequency/mode/gain).

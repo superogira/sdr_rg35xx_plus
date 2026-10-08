@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //go:build !linux
 
 // Package input: on non-Linux dev machines there is no evdev gamepad; the

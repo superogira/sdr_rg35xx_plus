@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package geo: Maidenhead grid math (lat/lon, great-circle distance)
 // and callsign-prefix → country lookup for FT8 annotations.
 package geo

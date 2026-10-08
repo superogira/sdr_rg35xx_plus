@@ -205,5 +205,31 @@ static librtlsdr (link แค่ libusb/libudev ของระบบ) — ด�
 
 ## License
 
-See [Licenses](Licenses) — ข้อความ license ฉบับเต็มของงาน third-party
-ทั้งหมดที่แอปนี้ใช้/พอร์ต/รันร่วม (ตารางข้างบน) รวมอยู่ในโฟลเดอร์นั้น
+**SDRg35xx is licensed under the GNU General Public License v3.0 or any
+later version (GPL-3.0-or-later)** — see [LICENSE](LICENSE). Every source
+file carries an SPDX header; the two files that port copyleft algorithms
+(`internal/adsb/modes.go` from readsb, `internal/ais/gmsk.go` from
+AIS-catcher) state their upstream provenance in the header as well.
+
+GPL is not merely a preference here: the Mode S demodulator ports
+readsb's algorithm and coefficient tables (GPL v3+), and the AIS RF
+demodulator ports AIS-catcher's ModelDefault architecture (GPL-3.0).
+Both are compiled into the main binary, so copyleft covers the combined
+work — distributing the binary (OTA, SD card) obliges the whole program
+to GPL. The MIT-licensed ft8_lib tables and the permissively licensed
+dependencies are compatible with that.
+
+Components that run as SEPARATE processes keep their own licenses and
+never link into the binary:
+
+| ส่วน | License | รูปแบบการรวม |
+|---|---|---|
+| ตัวแอป `sdrg35xx` (รวมพอร์ต readsb/AIS-catcher/ft8_lib) | GPL-3.0-or-later | ไบนารีเดียว |
+| `rtl_tcp` (rtlsdrblog/rtl-sdr-blog) | GPL-2.0 | sidecar process |
+| `hamnoise` (e04/HamNoise) | AGPL-3.0 | sidecar process |
+| `deepcw` + ONNX Runtime + โมเดล DeepCW (e04/deepcw-engine) | AGPL-3.0-only / MIT / AGPL-3.0-only | sidecar process |
+| `ft8ts` + Node.js (e04/ft8ts) | GPL-3.0 / Node.js License | sidecar process |
+
+ข้อความ license ฉบับเต็มของงาน third-party ทั้งหมดอยู่ในโฟลเดอร์
+[`Licenses/`](Licenses) และ `third_party/*/LICENSE` + `NOTICE` สำหรับ
+ส่วนที่ vendored ไว้ใน repo

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package dsp turns a raw rtl_tcp IQ byte stream into audio and spectrum.
 //
 // Chain (sample rates for IQRate 960000):

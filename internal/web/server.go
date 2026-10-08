@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package web exposes the receiver as a small LAN web service: a JSON
 // control/state API plus a self-contained page (embedded HTML/JS) that
 // renders and controls the radio from any browser on the network.

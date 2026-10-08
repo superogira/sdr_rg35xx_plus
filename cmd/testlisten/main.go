@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // testlisten — offline verification of the sdr35 receive chain against a
 // real rtl_tcp server (or a saved raw-IQ file). It scans the broadcast band
 // for strong stations, captures WFM/NFM audio through the same dsp.Chain

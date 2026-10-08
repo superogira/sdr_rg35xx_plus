@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package backlight controls the RG35XX Plus panel brightness through
 // the Allwinner dispdbg interface (the only write path this firmware
 // honours) plus the fb blank level for full-off. Ported from goro's

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Radar screen: classic green phosphor ATC display — the receiver sits
 // at the centre (no basemap yet), range rings every quarter of the
 // scale, aircraft as blips with callsign + flight level.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package audio pipes a raw s16le stereo stream into an external player.
 //
 // On the RG35XX StockOS the in-process audio libraries open a "working"

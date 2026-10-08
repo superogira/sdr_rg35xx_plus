@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // ADS-B (DF17/DF18 extended squitter) decoding: airborne position via
 // Compact Position Reporting, identity, and velocity. CRC is not
 // re-verified — Beast feeds (dump1090/readsb) only emit frames that

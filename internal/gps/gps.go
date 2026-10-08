@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package gps parses NMEA 0183 sentences from a USB GPS receiver and
 // keeps the latest fix. Only the sentences every receiver emits are
 // used: GGA (position/fix/sats/HDOP/altitude), RMC (valid/speed/course)

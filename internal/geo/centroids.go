@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package geo: country centroids for coarse station positions on the
 // world map — used when a station's Maidenhead grid is not (yet) known.
 // Coordinates are rough geographic centres, good enough to place a

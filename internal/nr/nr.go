@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package nr drives the hamnoise sidecar (HamNoise neural noise
 // reduction, AGPL-3.0 — kept out of this binary by running it as a
 // separate process, like the rtl_tcp sidecar). Protocol: float32 mono

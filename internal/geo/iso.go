@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package geo
 
 // nameISO maps the DXCC country names used by dxcc.go to ISO 3166-1

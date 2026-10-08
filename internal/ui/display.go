@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package ui renders the SDR screen: a scrolling waterfall on top and a
 // status/frequency bar at the bottom, written straight to the framebuffer.
 package ui

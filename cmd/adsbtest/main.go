@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // adsbtest — live ADS-B decode check: connects to an rtl_tcp server
 // tuned at 1090 MHz, feeds raw IQ to the Mode S demodulator and
 // reports decoded aircraft.

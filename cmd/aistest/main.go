@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // aistest — live AIS feed check: connects to an NMEA-over-TCP server
 // and reports decoded ships.
 package main

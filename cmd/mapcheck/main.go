@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // mapcheck — dev tool: verifies every maps/*.png shares the world map's
 // geography (same projection & alignment). Compares coastline edge maps
 // at coarse resolution; the reference is world_map_2.png (landmark-

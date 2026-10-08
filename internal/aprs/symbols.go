@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package aprs
 
 // Emoji maps the sender's chosen symbol (table+code) to an emoji for

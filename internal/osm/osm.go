@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package osm fetches and caches OpenStreetMap raster tiles and builds
 // screen-sized mosaics for the ADS-B radar background. The radar view
 // is static (receiver fixed at the screen centre), so each zoom level

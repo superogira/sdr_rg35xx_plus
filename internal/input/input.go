@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //go:build linux
 
 // Package input reads the RG35XX gamepad straight from evdev, the way the

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // genicon draws the v2 APPS-menu icon (SDRg35xx_v2.png, superseded by
 // tools/make_logo.py) with the same font/display stack as the app itself.
 package main

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package deepcw drives the deepcw sidecar (DeepCW neural Morse
 // decoder, AGPL-3.0-only — model and ONNX Runtime stay in the separate
 // process, like the hamnoise sidecar). Protocol: mono s16 PCM at

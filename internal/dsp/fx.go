@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Audio effects shared by every demod path: the noise-reduction
 // adaptive filter and the user low-/high-pass biquads.
 package dsp

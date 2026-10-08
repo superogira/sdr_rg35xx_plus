@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package ui
 
 import (
@@ -9,14 +12,14 @@ import (
 
 // APRSStationUI is one live station row for the APRS log screen.
 type APRSStationUI struct {
-	Call    string
-	Country string // ISO-2 for the flag
-	Sym     string // sender's symbol char
+	Call     string
+	Country  string // ISO-2 for the flag
+	Sym      string // sender's symbol char
 	Lat, Lon float64
-	SpeedKt float64
-	AltFt   int
-	Comment string
-	AgeSec  float64
+	SpeedKt  float64
+	AltFt    int
+	Comment  string
+	AgeSec   float64
 }
 
 // APRSLogUI is one history row (receive or transmit).

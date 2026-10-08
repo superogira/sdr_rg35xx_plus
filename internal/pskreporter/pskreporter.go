@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package pskreporter formats and sends FT8 reception reports to
 // PSK Reporter (report.pskreporter.info:4739) using the IPFIX-style
 // "cookie cutter" layout from pskreporter.info/pskdev.html.

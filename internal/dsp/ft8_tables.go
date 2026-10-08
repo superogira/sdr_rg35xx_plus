@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package dsp
 
 // Code tables ported from kgoba/ft8_lib constants.c (WSJT-X ldpc_174_91).

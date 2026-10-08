@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package aprs decodes and encodes APRS over Bell-202 AFSK (1200 baud,
 // 1200/2200 Hz): AX.25 UI frames, position reports, a station store for
 // the radar, and a phase-continuous AFSK modulator that turns a GPS fix

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package ais: NMEA AIVDM/AIVDO client and decoder for ship positions
 // and names, feeding a TTL store like the ADS-B one.
 package ais

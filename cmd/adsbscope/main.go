@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // adsbscope — dumps the magnitude envelope around the strongest pulse
 // from a live 1090 MHz rtl_tcp stream, to eyeball what the Mode S
 // signal (or its absence) looks like.
