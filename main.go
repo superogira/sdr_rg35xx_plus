@@ -654,6 +654,7 @@ const (
 	menuDeepCWThreads
 	menuDeepCWWindow
 	menuDeepCWClear
+	menuFT8Sub
 	menuFT8TS
 	menuFT8TSDepth
 	menuFT8TSThreads
@@ -720,9 +721,11 @@ var pageItems = [][]int{
 	{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBRF, menuRTLSrv, menuRTLSrvPort, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 	{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 	{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSIgate, menuAPRSGateLim, menuAPRSSrc, menuAPRSFixLat, menuAPRSFixLon, menuAPRSNow},
-	{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuDeepCW, menuDeepCWThreads, menuDeepCWWindow, menuDeepCWClear, menuFT8TS, menuFT8TSDepth, menuFT8TSThreads, menuFT8TSBand, menuSSTV, menuSSTVView, menuSSTVClear},
+	{menuFT8Sub, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuDeepCW, menuDeepCWThreads, menuDeepCWWindow, menuDeepCWClear, menuSSTV, menuSSTVView, menuSSTVClear},
+
 	{menuCall, menuGrid, menuAnt, menuRig, menuPSK},
 	{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuShot, menuUpdate},
+	{menuFT8, menuBands, menuMap, menuFT8TS, menuFT8TSDepth, menuFT8TSThreads, menuFT8TSBand},
 }
 
 // The flat 16-row menu outgrew the screen, so it is now subpages
@@ -741,6 +744,7 @@ const (
 	pageFT8
 	pageStation
 	pageSys
+	pageFT8Sub
 )
 
 // beaconFix resolves the position a beacon reports: the live GPS fix
@@ -2071,6 +2075,8 @@ func main() {
 		uiMode, menuPage = uiMenu, pageRx
 	case "ft8page":
 		uiMode, menuPage = uiMenu, pageFT8
+	case "ft8subpage":
+		uiMode, menuPage = uiMenu, pageFT8Sub
 	case "stationpage":
 		uiMode, menuPage = uiMenu, pageStation
 	case "aprspage":
@@ -2306,7 +2312,7 @@ func main() {
 	adjustItem := func(idx, dir int) {
 		switch idx {
 		case menuMode:
-			if r.FT8Enabled() {
+			if r.FT8Enabled() || r.FT8TSEnabled() {
 				// USB-only while FT8 decodes (radio.SetMode enforces it;
 				// skip the switch dance so the bw cfg isn't crossed).
 				capturedMsg, capturedAt = i18n.T("ft8_modelock"), time.Now()
@@ -2732,8 +2738,13 @@ func main() {
 			if r.FT8TSEnabled() {
 				r.SetFT8TSEnabled(false)
 				cfg["ft8ts"] = "off"
+				setSidecarStatus("ft8ts", "")
 				saveNow()
 				break
+			}
+			if r.Mode().Name != dsp.ModeUSB.Name {
+				saveBwNow(cfg, r) // keep old mode's bw before the USB jump
+				autoStep(dsp.ModeUSB)
 			}
 			if !r.FT8TSAvailable() {
 				setSidecarStatus("ft8ts", "%s", i18n.T("ft8ts_fetching"))
@@ -2929,6 +2940,9 @@ func main() {
 		case menuBM:
 			bmSel = 0
 			uiMode = uiBmList
+		case menuFT8Sub:
+			menuPage = pageFT8Sub
+			menuSel = 0
 		case menuMap:
 			mapSel, mapDetail = -1, false
 			uiMode = uiMap
@@ -2977,7 +2991,7 @@ func main() {
 		case input.Down:
 			r.SetFreq(r.Freq() + 10*stepFor())
 		case input.A:
-			if r.FT8Enabled() {
+			if r.FT8Enabled() || r.FT8TSEnabled() {
 				// Mode cycling disabled while FT8 decodes — USB only
 				// (radio.SetMode would reject it anyway; bail out before
 				// the bw/step dance crosses settings between modes).
@@ -2997,7 +3011,7 @@ func main() {
 		case input.Select:
 			// Big scrollable history window (FT8 or, when the AIS RF
 			// decoder runs, the AIS messages).
-			if r.FT8Enabled() {
+			if r.FT8Enabled() || r.FT8TSEnabled() {
 				ft8Scroll = 0
 				uiMode = uiFT8Log
 			} else if r.AISRFEnabled() {
@@ -3070,7 +3084,9 @@ func main() {
 			case input.A:
 				activateItem(pageItems[menuPage][menuSel])
 			case input.B, input.Start:
-				if menuPage != pageRoot {
+				if menuPage == pageFT8Sub {
+					menuPage, menuSel = pageFT8, menuRow(pageFT8, menuFT8Sub)
+				} else if menuPage != pageRoot {
 					menuPage, menuSel = pageRoot, 0
 				} else {
 					uiMode = uiMain
@@ -3348,7 +3364,7 @@ func main() {
 				capturedAt = time.Now()
 				uiMode = uiMain
 			case input.B, input.Start, input.Select:
-				uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuBands)
+				uiMode, menuPage, menuSel = uiMenu, pageFT8Sub, menuRow(pageFT8Sub, menuBands)
 			}
 		case uiHostList:
 			// Rows: a leading "(ปิดใช้งาน)" row (radio off — viewer
@@ -3739,7 +3755,7 @@ func main() {
 					hostEditIdx = -1
 					uiMode = uiAISList
 				} else {
-					uiMode, menuPage, menuSel = uiMenu, pageFT8, menuRow(pageFT8, menuFT8)
+					uiMode, menuPage, menuSel = uiMenu, pageFT8Sub, menuRow(pageFT8Sub, menuFT8)
 				}
 			}
 		case uiFreqEdit:
@@ -4129,7 +4145,10 @@ func main() {
 
 		// FT8 slot boundary: mark the newest waterfall row red once per
 		// 15 s slot after a Y sync (pending until a fresh row arrives).
-		if r.FT8Enabled() && !ft8SyncWall.IsZero() {
+		if r.FT8TSEnabled() && ft8SyncWall.IsZero() {
+			ft8SyncWall = time.Now()
+		}
+		if (r.FT8Enabled() || r.FT8TSEnabled()) && !ft8SyncWall.IsZero() {
 			if idx := int(time.Since(ft8SyncWall) / (15 * time.Second)); idx > ft8SlotIdx {
 				ft8SlotIdx = idx
 				ft8SlotMark = true
@@ -4425,9 +4444,7 @@ func main() {
 					ui.MenuItem{Label: i18n.T("m_wfmax"), Value: fmt.Sprintf("%.0f dB", wfMax)})
 			case pageFT8:
 				items = append(items,
-					ui.MenuItem{Label: i18n.T("m_map"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_ft8"), Value: ft8Label(r.FT8Enabled())},
-					ui.MenuItem{Label: i18n.T("m_bands"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_ft8sub"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_rtty"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.RTTYEnabled()]},
 					ui.MenuItem{Label: i18n.T("m_rttylog"), Value: i18n.T("press_a")},
 					ui.MenuItem{Label: i18n.T("m_wefax"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.WefaxEnabled()]},
@@ -4459,6 +4476,14 @@ func main() {
 						return fmt.Sprintf("%d s", w)
 					}()},
 					ui.MenuItem{Label: i18n.T("m_deepcwclear"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_sstv"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.SSTVEnabled()]},
+					ui.MenuItem{Label: i18n.T("m_sstvview"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_sstvclear"), Value: i18n.T("press_a")})
+			case pageFT8Sub:
+				items = append(items,
+					ui.MenuItem{Label: i18n.T("m_ft8"), Value: ft8Label(r.FT8Enabled())},
+					ui.MenuItem{Label: i18n.T("m_bands"), Value: i18n.T("press_a")},
+					ui.MenuItem{Label: i18n.T("m_map"), Value: i18n.T("press_a")},
 					func() ui.MenuItem {
 						if v := sidecarStatus("ft8ts"); v != "" {
 							return ui.MenuItem{Label: i18n.T("m_ft8ts"), Value: v}
@@ -4491,10 +4516,7 @@ func main() {
 							hi = 3000
 						}
 						return fmt.Sprintf("%d-%d Hz", lo, hi)
-					}()},
-					ui.MenuItem{Label: i18n.T("m_sstv"), Value: map[bool]string{true: i18n.T("on"), false: i18n.T("off")}[r.SSTVEnabled()]},
-					ui.MenuItem{Label: i18n.T("m_sstvview"), Value: i18n.T("press_a")},
-					ui.MenuItem{Label: i18n.T("m_sstvclear"), Value: i18n.T("press_a")})
+					}()})
 			case pageStation:
 				items = append(items,
 					ui.MenuItem{Label: i18n.T("m_call"), Value: myCall},
@@ -5235,7 +5257,7 @@ func main() {
 			}
 			u.DrawRadar(blips, adsbRanges[adsbRangeIdx], hostLbl, adsbConnected, adsbLat, adsbLon, cpu, adsbMosaic[L][z], mapName, mapAttr, mercArg, flagDir, radarTargetsMask, radarLabelMode, panX, panY, mapOffX, mapOffY, sysinfo.SensorSnapshot().BattPct, strings.Contains(sysinfo.SensorSnapshot().BattStatus, "harg"), radarSel)
 		}
-		if r.FT8Enabled() && uiMode == uiMain {
+		if (r.FT8Enabled() || r.FT8TSEnabled()) && uiMode == uiMain {
 			u.DrawFT8Grid(loHz, viewOff)
 			u.DrawFT8Log(ft8Log, flagDir)
 		}

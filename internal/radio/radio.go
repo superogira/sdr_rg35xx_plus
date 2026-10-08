@@ -1808,6 +1808,12 @@ func (r *Radio) SetFT8TSEnabled(on bool) bool {
 	r.f8tsOn = true
 	r.mu.Unlock()
 	r.retapFT8TS()
+	// FT8 lives in USB (the sidecar drinks the 8 kHz SSB branch) —
+	// switch like the built-in detector does, so enabling from any
+	// other mode just works.
+	if r.Mode().Name != dsp.ModeUSB.Name {
+		r.SetMode(dsp.ModeUSB)
+	}
 	return true
 }
 

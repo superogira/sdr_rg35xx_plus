@@ -11,7 +11,8 @@ import (
 // the root page exposes one row per subpage — the Audio page row once
 // went missing in a silent edit and the d-pad could never reach it.
 func TestPageItemsCoverEveryPage(t *testing.T) {
-	wantPages := []int{pageRoot, pageRx, pageAudio, pageDisp, pageADSB, pageGPS, pageAPRS, pageFT8, pageStation, pageSys}
+	rootPages := []int{pageRoot, pageRx, pageAudio, pageDisp, pageADSB, pageGPS, pageAPRS, pageFT8, pageStation, pageSys}
+	wantPages := append(append([]int{}, rootPages...), pageFT8Sub) // sub-page lives in pageItems too
 	if len(pageItems) != len(wantPages) {
 		t.Fatalf("pageItems has %d pages, want %d — a page id exists with no row list (rows become unreachable)", len(pageItems), len(wantPages))
 	}
@@ -19,7 +20,7 @@ func TestPageItemsCoverEveryPage(t *testing.T) {
 	// rows open pages by position (the bookmarks row between Station
 	// and System is handled before the positional dispatch), and the
 	// last row is Exit.
-	subpages := len(wantPages) - 1
+	subpages := len(rootPages) - 1
 	if got := len(pageItems[pageRoot]); got != subpages+2 {
 		t.Fatalf("root page has %d rows, want %d (subpages + Bookmarks + Exit)", got, subpages+2)
 	}
@@ -48,7 +49,7 @@ func TestRootRowsOpenMatchingPages(t *testing.T) {
 		{menuADSBRadar, menuADSBLat, menuADSBLon, menuADSBRF, menuRTLSrv, menuRTLSrvPort, menuADSBHost, menuAISServer, menuAISRF, menuAISLog, menuClearMap},
 		{menuGPSDev, menuGPSStat, menuGPSTime, menuGPSPos, menuGPSGrid, menuGPSAlt, menuGPSSpd, menuGPSCourse, menuGPSSats, menuGPSHdop, menuGPSAge, menuGPSFollow, menuGPSTimeSync},
 		{menuAPRSRx, menuAPRSFreq, menuAPRSCall, menuAPRSBeacon, menuAPRSIS, menuAPRSServer, menuAPRSPath, menuAPRSSym, menuAPRSCmt, menuAPRSPre, menuAPRSLvl, menuAPRSStat, menuAPRSLog, menuAPRSIgate, menuAPRSGateLim, menuAPRSSrc, menuAPRSFixLat, menuAPRSFixLon, menuAPRSNow},
-		{menuMap, menuFT8, menuBands, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuDeepCW, menuDeepCWThreads, menuDeepCWWindow, menuDeepCWClear, menuFT8TS, menuFT8TSDepth, menuFT8TSThreads, menuFT8TSBand, menuSSTV, menuSSTVView, menuSSTVClear},
+		{menuFT8Sub, menuRTTY, menuRTTYLog, menuWefax, menuWefaxAuto, menuWefaxClear, menuCWDec, menuCWClear, menuDeepCW, menuDeepCWThreads, menuDeepCWWindow, menuDeepCWClear, menuSSTV, menuSSTVView, menuSSTVClear},
 		{menuCall, menuGrid, menuAnt, menuRig, menuPSK},
 		{menuWeb, menuWebPort, menuLang, menuSysMon, menuLogs, menuShot, menuUpdate},
 	}
@@ -154,6 +155,52 @@ func TestPageADSBRenderMatchesDispatch(t *testing.T) {
 	for i := range dispatch {
 		if render[i] != dispatch[i] {
 			t.Fatalf("row %d: screen shows %s but pressing dispatches %s — render/pageItems drift (presses land on the wrong action!)", i, render[i], dispatch[i])
+		}
+	}
+}
+
+// TestPageFT8SubRenderMatchesDispatch: pin the FT8 sub-page's rendered
+// label order to its dispatch list (same drift class as the pageADSB
+// pin — presses land on the neighbouring row when they drift).
+func TestPageFT8SubRenderMatchesDispatch(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Skip("source not available")
+	}
+	s := string(src)
+	begin := strings.Index(s, "case pageFT8Sub:")
+	end := strings.Index(s[begin:], "case pageStation:") + begin
+	if begin < 0 || end <= begin {
+		t.Fatal("pageFT8Sub render block not found")
+	}
+	keyRe := regexp.MustCompile(`i18n\.T\("(m_[a-z0-9]+)"\)`)
+	keyToID := map[string]string{
+		"m_ft8":        "menuFT8",
+		"m_bands":      "menuBands",
+		"m_map":        "menuMap",
+		"m_ft8ts":      "menuFT8TS",
+		"m_ft8tsdepth": "menuFT8TSDepth",
+		"m_ft8tsth":    "menuFT8TSThreads",
+		"m_ft8tsband":  "menuFT8TSBand",
+	}
+	var render []string
+	for _, m := range keyRe.FindAllStringSubmatch(s[begin:end], -1) {
+		if id, ok := keyToID[m[1]]; ok {
+			// availability closures repeat the row's label in both
+			// return branches — one row, one entry
+			if n := len(render); n > 0 && render[n-1] == id {
+				continue
+			}
+			render = append(render, id)
+		}
+	}
+	dispatch := []string{"menuFT8", "menuBands", "menuMap", "menuFT8TS", "menuFT8TSDepth", "menuFT8TSThreads", "menuFT8TSBand"}
+	if len(render) != len(dispatch) {
+		t.Fatalf("rendered %d mapped rows, dispatch has %d", len(render), len(dispatch))
+	}
+	for i := range dispatch {
+		if render[i] != dispatch[i] {
+			t.Fatalf("row %d: screen shows %s but pressing dispatches %s", i, render[i], dispatch[i])
 		}
 	}
 }

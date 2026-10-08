@@ -146,6 +146,7 @@ var strings = map[string][2]string{
 	"deepcw_missing":     {"ยังไม่ได้ติดตั้งดีโคดเดอร์ AI", "AI decoder not installed"},
 	"deepcw_fetching":    {"กำลังดาวน์โหลดดีโคดเดอร์ AI (~40MB)...", "downloading AI decoder (~40 MB)..."},
 	"m_ft8ts":            {"FT8 สำรอง (ft8ts/WSJT-X 3)", "FT8 alt engine (ft8ts/WSJT-X 3)"},
+	"m_ft8sub":           {"โหมด FT8 >", "FT8 modes >"},
 	"m_ft8tsdepth":       {"ความลึกดีโคด FT8 สำรอง", "Alt FT8 depth"},
 	"m_ft8tsth":          {"เธรด FT8 สำรอง", "Alt FT8 threads"},
 	"m_ft8tsband":        {"ย่านเสียง FT8 สำรอง", "Alt FT8 audio band"},
