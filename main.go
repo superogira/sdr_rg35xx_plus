@@ -4349,7 +4349,7 @@ func main() {
 					// SNR in the standard 2500 Hz convention —
 					// typically negative for FT8; keep within the
 					// int8 field's sane range.
-					sn := int8(m.SNRDb)
+					sn := int8(math.Round(m.SNRDb))
 					if sn < -40 {
 						sn = -40
 					}

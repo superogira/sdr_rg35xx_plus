@@ -393,7 +393,12 @@ func (w *ft8Waterfall) candSNRDb(c ft8WFCand) float64 {
 	if n == 0 {
 		return 0
 	}
-	snr := 10*math.Log10(sumRatio/float64(n)) - refBand
+	// +6.1 dB calibration: against synthetic tones of known 2500 Hz-band
+	// SNR the raw ratio read 6.0-6.2 dB low at every level (analysis
+	// window and Hann/quantisation losses); the offset is constant, so
+	// one additive term puts the estimate on the WSJT-X/pskreporter
+	// scale (TestSNRCalibrationFiles pins it within ±1 dB).
+	snr := 10*math.Log10(sumRatio/float64(n)) - refBand + 6.1
 	if snr > 40 {
 		snr = 40
 	}
