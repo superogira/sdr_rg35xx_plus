@@ -56,7 +56,7 @@ type Engine struct {
 // bundle's ft8ts.rev by tools/build_ft8ts_bundle.sh). A stale bundle —
 // like the first sidecar, which deadlocked on stream gaps — re-downloads
 // on the next enable instead of running the broken code forever.
-const Rev = "r4"
+const Rev = "r5"
 
 // nodePath finds the bundled runtime: plain name on Linux (the only
 // production target), .exe alongside for dev machines on Windows.
@@ -127,6 +127,7 @@ func Start(dir string, rate, depth, threads, low, high int) *Engine {
 	// arriving meanwhile must SURVIVE in the OS pipe buffer (the
 	// sidecar resyncs only on sustained lag, so a draining backlog is
 	// real signal). 1 MB holds ~30 s of 8 kHz float32.
+	fmt.Fprintf(os.Stderr, "ft8ts: start depth=%d threads=%d band=%d-%d\n", depth, threads, low, high)
 	enlargePipe(stdin)
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "ft8ts: start node: %v\n", err)

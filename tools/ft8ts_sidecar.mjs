@@ -23,7 +23,7 @@
 // search in case the stream slipped.
 //
 // usage: node ft8ts_sidecar.mjs lib.mjs rate depth threads low high
-const { decodeFT8, FT8History } = await import(process.argv[2]);
+const { decodeFT8, FT8DecoderPool, FT8History } = await import(process.argv[2]);
 const [, , , rateS, depthS, threadsS, lowS, highS] = process.argv;
 const rate = parseInt(rateS || "8000", 10);
 const depth = Math.min(3, Math.max(1, parseInt(depthS || "2", 10)));
@@ -37,6 +37,7 @@ const BLK = Math.round(0.5 * rate); // envelope block: 0.5 s
 const BURST_BLOCKS = 16; // >= 8 s of tone = a transmission
 const PRE = Math.round(0.1 * rate); // window lead before the burst
 const history = new FT8History();
+const pool = threads > 1 ? new FT8DecoderPool({ threads }) : null;
 
 let buf = new Float32Array(0);
 let carry = Buffer.alloc(0); // stdin bytes awaiting a full float32
@@ -105,7 +106,7 @@ function lockAt(burstBlock) {
   stderr(`locked: burst ${((buf.length - burstIdx) / rate).toFixed(1)}s old, slot ${slotLabel}`);
 }
 
-function decodeWindow() {
+async function decodeWindow() {
   if (grid + SLOT > buf.length) return false;
   const samples = buf.slice(grid, grid + SLOT);
   const label = slotLabel;
@@ -117,14 +118,23 @@ function decodeWindow() {
   const t0 = Date.now();
   let out = [];
   try {
-    out = decodeFT8(samples, {
-      sampleRate: rate,
-      freqLow,
-      freqHigh,
-      depth,
-      history,
-      slotStart: label,
-    });
+    out = pool
+      ? await pool.decode(samples, {
+          sampleRate: rate,
+          freqLow,
+          freqHigh,
+          depth,
+          history,
+          slotStart: label,
+        })
+      : decodeFT8(samples, {
+          sampleRate: rate,
+          freqLow,
+          freqHigh,
+          depth,
+          history,
+          slotStart: label,
+        });
   } catch (e) {
     stderr(`decode error: ${e}`);
   }
@@ -148,6 +158,7 @@ function decodeWindow() {
 }
 
 process.stdin.on("data", (chunk) => {
+  (async () => {
   try {
     bytesIn += chunk.length;
     carry = carry.length ? Buffer.concat([carry, chunk]) : chunk;
@@ -178,7 +189,7 @@ process.stdin.on("data", (chunk) => {
     if (locked) {
       updateEnv();
       let guard = 0;
-      while (grid + SLOT <= buf.length && guard++ < 8) decodeWindow();
+      while (grid + SLOT <= buf.length && guard++ < 8) await decodeWindow();
       if (zeroRun >= 2) {
         // Two empty windows: either a genuinely quiet stretch or the
         // grid slipped (jitter accumulation, dropped audio). A burst
@@ -209,6 +220,7 @@ process.stdin.on("data", (chunk) => {
   } catch (e) {
     stderr(`stdin error: ${e}`);
   }
+  })();
 });
 process.stdin.on("end", () => {
   // process.exit can truncate stdout writes still in flight to the pipe
