@@ -3884,6 +3884,8 @@ func main() {
 	}()
 	lastBeat := time.Now()
 	lastSave := time.Now()
+	cwSpots := newCWSpotter()
+	lastCWSpotPoll := time.Now()
 
 	for {
 	drain:
@@ -4362,6 +4364,22 @@ func main() {
 						SNRDb:  sn,
 						At:     now,
 					})
+				}
+			}
+			// CW → PSK Reporter: harvest "DE <callsign>" senders from
+			// the rolling classic + neural decoder texts (same record
+			// shape as the FT8 spots, mode CW — PSK Reporter accepts
+			// any mode string and already maps RBN's CW spots). SNR is
+			// unknown for CW, so it goes out as 0. Polled at 2 Hz: the
+			// neural text can be 20k runes and re-copying it per frame
+			// would burn CPU for nothing.
+			if time.Since(lastCWSpotPoll) >= 500*time.Millisecond {
+				lastCWSpotPoll = time.Now()
+				for _, c := range cwSpots.harvest(0, r.CW().Text(), myCall) {
+					psk.Add(pskreporter.Spot{Sender: c, FreqHz: uint32(r.Freq()), Mode: "CW", At: time.Now()})
+				}
+				for _, c := range cwSpots.harvest(1, r.DeepCWText(), myCall) {
+					psk.Add(pskreporter.Spot{Sender: c, FreqHz: uint32(r.Freq()), Mode: "CW", At: time.Now()})
 				}
 			}
 		}
@@ -5689,25 +5707,86 @@ func saveConfig(cfg map[string]string, host string, freq int64, mode string, vol
 	}
 }
 
-// isSpotCallsign filters reportable callsigns: 3-11 chars, starts with
-// a letter or digit, contains at least one digit (standard-form
-// amateur calls) — skips hashes "<...>", telemetry and plain words.
+// cwSpotter incrementally scans the rolling CW decoder texts (classic
+// + neural) for "DE <callsign>" senders to report to PSK Reporter —
+// in CW "ADDRESSEE DE SENDER", so the token after DE is who we are
+// hearing. The rolling buffers trim their heads, so a consumed offset
+// that suddenly exceeds the text length means a trim/clear — start
+// over (the per-call cooldown makes re-scans harmless). Only whole
+// words are consumed so a half-arrived callsign is never split.
+type cwSpotter struct {
+	consumed [2]int
+	carry    [2]string // last complete word, kept so a "DE" split across polls still pairs
+	last     map[string]time.Time
+}
+
+func newCWSpotter() *cwSpotter { return &cwSpotter{last: map[string]time.Time{}} }
+
+const cwSpotCooldown = 5 * time.Minute
+
+func (s *cwSpotter) harvest(which int, text, myCall string) []string {
+	r := []rune(text)
+	off := s.consumed[which]
+	if off > len(r) {
+		off = 0
+	}
+	end := len(r)
+	for end > off && r[end-1] != ' ' && r[end-1] != '.' && r[end-1] != '?' && r[end-1] != '!' {
+		end-- // leave a trailing partial word for the next pass
+	}
+	s.consumed[which] = end
+	body := ""
+	if end > off {
+		body = strings.ToUpper(string(r[off:end]))
+	}
+	fresh := s.carry[which] + " " + body
+	// carry the last complete word forward (often exactly "DE")
+	toks := strings.Fields(body)
+	if len(toks) > 0 {
+		s.carry[which] = toks[len(toks)-1]
+	} else if body == "" {
+		s.carry[which] = ""
+	}
+	var out []string
+	toks = strings.Fields(fresh)
+	for i := 0; i+1 < len(toks); i++ {
+		if toks[i] != "DE" {
+			continue
+		}
+		c := strings.TrimRight(toks[i+1], ",.!?:;\"'")
+		if c == myCall || !isSpotCallsign(c) {
+			continue
+		}
+		if t, ok := s.last[c]; ok && time.Since(t) < cwSpotCooldown {
+			continue
+		}
+		s.last[c] = time.Now()
+		out = append(out, c)
+	}
+	return out
+}
+
+// isSpotCallsign filters reportable callsigns: 3-11 chars, A-Z/0-9
+// only, at least one digit AND one letter (standard-form amateur
+// calls) — skips hashes "<...>", telemetry, plain words and bare
+// numbers like an RST report caught after a stray DE.
 func isSpotCallsign(s string) bool {
 	if len(s) < 3 || len(s) > 11 {
 		return false
 	}
-	hasDigit := false
+	hasDigit, hasLetter := false, false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
 		case c >= '0' && c <= '9':
 			hasDigit = true
 		case c >= 'A' && c <= 'Z':
+			hasLetter = true
 		default:
 			return false
 		}
 	}
-	return hasDigit
+	return hasDigit && hasLetter
 }
 
 // wefaxStateLabel names the decoder phase for the panel title.

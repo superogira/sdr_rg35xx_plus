@@ -26,6 +26,7 @@ type Spot struct {
 	Sender string // callsign heard
 	FreqHz uint32 // actual RF frequency of the transmission
 	SNRDb  int8   // received SNR (clamped to -128..127)
+	Mode   string // "FT8" when empty; "CW" for the CW decoder spots
 	At     time.Time
 }
 
@@ -203,11 +204,15 @@ func buildPacket(call, grid, antenna, rig string, spots []Spot, seq, sess uint32
 	// Sender information records (99 93).
 	var tx []byte
 	for _, s := range spots {
+		mode := s.Mode
+		if mode == "" {
+			mode = "FT8"
+		}
 		tx = appendLenString(tx, s.Sender)
 		tx = binary.BigEndian.AppendUint32(tx, s.FreqHz)
 		tx = append(tx, byte(s.SNRDb)) // sNR
 		tx = append(tx, 0)             // iMD unknown
-		tx = appendLenString(tx, "FT8")
+		tx = appendLenString(tx, mode)
 		tx = append(tx, 1) // informationSource: automatically extracted
 		tx = binary.BigEndian.AppendUint32(tx, uint32(s.At.Unix()))
 	}
