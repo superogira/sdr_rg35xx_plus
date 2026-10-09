@@ -157,8 +157,29 @@ async function decodeWindow() {
   return true;
 }
 
-process.stdin.on("data", (chunk) => {
-  (async () => {
+// Serialised pump: pool.decode() awaits, and awaiting inside the data
+// handler lets a second chunk's handler run to completion meanwhile —
+// concurrent decodes then advance `grid` from multiple places (field
+// log: 159 slots with ms up to 77 s, one slot label repeated 40x, zero
+// decodes). Chunks that arrive while a decode is in flight are queued
+// and processed strictly one at a time.
+const pending = [];
+let pumping = false;
+
+async function pump() {
+  if (pumping) return;
+  pumping = true;
+  try {
+    while (pending.length > 0) {
+      const chunk = pending.shift();
+      await ingest(chunk);
+    }
+  } finally {
+    pumping = false;
+  }
+}
+
+async function ingest(chunk) {
   try {
     bytesIn += chunk.length;
     carry = carry.length ? Buffer.concat([carry, chunk]) : chunk;
@@ -220,7 +241,11 @@ process.stdin.on("data", (chunk) => {
   } catch (e) {
     stderr(`stdin error: ${e}`);
   }
-  })();
+}
+
+process.stdin.on("data", (chunk) => {
+  pending.push(chunk);
+  pump();
 });
 process.stdin.on("end", () => {
   // process.exit can truncate stdout writes still in flight to the pipe
