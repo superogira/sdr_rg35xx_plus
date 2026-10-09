@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Msg is one decoded transmission as reported by the sidecar.
@@ -132,6 +133,7 @@ func Start(dir string, rate, depth, threads, low, high int) *Engine {
 	e := &Engine{cmd: cmd, in: stdin, quit: make(chan struct{}), q: make(chan []float64, 512)}
 	go e.readLoop(stdout)
 	go e.writeLoop()
+	go e.statLoop()
 	go func() {
 		_ = cmd.Wait()
 		e.mu.Lock()
@@ -139,6 +141,29 @@ func Start(dir string, rate, depth, threads, low, high int) *Engine {
 		e.mu.Unlock()
 	}()
 	return e
+}
+
+// statLoop reports queue depth every 10 s so a starved audio path is
+// visible in the device log (deep queue + drops = writer starved;
+// empty queue with silent windows at the sidecar = tap not feeding).
+func (e *Engine) statLoop() {
+	t := time.NewTicker(10 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-e.quit:
+			return
+		case <-t.C:
+			e.mu.Lock()
+			dead := e.dead
+			qlen := len(e.q)
+			e.mu.Unlock()
+			if dead {
+				return
+			}
+			fmt.Fprintf(os.Stderr, "ft8ts: queue=%d/512 dropped=%d"+string(rune(10)), qlen, atomic.LoadInt64(&e.dropped))
+		}
+	}
 }
 
 func (e *Engine) readLoop(r io.Reader) {

@@ -128,6 +128,9 @@ function decodeWindow() {
   } catch (e) {
     stderr(`decode error: ${e}`);
   }
+  let wrms = 0;
+  for (let i = 0; i < samples.length; i++) wrms += samples[i] * samples[i];
+  wrms = Math.sqrt(wrms / Math.max(1, samples.length));
   const dt = Date.now() - t0;
   for (const d of out) {
     process.stdout.write(
@@ -137,7 +140,7 @@ function decodeWindow() {
   if (out.length === 0) {
     process.stdout.write(JSON.stringify({ slot: label, n: 0, ms: dt }) + "\n");
   }
-  stderr(`slot ${label} n=${out.length} ms=${dt}`);
+  stderr(`slot ${label} n=${out.length} ms=${dt} rms=${wrms.toFixed(3)}`);
   zeroRun = out.length === 0 ? zeroRun + 1 : 0;
   grid += SLOT;
   slotLabel += SLOT_MS;
