@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Msg is one decoded transmission as reported by the sidecar.
@@ -43,8 +44,9 @@ type Engine struct {
 	once sync.Once
 	dead bool
 
-	q    chan []float64
-	msgs []Msg // undrained decodes
+	q       chan []float64
+	dropped int64 // chunks lost to a full queue (atomic)
+	msgs    []Msg // undrained decodes
 }
 
 // Rev is the sidecar revision this build expects (written into the
@@ -127,7 +129,7 @@ func Start(dir string, rate, depth, threads, low, high int) *Engine {
 		fmt.Fprintf(os.Stderr, "ft8ts: start node: %v\n", err)
 		return nil
 	}
-	e := &Engine{cmd: cmd, in: stdin, quit: make(chan struct{}), q: make(chan []float64, 64)}
+	e := &Engine{cmd: cmd, in: stdin, quit: make(chan struct{}), q: make(chan []float64, 512)}
 	go e.readLoop(stdout)
 	go e.writeLoop()
 	go func() {
@@ -169,6 +171,10 @@ func (e *Engine) Feed(x []float64) {
 	select {
 	case e.q <- cp:
 	default:
+		n := atomic.AddInt64(&e.dropped, 1)
+		if n%256 == 1 {
+			fmt.Fprintf(os.Stderr, "ft8ts: audio queue dropped %d chunks (sidecar starved)"+string(rune(10)), n)
+		}
 	}
 }
 
@@ -228,6 +234,15 @@ func (e *Engine) Take() []Msg {
 	out := e.msgs
 	e.msgs = nil
 	return out
+}
+
+// Dropped reports how many audio chunks the queue rejected (a starved
+// sidecar or a saturated CPU shows up here).
+func (e *Engine) Dropped() int64 {
+	if e == nil {
+		return 0
+	}
+	return atomic.LoadInt64(&e.dropped)
 }
 
 // Alive reports whether the sidecar is still running.

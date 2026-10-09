@@ -117,43 +117,44 @@ type Radio struct {
 	adsbDone   chan struct{}
 
 	// rtl_tcp server mode: republish the live IQ so other hosts connect.
-	srvOn      bool
-	srv        *rtltcp.Server
-	srvPort    int
-	audioTap   func(mono []float32, rate int) // web audio stream tap
-	localMute  bool                           // speaker off; web tap still live
-	aisA, aisB *ais.ChannelDemod
-	aisPay     func(payload []byte, ch int, levelDb float64)
-	aprsDem    *aprs.Demodulator
-	sstvDec    *dsp.SSTVDecoder
-	sstvOn     bool
-	nrEng      *nr.Engine
-	nrOn       bool
-	nrMode     string
-	nrExeDir   string
-	dcwEng     *deepcw.Engine
-	dcwOn      bool
-	dcwThreads int
-	dcwWindow  int
-	dcwExeDir  string
-	f8tsEng    *ft8ts.Engine
-	f8tsOn     bool
-	f8tsDepth  int
-	f8tsTh     int
-	f8tsLow    int
-	f8tsHigh   int
-	f8tsExeDir string
-	aprsRFOn   bool
-	aprsFreqHz int64     // channel centre the RX branch tracks
-	aprsOff    float64   // current offset applied to the chain
-	beacon     []float64 // pending beacon audio at 48k (nil = idle)
-	beaconPos  int
-	beaconOn   bool // true while audio is actually flowing out
-	relArm     bool // release ramp pending for the receive path
-	beaconRate int  // input rate to restore after the beacon
-	hfApplied  int  // direct-sampling mode currently set on the server
-	ppm        int  // tuner frequency correction, applied live and at every (re)connect
-	ppmOff     bool // true = leave the correction to the server's own setting
+	srvOn       bool
+	srv         *rtltcp.Server
+	srvPort     int
+	audioTap    func(mono []float32, rate int) // web audio stream tap
+	localMute   bool                           // speaker off; web tap still live
+	aisA, aisB  *ais.ChannelDemod
+	aisPay      func(payload []byte, ch int, levelDb float64)
+	aprsDem     *aprs.Demodulator
+	sstvDec     *dsp.SSTVDecoder
+	sstvOn      bool
+	nrEng       *nr.Engine
+	nrOn        bool
+	nrMode      string
+	nrExeDir    string
+	dcwEng      *deepcw.Engine
+	dcwOn       bool
+	dcwThreads  int
+	dcwWindow   int
+	dcwExeDir   string
+	f8tsEng     *ft8ts.Engine
+	ft8LastScan time.Time
+	f8tsOn      bool
+	f8tsDepth   int
+	f8tsTh      int
+	f8tsLow     int
+	f8tsHigh    int
+	f8tsExeDir  string
+	aprsRFOn    bool
+	aprsFreqHz  int64     // channel centre the RX branch tracks
+	aprsOff     float64   // current offset applied to the chain
+	beacon      []float64 // pending beacon audio at 48k (nil = idle)
+	beaconPos   int
+	beaconOn    bool // true while audio is actually flowing out
+	relArm      bool // release ramp pending for the receive path
+	beaconRate  int  // input rate to restore after the beacon
+	hfApplied   int  // direct-sampling mode currently set on the server
+	ppm         int  // tuner frequency correction, applied live and at every (re)connect
+	ppmOff      bool // true = leave the correction to the server's own setting
 
 	client  *rtltcp.Client
 	gains   int32
@@ -1742,6 +1743,14 @@ func (r *Radio) FT8TSEnabled() bool {
 	return r.f8tsOn
 }
 
+// FT8TSDropped reports audio chunks the alt engine's queue rejected.
+func (r *Radio) FT8TSDropped() int64 {
+	r.mu.Lock()
+	eng := r.f8tsEng
+	r.mu.Unlock()
+	return eng.Dropped()
+}
+
 // FT8TSParams returns depth, threads, low and high audio Hz.
 func (r *Radio) FT8TSParams() (depth, threads, low, high int) {
 	r.mu.Lock()
@@ -2135,9 +2144,28 @@ var ft8Busy bool
 func (r *Radio) FT8Process() {
 	r.mu.Lock()
 	det := r.ft8
+	altOn := r.f8tsOn
 	r.mu.Unlock()
 	if det == nil || !det.Enabled() || ft8Busy {
 		return
+	}
+	// While the alt engine runs, both decoders plus the audio chain
+	// saturate the four A53 cores and the alt's real-time audio path
+	// starves (field log: 3% of slots decoded with both on, 100% with
+	// the built-in off). The built-in scans every frame (~1 core
+	// continuously); throttling it to one scan per slot frees that
+	// core most of the time while losing nothing — its 15 s ring
+	// still sees every transmission once.
+	if altOn {
+		r.mu.Lock()
+		since := time.Since(r.ft8LastScan)
+		r.mu.Unlock()
+		if since < 13*time.Second {
+			return
+		}
+		r.mu.Lock()
+		r.ft8LastScan = time.Now()
+		r.mu.Unlock()
 	}
 	ft8Busy = true
 	go func() {

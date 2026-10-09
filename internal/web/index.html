@@ -536,6 +536,7 @@ function renderState(s) {
   const f8b = $('ft8ts');
   f8b.className = s.ft8ts ? 'on' : '';
   f8b.style.display = s.ft8tsAvail ? '' : 'none';
+  if (s.ft8ts && s.ft8tsDrop > 0) f8b.title = 'alt FT8: ' + s.ft8tsDrop + ' audio chunks dropped (CPU starved)';
   $('aisrf').className = s.aisrf ? 'on' : '';
   $('adsbrf').className = s.adsbrf ? 'on' : '';
   $('rtlsrv').className = s.rtlsrv ? 'on' : '';
