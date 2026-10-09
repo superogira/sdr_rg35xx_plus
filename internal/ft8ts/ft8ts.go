@@ -46,8 +46,10 @@ type Engine struct {
 	dead bool
 
 	q       chan []float64
-	dropped int64 // chunks lost to a full queue (atomic)
-	msgs    []Msg // undrained decodes
+	dropped int64   // chunks lost to a full queue (atomic)
+	fedRMS  float64 // running RMS of audio the tap handed us
+	fedN    int64   // samples counted into fedRMS
+	msgs    []Msg   // undrained decodes
 }
 
 // Rev is the sidecar revision this build expects (written into the
@@ -161,7 +163,11 @@ func (e *Engine) statLoop() {
 			if dead {
 				return
 			}
-			fmt.Fprintf(os.Stderr, "ft8ts: queue=%d/512 dropped=%d"+string(rune(10)), qlen, atomic.LoadInt64(&e.dropped))
+			e.mu.Lock()
+			rms := math.Sqrt(e.fedRMS)
+			e.fedRMS, e.fedN = 0, 0
+			e.mu.Unlock()
+			fmt.Fprintf(os.Stderr, "ft8ts: queue=%d/512 dropped=%d tapRMS=%.4f"+string(rune(10)), qlen, atomic.LoadInt64(&e.dropped), rms)
 		}
 	}
 }
@@ -192,6 +198,16 @@ func (e *Engine) Feed(x []float64) {
 	if e == nil {
 		return
 	}
+	// track what the tap actually delivers (silence here with signal
+	// on the band = the tap/chain layer is at fault, not the pipe)
+	var sum float64
+	for _, v := range x {
+		sum += v * v
+	}
+	e.mu.Lock()
+	e.fedRMS = (e.fedRMS*float64(e.fedN) + sum) / float64(e.fedN+int64(len(x)))
+	e.fedN += int64(len(x))
+	e.mu.Unlock()
 	cp := append([]float64(nil), x...)
 	select {
 	case e.q <- cp:
