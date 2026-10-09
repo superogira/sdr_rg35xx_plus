@@ -2,11 +2,18 @@
 # it at a random point in the 15 s cycle). Headless burst must NOT be
 # locked; the next burst with a visible head must be locked and decode.
 import subprocess, time, threading
-LIB = "file:///C:/Users/superogira/Desktop/sdr_rg35xx_plus/third_party/ft8ts/ft8ts.mjs"
+# Mid-burst restart regression: a depth/thread change restarts the
+# sidecar at a random point in the 15 s cycle; a burst whose head is
+# not visible must NOT lock the grid (it aliases -4 s and decodes
+# nothing forever). Run from the repo root: python tools/e2e_ft8ts_midburst.py
+import os, sys
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LIB = "file://" + os.path.join(ROOT, "third_party/ft8ts/ft8ts.mjs")
+SLOT = os.path.join(ROOT, ".webtest/e2e_slot.raw")
 RATE = 8000
-raw = open(".webtest/e2e_slot.raw","rb").read()   # 15 s: 12.6 s burst + 2.4 s silence
+raw = open(SLOT,"rb").read()   # 15 s: 12.6 s burst + 2.4 s silence
 sil = b"\x00" * (RATE*4*2)
-p = subprocess.Popen(["node","tools/ft8ts_sidecar.mjs",LIB,"8000","3","2","200","3000"],
+p = subprocess.Popen(["node",os.path.join(ROOT,"tools/ft8ts_sidecar.mjs"),LIB,"8000","3","2","200","3000"],
                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 errs=[]
 def pump():
