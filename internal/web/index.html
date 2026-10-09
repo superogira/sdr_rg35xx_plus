@@ -137,6 +137,57 @@ tr:hover td { background:var(--row-hover); }
 .sys b { display:block; font-size:18px; color:var(--acc); }
 .sys span { font-size:11px; color:var(--dim); }
 #err { color:var(--err); min-height:18px; font-size:12px; }
+
+/* ── rig theme: a radio's front panel (big screen left, knobs+buttons
+   right) — DOM/CSS only, no images. Pointer-drag the knobs to tune. */
+[data-theme=rig] body { background:#0b0c0d; background-image:radial-gradient(1200px 500px at 20% -10%,#17191b,#0b0c0d); }
+[data-theme=rig] main { display:block; }
+[data-theme=rig] .card { background:linear-gradient(180deg,#181b1e 0%,#111315 100%);
+  border:1px solid #2a2e33; border-radius:16px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06), inset 0 -6px 18px rgba(0,0,0,.55), 0 18px 40px rgba(0,0,0,.6); }
+/* the receiver card reads as the front panel: screen on the left */
+[data-theme=rig] .card.screen, [data-theme=rig] section:nth-of-type(2) .card { display:flex; gap:16px; align-items:stretch; }
+[data-theme=rig] .freq { font-family:"Courier New",monospace; font-weight:700; letter-spacing:3px;
+  color:#f4a63c; text-shadow:0 0 18px rgba(244,166,60,.5), 0 0 2px rgba(244,166,60,.9);
+  background:#060708; border-radius:8px; padding:8px 16px; border:1px solid #23282e;
+  box-shadow:inset 0 3px 10px rgba(0,0,0,.85), inset 0 -1px 0 rgba(255,255,255,.03); }
+[data-theme=rig] canvas { border-radius:6px; background:#050607;
+  box-shadow:inset 0 2px 12px rgba(0,0,0,.9); border:1px solid #1c2024; }
+/* knobs: vertical drag or wheel; the notch rotates */
+[data-theme=rig] .rigknob { width:74px; height:74px; border-radius:50%;
+  background:radial-gradient(circle at 35% 32%,#3b4046 0%,#23262b 40%,#14161a 100%);
+  border:2px solid #2f343a;
+  box-shadow:0 4px 10px rgba(0,0,0,.7), inset 0 2px 4px rgba(255,255,255,.1), inset 0 -3px 6px rgba(0,0,0,.7);
+  position:relative; cursor:ns-resize; touch-action:none; user-select:none; }
+[data-theme=rig] .rigknob::after { content:''; position:absolute; left:50%; top:8%;
+  width:6px; height:26%; margin-left:-3px; border-radius:3px;
+  background:#e8eaec; box-shadow:0 0 4px rgba(0,0,0,.6);
+  transform-origin:50% 200%; transform:rotate(var(--knobdeg,0deg)); }
+[data-theme=rig] .rigknob:hover { border-color:#4a5057; }
+[data-theme=rig] .rigknob:active { transform:scale(.98); }
+[data-theme=rig] .rigknob:focus { outline:none; border-color:#f4a63c; box-shadow:0 0 0 3px rgba(244,166,60,.25), 0 4px 10px rgba(0,0,0,.7), inset 0 2px 4px rgba(255,255,255,.1); }
+[data-theme=rig] .riglab { font-size:11px; color:#8a929b; text-align:center; margin-top:6px;
+  text-transform:uppercase; letter-spacing:1px; font-weight:600; }
+[data-theme=rig] .rigrow { display:flex; gap:18px; justify-content:flex-start; flex-wrap:wrap; }
+/* push buttons with the green glow when on */
+[data-theme=rig] button { border-radius:8px; font-weight:600; letter-spacing:1px;
+  background:linear-gradient(180deg,#2b3036 0%,#181c20 100%); color:#cfd4da;
+  border:1px solid #31363d; text-transform:uppercase;
+  box-shadow:0 3px 6px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.1), inset 0 -2px 3px rgba(0,0,0,.5); }
+[data-theme=rig] button:hover { background:linear-gradient(180deg,#343a41 0%,#1d2226 100%); }
+[data-theme=rig] button:active { transform:translateY(1px);
+  box-shadow:0 1px 2px rgba(0,0,0,.7), inset 0 2px 5px rgba(0,0,0,.7); }
+[data-theme=rig] button.on { color:#0b0d0e;
+  background:linear-gradient(180deg,#7ef0a8 0%,#37c878 100%);
+  border-color:#5fe08f; text-shadow:0 0 2px rgba(255,255,255,.4);
+  box-shadow:0 0 18px rgba(55,200,120,.55), 0 0 6px rgba(126,240,168,.8),
+    0 3px 6px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.5), inset 0 -2px 3px rgba(0,0,0,.25); }
+[data-theme=rig] .sys div { border-radius:8px; border:1px solid #2a2e33; }
+[data-theme=rig] .sys b { color:#f4a63c; text-shadow:0 0 10px rgba(244,166,60,.4); }
+[data-theme=rig] input[type=range] { accent-color:#f4a63c; }
+[data-theme=rig] input[type=number], [data-theme=rig] select { background:#0a0b0c; border-color:#23282e; color:#dfe3e6; }
+[data-theme=rig] .tabs button { border-radius:8px 8px 0 0; }
+
 </style>
 </head>
 <body>
@@ -173,6 +224,12 @@ tr:hover td { background:var(--row-hover); }
       </div>
       <div class="row"><label data-i18n="mode">Mode</label><select id="mode"></select>
         <label style="flex:0 0 auto">BW</label><select id="bw"></select></div>
+      <div class="row rigrow" id="rigrow" style="margin-top:10px">
+        <div><div class="rigknob" tabindex="0" id="kn-gain" role="slider" aria-label="Gain" aria-valuemin="-10" aria-valuemax="49.6"></div><div class="riglab">Gain</div></div>
+        <div><div class="rigknob" tabindex="0" id="kn-vol" role="slider" aria-label="Volume" aria-valuemin="0" aria-valuemax="1.5"></div><div class="riglab">Vol</div></div>
+        <div><div class="rigknob" tabindex="0" id="kn-sql" role="slider" aria-label="Squelch" aria-valuemin="-100" aria-valuemax="0"></div><div class="riglab">SQL</div></div>
+        <div><div class="rigknob" tabindex="0" id="kn-ppm" role="slider" aria-label="PPM" aria-valuemin="-120" aria-valuemax="120"></div><div class="riglab">PPM</div></div>
+      </div>
       <div class="row"><label data-i18n="gain">Gain</label><input type="range" id="gain" min="-10" max="49.6" step="0.1"><span class="val" id="gainv"></span></div>
       <div class="row"><label data-i18n="volume">Volume</label><input type="range" id="vol" min="0" max="1.5" step="0.001"><span class="val" id="volv"></span></div>
       <div class="row"><label data-i18n="squelch">Squelch</label><input type="range" id="sql" min="-100" max="0" step="1"><span class="val" id="sqlv"></span></div>
@@ -383,7 +440,7 @@ const STRINGS = {
     devOn: '🔈 เครื่อง', devOff: '🔇 เครื่อง',
     connFail: '○ เว็บไม่ตอบ', connOff: '○ ไม่เชื่อมต่อ ', tuned: 'จูน → ', reset: ' · ดับเบิลคลิกรีเซ็ต',
     ttTheme: 'สลับธีม', ttListen: 'สตรีมเสียงจากเครื่องเกม', ttMute: 'ปิดลำโพงเครื่องเกม (เว็บยังได้ยิน)', ttLang: 'Switch to English',
-    nextTheme: { phosphor: '☀️ ขาว', light: '📻 วิทยุ', radio: '💡 เขียว' },
+    nextTheme: { phosphor: '☀️ ขาว', light: '📻 วิทยุ', radio: '🛰 ตัวเครื่อง', rig: '💡 เขียว' },
     gpsLbl: 'GPS', gpsTitle: 'คลิกดูข้อมูล GPS ทั้งหมด',
     panelLbl: 'หน้าจอ', panelDim: 'ไฟหรี่', panelOff: 'ปิดจอ', panelOn: 'เปิดจอ',
     ttPanDim: 'ลดแสง backlight (แอปยังทำงาน)', ttPanOff: 'ปิดจอ (แอป/เว็บ/วิทยุยังทำงาน)',
@@ -420,7 +477,7 @@ const STRINGS = {
     devOn: '🔈 Device', devOff: '🔇 Device',
     connFail: '○ no response', connOff: '○ offline ', tuned: 'Tuned → ', reset: ' · dbl-click reset',
     ttTheme: 'Switch theme', ttListen: 'Stream audio from device', ttMute: 'Mute device speaker (web still hears)', ttLang: 'เปลี่ยนเป็นภาษาไทย',
-    nextTheme: { phosphor: '☀️ Light', light: '📻 Radio', radio: '💡 Green' },
+    nextTheme: { phosphor: '☀️ Light', light: '📻 Radio', radio: '🛰 Rig', rig: '💡 Green' },
     gpsLbl: 'GPS', gpsTitle: 'Click for full GPS details',
     panelLbl: 'Screen', panelDim: 'Dim', panelOff: 'Off', panelOn: 'On',
     ttPanDim: 'Dim the backlight (app keeps running)', ttPanOff: 'Screen off (app/web/radio keep running)',
@@ -455,7 +512,7 @@ function applyLang(l, pin) {
 }
 $('lang').onclick = () => { langPinned = true; applyLang(lang === 'th' ? 'en' : 'th'); };
 // Theme: 'phosphor' (default) or 'light', remembered per browser.
-const THEMES = { phosphor: null, light: 'light', radio: 'radio' };
+const THEMES = { phosphor: null, light: 'light', radio: 'radio', rig: 'rig' };
 function themeLabel(name) {
   // Show the NEXT theme the button will switch to.
   return STRINGS[lang].nextTheme[name] || '';
@@ -474,13 +531,61 @@ $('theme').onclick = () => {
   // The phosphor theme stores dataset.theme as '' — read the label as
   // the current theme instead of guessing from the empty string.
   const cur = document.documentElement.dataset.theme === '' ? 'phosphor'
-    : document.documentElement.dataset.theme === 'light' ? 'light' : 'radio';
-  const next = cur === 'phosphor' ? 'light' : cur === 'light' ? 'radio' : 'phosphor';
+    : document.documentElement.dataset.theme === 'light' ? 'light'
+    : document.documentElement.dataset.theme === 'radio' ? 'radio' : 'rig';
+  const next = cur === 'phosphor' ? 'light' : cur === 'light' ? 'radio' : cur === 'radio' ? 'rig' : 'phosphor';
   applyTheme(next);
   if (typeof wf !== 'undefined' && wctx) { wctx.fillStyle = wfBg(); wctx.fillRect(0, 0, wf.width, wf.height); }
   if (typeof drawOverlays === 'function') drawOverlays();
 };
 let st = null, tab = 'tgt', rebootPending = false;
+
+// Rig knobs: vertical drag or wheel rotates the notch and updates the
+// paired slider, so the existing command path (input events) carries
+// the change to the device exactly as a slider move would.
+function rigKnob(knobId, sliderId) {
+  const kn = $(knobId), sl = $(sliderId);
+  if (!kn || !sl) return;
+  const min = parseFloat(sl.min), max = parseFloat(sl.max);
+  const render = () => {
+    const v = (parseFloat(sl.value) - min) / (max - min);
+    kn.style.setProperty('--knobdeg', (-135 + v * 270) + 'deg');
+  };
+  const set = (v) => {
+    v = Math.min(max, Math.max(min, v));
+    sl.value = v;
+    sl.dispatchEvent(new Event('input', {bubbles: true}));
+    render();
+  };
+  sl.addEventListener('input', render);
+  render();
+  let dragging = false, startY = 0, startV = 0;
+  kn.addEventListener('pointerdown', (e) => {
+    dragging = true; startY = e.clientY; startV = parseFloat(sl.value);
+    kn.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  kn.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dy = startY - e.clientY; // up = louder/higher
+    set(startV + dy * (max - min) / 220);
+  });
+  const stop = (e) => { dragging = false; try { kn.releasePointerCapture(e.pointerId); } catch (e2) {} };
+  kn.addEventListener('pointerup', stop);
+  kn.addEventListener('pointercancel', stop);
+  kn.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    set(parseFloat(sl.value) - Math.sign(e.deltaY) * (max - min) / 40);
+  }, {passive: false});
+  kn.addEventListener('keydown', (e) => {
+    const step = (max - min) / 40;
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { set(parseFloat(sl.value) + step); e.preventDefault(); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { set(parseFloat(sl.value) - step); e.preventDefault(); }
+  });
+}
+rigKnob('kn-gain', 'gain');
+rigKnob('kn-vol', 'vol');
+rigKnob('kn-sql', 'sql');
+rigKnob('kn-ppm', 'ppm');
 const fmtMHz = hz => (hz/1e6).toFixed(4);
 
 async function api(path, body, signal) {
