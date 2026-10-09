@@ -145,8 +145,46 @@ tr:hover td { background:var(--row-hover); }
 [data-theme=rig] .card { background:linear-gradient(180deg,#181b1e 0%,#111315 100%);
   border:1px solid #2a2e33; border-radius:16px;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.06), inset 0 -6px 18px rgba(0,0,0,.55), 0 18px 40px rgba(0,0,0,.6); }
-/* the receiver card reads as the front panel: screen on the left */
-[data-theme=rig] .card.screen, [data-theme=rig] section:nth-of-type(2) .card { display:flex; gap:16px; align-items:stretch; }
+/* the receiver card reads as the front panel: the MHz readout's old
+   spot is now the spectrum+waterfall screen, controls sit beside it */
+[data-theme=rig] .card.rcv { display:grid; grid-template-columns:minmax(0,1fr) 350px;
+  gap:10px 16px; align-items:start; }
+[data-theme=rig] .card.rcv > div:first-child { grid-column:1/-1; }
+@media (max-width:900px) { [data-theme=rig] .card.rcv { grid-template-columns:1fr; } }
+/* status readouts above the spectrum: 4 rows × 4 columns, column 2 is
+   half the width and carries the big dotted frequency (no unit text) */
+[data-theme=rig] #rigstatus { display:grid; grid-template-columns:1fr 3fr 1fr 1fr;
+  grid-template-rows:repeat(4, minmax(19px, auto)); gap:2px 10px;
+  background:#060708; border:1px solid #1c2024; border-radius:6px;
+  padding:6px 10px; margin-bottom:6px;
+  font-family:"Courier New",monospace; color:#f4a63c;
+  text-shadow:0 0 10px rgba(244,166,60,.35); }
+[data-theme=rig] #rigstatus .st { font-size:13px; letter-spacing:1px;
+  white-space:nowrap; align-self:center; min-width:0; }
+[data-theme=rig] #rigstatus .r { text-align:right; }
+[data-theme=rig] #rigstatus .u { color:#8a929b; font-size:10px; text-shadow:none; }
+[data-theme=rig] #rigst-mode { grid-area:1/1; font-weight:700; }
+[data-theme=rig] #rigst-freq { grid-area:2/2; text-align:center; }
+[data-theme=rig] #rigst-clock { grid-area:1/4/3/5; line-height:1.35; }
+/* mode + the clock block read as separate lit segments on the LCD */
+[data-theme=rig] #rigst-mode, [data-theme=rig] #rigst-clock {
+  border:1px solid #4d3f22; border-radius:4px; padding:1px 8px;
+  justify-self:start; background:rgba(244,166,60,.05);
+  box-shadow:inset 0 1px 4px rgba(0,0,0,.6), 0 0 6px rgba(244,166,60,.12); }
+[data-theme=rig] #rigst-clock { justify-self:end; }
+[data-theme=rig] #rigst-freq #freq { display:inline-block; font-size:25px;
+  padding:0 10px; letter-spacing:2px; }
+[data-theme=rig] #spc, [data-theme=rig] #spcOv { height:130px !important; }
+[data-theme=rig] #wf, [data-theme=rig] #wfOv { height:280px !important; }
+[data-theme=rig] #specfull { position:absolute; top:4px; right:6px; z-index:6; }
+/* fullscreen spectrum keeps the front panel's own screen (the generic
+   .specfull rules size the canvases inside it) */
+[data-theme=rig] body.specfull section:not(#sec-rx) { display:none; }
+[data-theme=rig] body.specfull #sec-rx { display:block; }
+[data-theme=rig] body.specfull #sec-rx > .card:not(.rcv) { display:none; }
+[data-theme=rig] body.specfull .card.rcv { display:flex; flex-direction:column; height:calc(100vh - 12px); }
+[data-theme=rig] body.specfull #rigctrls { display:none; }
+[data-theme=rig] body.specfull #rigscreen { flex:1 1 auto; min-height:140px; display:flex; flex-direction:column; }
 [data-theme=rig] .freq { font-family:"Courier New",monospace; font-weight:700; letter-spacing:3px;
   color:#f4a63c; text-shadow:0 0 18px rgba(244,166,60,.5), 0 0 2px rgba(244,166,60,.9);
   background:#060708; border-radius:8px; padding:8px 16px; border:1px solid #23282e;
@@ -200,8 +238,8 @@ tr:hover td { background:var(--row-hover); }
   <span id="up" style="color:var(--dim);font-size:12px"></span>
 </header>
 <main>
-  <section>
-    <div class="card">
+  <section id="sec-rx">
+    <div class="card rcv">
       <div style="display:flex;align-items:center;gap:8px;margin:0 0 10px">
         <h2 data-i18n="receiver" style="margin:0">Receiver</h2>
         <span style="flex:1"></span>
@@ -209,6 +247,7 @@ tr:hover td { background:var(--row-hover); }
         <select id="rate" style="width:auto"></select>
       </div>
       <div class="freq" id="freq" data-i18n-title="tuneHint">0.0000 <small>MHz</small></div>
+      <div id="rigctrls">
       <div class="row">
         <button id="dn1k">−1k</button><button id="dn100">−100</button>
         <button id="up100">+100</button><button id="up1k">+1k</button>
@@ -259,6 +298,7 @@ tr:hover td { background:var(--row-hover); }
       <div class="row"><label data-i18n="webvol">เสียงเว็บ</label><input type="range" id="wgain" min="0" max="3" step="0.1" value="1"><span class="val" id="wgainv">100%</span>
         <span class="val" id="abuf" style="color:var(--dim)"></span></div>
       <div id="err"></div>
+      </div><!-- /rigctrls -->
     </div>
     <div class="card" style="margin-top:12px">
       <h2 data-i18n="system">System</h2>
@@ -411,6 +451,14 @@ tr:hover td { background:var(--row-hover); }
 </div>
 <script>
 const $ = id => document.getElementById(id);
+const fmtMHz = hz => (hz/1e6).toFixed(4);
+// rig theme shows pure digits with dots between kHz/MHz/GHz groups
+// (9.000.000 = 9 MHz); other themes keep the "0.0000 MHz" form.
+// Declared up here: applyTheme/rigLayout run before the radio code
+// below and must be able to re-format the readout on theme switches.
+const fmtFreq = hz => document.documentElement.dataset.theme === 'rig'
+  ? String(hz).replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+  : fmtMHz(hz) + ' <small>MHz</small>';
 // ---- i18n: TH (default) / EN, remembered per browser ----
 const STRINGS = {
   th: {
@@ -517,10 +565,57 @@ function themeLabel(name) {
   // Show the NEXT theme the button will switch to.
   return STRINGS[lang].nextTheme[name] || '';
 }
+// Rig front panel: the MHz readout's spot becomes the spectrum+
+// waterfall screen, with a 4×4 status readout bar above it (mode,
+// big dotted frequency, device local + UTC clocks). Pure DOM moves —
+// ids (and their handlers) travel with the nodes, so leaving the
+// theme just puts everything back.
+let clockOff = 0; // device epoch − browser epoch; 0 until first state
+function rigLayout(on) {
+  const freq = $('freq'), ctrls = $('rigctrls');
+  const specCard = document.querySelector('#sec-spec .card');
+  if (!freq || !ctrls || !specCard) return;
+  if (on) {
+    if ($('rigscreen')) return;
+    const scr = document.createElement('div');
+    scr.id = 'rigscreen';
+    const bar = document.createElement('div');
+    bar.id = 'rigstatus';
+    bar.innerHTML = '<div class="st" id="rigst-mode">—</div>' +
+      '<div class="st" id="rigst-freq"></div>' +
+      '<div class="st r" id="rigst-clock"><div id="rigst-lcl"></div><div id="rigst-utc"><span id="rigst-utct"></span> <span class="u">UTC</span></div></div>';
+    scr.appendChild(bar);
+    ctrls.parentNode.insertBefore(scr, ctrls);
+    scr.appendChild($('spc').parentElement);
+    scr.appendChild($('freqaxis'));
+    scr.appendChild($('wfwrap'));
+    $('rigst-freq').appendChild(freq);                  // frequency readout lives here
+    // re-format the placeholder ("0.0000 MHz" → "0") even before the
+    // first state arrives; parseFloat of a dotted form still works
+    freq.innerHTML = fmtFreq(Math.round(parseFloat(freq.textContent) * 1e6));
+    $('spc').parentElement.appendChild($('specfull'));  // ⛶ over the spectrum
+  } else {
+    const scr = $('rigscreen');
+    if (!scr) return;
+    const anchor = $('sigdb').closest('.row');
+    specCard.insertBefore($('spc').parentElement, anchor);
+    specCard.insertBefore($('freqaxis'), anchor);
+    specCard.insertBefore($('wfwrap'), anchor);
+    specCard.querySelector('h2').appendChild($('specfull'));
+    ctrls.parentNode.insertBefore(freq, ctrls);
+    // the readout just carried the dotted rig form — restore "0.0000 MHz"
+    // (source is always dotted here, so stripping dots is unambiguous)
+    freq.innerHTML = fmtFreq(parseInt(freq.textContent.replace(/\./g, '')) || 0);
+    scr.remove();
+  }
+  try { if (specState) drawOverlays(); } catch (e) {} // specState may be TDZ on first load
+}
 function applyTheme(name) {
   document.documentElement.dataset.theme = THEMES[name] || '';
   try { localStorage.setItem('sdr-theme', name); } catch (e) {}
   $('theme').textContent = themeLabel(name);
+  rigLayout(name === 'rig');
+  try { if (st) $('freq').innerHTML = fmtFreq(st.freqHz); } catch (e) {} // st may be TDZ on first load
 }
 {
   let t = 'phosphor';
@@ -586,7 +681,16 @@ rigKnob('kn-gain', 'gain');
 rigKnob('kn-vol', 'vol');
 rigKnob('kn-sql', 'sql');
 rigKnob('kn-ppm', 'ppm');
-const fmtMHz = hz => (hz/1e6).toFixed(4);
+// rig status clocks: tick locally between state polls, skewed by the
+// device-clock offset so they show the radio's time, not the browser's
+// (offset 0 until the first /api/state — falls back to browser time).
+setInterval(() => {
+  const d = new Date(Date.now() + clockOff);
+  const p = n => String(n).padStart(2, '0');
+  const lcl = $('rigst-lcl'), utc = $('rigst-utct');
+  if (lcl) lcl.textContent = p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  if (utc) utc.textContent = p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ':' + p(d.getUTCSeconds());
+}, 500);
 
 async function api(path, body, signal) {
   const opt = body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {};
@@ -611,7 +715,9 @@ function renderState(s) {
   if (!langPinned && s.lang && s.lang !== lang) applyLang(s.lang, false);
   $('conn').textContent = s.connected ? '● ' + s.host : STRINGS[lang].connOff + s.host;
   $('conn').className = s.connected ? 'on' : '';
-  $('freq').innerHTML = fmtMHz(s.freqHz) + ' <small>MHz</small>';
+  $('freq').innerHTML = fmtFreq(s.freqHz);
+  if (s.timeMs) clockOff = s.timeMs - Date.now();
+  { const m = $('rigst-mode'); if (m) m.textContent = s.mode; }
   $('up').textContent = 'up ' + Math.floor(s.upSecs/60) + 'm';
   // selects
   if ($('mode').options.length !== s.modes.length) {

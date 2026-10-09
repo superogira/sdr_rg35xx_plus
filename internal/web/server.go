@@ -454,6 +454,7 @@ type state struct {
 	Planes    int       `json:"planes"`
 	Ships     int       `json:"ships"`
 	UpSecs    int       `json:"upSecs"`
+	TimeMs    int64     `json:"timeMs"` // device wall clock (epoch ms) for the rig clock
 	RxLat     float64   `json:"rxLat"`
 	RxLon     float64   `json:"rxLon"`
 	GPS       *GPSInfo  `json:"gps"`
@@ -567,7 +568,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		CPU: cpu, MEM: mem, BAT: sens.BattPct,
 		BATChg: strings.Contains(sens.BattStatus, "harg"),
 		Planes: s.adsb.CountLive(), Ships: len(s.ais.Ships()),
-		UpSecs: int(time.Since(s.upSince).Seconds()), Lang: i18n.Lang(),
+		UpSecs: int(time.Since(s.upSince).Seconds()), Lang: i18n.Lang(), TimeMs: time.Now().UnixMilli(),
 		WfMin: 6, WfMax: 62,
 		RxLat: s.rx[0], RxLon: s.rx[1],
 		CPUTemp: sens.CPUTemp, GPUTemp: sens.GPUTemp, DDRTemp: sens.DDRTemp,
