@@ -11,16 +11,18 @@
 //           lock/resync events and errors — enough to diagnose a
 //           silent field failure from the device log alone.
 //
-// Slot timing is PHASE-LOCKED TO THE ARRIVING AUDIO, not to the wall
-// clock: decodeFT8's sync search only covers bursts within ~2 s of the
-// block start (measured), while a networked source (WAN rtl_tcp)
-// delivers audio seconds late and with jitter — wall-clock slicing
-// decoded nothing in the field. The lock finds a 12.6 s transmission
-// burst in the envelope (0.5 s RMS blocks), cuts the window 0.1 s
-// before it, then advances by exactly 15 s per slot. Wall-clock slot
-// labels are derived once at lock time (for history/a7) and advance
-// with the grid. Three consecutive empty windows re-run the burst
-// search in case the stream slipped.
+// Slot timing is found by DECODE-PROBING, not an envelope: an RMS
+// envelope cannot separate an FT8 burst from noise below ~+12 dB SNR
+// (burst/gap ratio is 1.05 at -10 dB), so the previous envelope lock
+// never locked on real-world bands. Instead, once a full 15 s window
+// is buffered, decode it at a set of candidate offsets (0 s and
+// ±0.5/±1 s; decodeFT8's own sync search covers ±2 s from the block
+// start). A successful decode defines the grid: that window's start is
+// the slot boundary. Later windows advance by exactly 15 s; small
+// drift is re-centred after every successful decode (the decode's own
+// timing estimate does not expose dt, so the grid follows the audio by
+// construction of decode-at-grid). A quiet run (no decodes) re-probes
+// at the offsets again, so the lock survives silence and sample drops.
 //
 // usage: node ft8ts_sidecar.mjs lib.mjs rate depth threads low high
 const { decodeFT8, FT8DecoderPool, FT8History } = await import(process.argv[2]);
@@ -33,97 +35,34 @@ const freqHigh = Math.min(parseInt(highS || "3000", 10), rate / 2 - 200);
 
 const SLOT_MS = 15000;
 const SLOT = Math.round((SLOT_MS / 1000) * rate); // samples per slot
-const BLK = Math.round(0.5 * rate); // envelope block: 0.5 s
-const BURST_BLOCKS = 16; // >= 8 s of tone = a transmission
-const PRE = Math.round(0.1 * rate); // window lead before the burst
 const history = new FT8History();
 const pool = threads > 1 ? new FT8DecoderPool({ threads }) : null;
+
+// probe offsets: decodeFT8 sync search covers ±2 s around the window
+// start, so these 5 offsets cover a full slot with margin; 0 is tried
+// first (the common case: wall-clock-ish grid or already-drifted)
+const PROBES = [0, 0.5, 1.0, -0.5, -1.0].map((s) => Math.round(s * rate));
 
 let buf = new Float32Array(0);
 let carry = Buffer.alloc(0); // stdin bytes awaiting a full float32
 let bytesIn = 0;
-let locked = false;
-let grid = 0; // buffer index of the next slot window start
-let slotLabel = 0; // wall-clock ms label of that slot
-let zeroRun = 0; // consecutive empty decodes (re-lock trigger)
-let envPos = 0; // buffer index just past the last env block
-let envStart = 0; // buffer index of env[0]
-const env = []; // RMS per 0.5 s block from envStart
+let grid = -1; // buffer index of the next slot window start; -1 = not locked
+let slotLabel = 0; // wall-clock ms label of the window at `grid`
+let zeroRun = 0; // consecutive empty windows since last decode
+let probing = false;
 
 const stderr = (m) => process.stderr.write(m + "\n");
 
 setInterval(() => {
-  stderr(`stream ${(bytesIn / 1e6).toFixed(1)}MB buffered=${(buf.length / rate).toFixed(1)}s locked=${locked}`);
+  stderr(
+    `stream ${(bytesIn / 1e6).toFixed(1)}MB buffered=${(buf.length / rate).toFixed(1)}s locked=${grid >= 0}`
+  );
 }, 30000).unref();
 
 stderr(`READY ${rate} ${depth} ${threads}`);
 
-// envelope lock: start block of the longest tone run, or -1.
-// HEAD RULE: a run touching env[0] may be a burst whose head arrived
-// before the buffer/envelope began (sidecar restarted mid-burst — the
-// tone occupies 84% of the 15 s cycle). Locking on it aliases the grid
-// 2-4 s early, every window then misses the burst head and decodes
-// nothing FOREVER (field log: endless n=0 after depth/thread changes;
-// only off/on fixed it). Require the run to start at index >= 1 — the
-// run tracker guarantees env[start-1] is below threshold — and wait
-// for the next burst when the head is not visible.
-function findBurst() {
-  if (env.length < BURST_BLOCKS + 8) return -1;
-  let max = 0;
-  for (const v of env) if (v > max) max = v;
-  if (max <= 0) return -1;
-  const thr = max * 0.25;
-  let best = -1, bestLen = 0, start = -1, len = 0;
-  for (let i = 0; i < env.length; i++) {
-    if (env[i] > thr) {
-      if (start < 0) start = i;
-      len = i - start + 1;
-      if (len > bestLen) { bestLen = len; best = start; }
-    } else {
-      start = -1;
-    }
-  }
-  if (bestLen < BURST_BLOCKS || best < 1) return -1;
-  return best;
-}
-
-// extend env over whole blocks; drop blocks that fell behind `grid`
-function updateEnv() {
-  while (envPos + BLK <= buf.length) {
-    let e = 0;
-    for (let i = 0; i < BLK; i++) {
-      const v = buf[envPos + i];
-      e += v * v;
-    }
-    env.push(Math.sqrt(e / BLK));
-    envPos += BLK;
-  }
-  while (envStart < grid && env.length > 0) {
-    env.shift();
-    envStart += BLK;
-  }
-}
-
-// env[0] always corresponds to buffer index `grid` (updateEnv trims it)
-function lockAt(burstBlock) {
-  const burstIdx = grid + burstBlock * BLK;
-  const burstWall = Date.now() - ((buf.length - burstIdx) / rate) * 1000;
-  grid = Math.max(0, burstIdx - PRE);
-  slotLabel = Math.floor(burstWall / SLOT_MS) * SLOT_MS;
-  locked = true;
-  zeroRun = 0;
-  stderr(`locked: burst ${((buf.length - burstIdx) / rate).toFixed(1)}s old, slot ${slotLabel}`);
-}
-
-async function decodeWindow() {
-  if (grid + SLOT > buf.length) return false;
-  const samples = buf.slice(grid, grid + SLOT);
-  const label = slotLabel;
-  const keepFrom = Math.max(0, grid + SLOT - BLK); // 0.5 s context lead
-  buf = buf.slice(keepFrom);
-  grid -= keepFrom;
-  envPos -= keepFrom;
-  envStart -= keepFrom;
+async function decodeAt(idx, label, register) {
+  const samples = buf.slice(idx, idx + SLOT);
   const t0 = Date.now();
   let out = [];
   try {
@@ -147,31 +86,32 @@ async function decodeWindow() {
   } catch (e) {
     stderr(`decode error: ${e}`);
   }
-  let wrms = 0;
-  for (let i = 0; i < samples.length; i++) wrms += samples[i] * samples[i];
-  wrms = Math.sqrt(wrms / Math.max(1, samples.length));
   const dt = Date.now() - t0;
   for (const d of out) {
     process.stdout.write(
       JSON.stringify({ slot: label, freq: d.freq, snr: d.snr, msg: d.msg, kind: d.kind ?? 0, ms: dt }) + "\n"
     );
   }
-  if (out.length === 0) {
+  if (register && out.length === 0) {
     process.stdout.write(JSON.stringify({ slot: label, n: 0, ms: dt }) + "\n");
   }
-  stderr(`slot ${label} n=${out.length} ms=${dt} rms=${wrms.toFixed(3)}`);
-  zeroRun = out.length === 0 ? zeroRun + 1 : 0;
-  grid += SLOT;
-  slotLabel += SLOT_MS;
-  return true;
+  stderr(`slot ${label} n=${out.length} ms=${dt}`);
+  return out.length;
+}
+
+// The wall-clock label of a window starting at buffer index idx: the
+// newest sample arrived ~now, so the window's start was
+// (buf.length - idx)/rate seconds ago.
+function labelFor(idx) {
+  const startWall = Date.now() - ((buf.length - idx) / rate) * 1000;
+  return Math.floor(startWall / SLOT_MS) * SLOT_MS;
 }
 
 // Serialised pump: pool.decode() awaits, and awaiting inside the data
 // handler lets a second chunk's handler run to completion meanwhile —
-// concurrent decodes then advance `grid` from multiple places (field
-// log: 159 slots with ms up to 77 s, one slot label repeated 40x, zero
-// decodes). Chunks that arrive while a decode is in flight are queued
-// and processed strictly one at a time.
+// concurrent decodes then advance `grid` from multiple places. Chunks
+// that arrive while a decode is in flight are queued and processed
+// strictly one at a time.
 const pending = [];
 let pumping = false;
 
@@ -201,50 +141,96 @@ async function ingest(chunk) {
     merged.set(f, buf.length);
     buf = merged;
 
-    if (!locked) {
-      updateEnv();
-      const b = findBurst();
-      if (b >= 0) lockAt(b);
-      else if (buf.length > SLOT * 3) {
-        // no FT8 burst in three slots of audio: drop the old tail and
-        // rebuild the envelope so a later burst is still findable
-        const drop = buf.length - SLOT;
-        buf = buf.slice(drop);
-        env.length = 0;
-        envPos = 0;
-        envStart = 0;
-        updateEnv();
-      }
-    }
-    if (locked) {
-      updateEnv();
-      let guard = 0;
-      while (grid + SLOT <= buf.length && guard++ < 8) await decodeWindow();
-      if (zeroRun >= 2) {
-        // Two empty windows: either a genuinely quiet stretch or the
-        // grid slipped (jitter accumulation, dropped audio). A burst
-        // visible far from the next window start proves a slip —
-        // re-lock; silence keeps the grid (quiet slots are normal).
-        const b = findBurst();
-        if (b >= 0) {
-          const burstIdx = grid + b * BLK;
-          const offSec = (burstIdx - PRE - grid) / rate;
-          if (offSec > 2.5 || offSec < -1) {
-            stderr(`slip ${(offSec).toFixed(1)}s — re-lock`);
-            lockAt(b);
+    if (grid < 0) {
+      // UNLOCKED: probe a full 15 s window for a transmission. Probe
+      // the newest complete window first (least latency), then older
+      // ones, at each of the candidate offsets. A decode at offset o
+      // of a window starting at w means the slot boundary is w+o —
+      // except that sync search tolerates ±2 s, so w+o is the boundary
+      // only when |o| < 2; the offsets here are all within ±1 s, and
+      // the NEXT window starts 15 s later from that boundary.
+      if (!probing && buf.length >= SLOT) {
+        probing = true;
+        try {
+          // Dense boundary scan: the transmission heads land at arbitrary
+          // phases inside the buffer, so SLOT-aligned windows miss them
+          // (mid-burst restart test: heads at 9 s and 24 s of 45 s never
+          // aligned with windows [0,15],[15,30],[30,45)). decodeFT8's own
+          // sync search covers ±2 s, so stepping the candidate boundary
+          // every 3 s is enough to find any phase; scan the newest two
+          // slots worth of candidates.
+          const step = Math.round(3 * rate);
+          outer: for (let idx = buf.length - SLOT; idx >= 0; idx -= step) {
+            const got = await decodeAt(idx, labelFor(idx), false);
+            if (got > 0) {
+              // this window's start is (close to) a slot boundary: the
+              // NEXT window starts one slot later
+              grid = idx + SLOT;
+              slotLabel = labelFor(idx) + SLOT_MS;
+              zeroRun = 0;
+              stderr(`locked: grid at ${idx}, next slot ${slotLabel}`);
+              break outer;
+            }
           }
-        } else if (zeroRun >= 6) {
-          locked = false; // long silence: search from scratch
-          stderr("unlocked (long silence)");
+        } finally {
+          probing = false;
+        }
+        // no luck: bound the buffer to ~2 slots and try again with
+        // fresh audio (a quiet band or sub-threshold signals)
+        if (grid < 0 && buf.length > SLOT * 2) {
+          const drop = buf.length - SLOT * 2;
+          buf = buf.slice(drop);
         }
       }
-      const maxKeep = SLOT * 3;
-      if (buf.length > maxKeep) {
-        const drop = buf.length - maxKeep;
+    } else {
+      // LOCKED: decode consecutive windows from the grid
+      let guard = 0;
+      while (grid >= 0 && grid + SLOT <= buf.length && guard++ < 4) {
+        const got = await decodeAt(grid, slotLabel, true);
+        zeroRun = got > 0 ? 0 : zeroRun + 1;
+        grid += SLOT;
+        slotLabel += SLOT_MS;
+      }
+      // Quiet run: the band went silent or the grid drifted (dropped
+      // audio shifts the stream). 2+ empties re-probe; a probe hit
+      // both re-locks and catches up on the missed windows.
+      if (zeroRun >= 2 && !probing && buf.length >= SLOT) {
+        probing = true;
+        try {
+          let best = -1;
+          for (let w = buf.length - SLOT; w >= 0 && w >= buf.length - SLOT * 2; w -= Math.round(0.5 * rate)) {
+            for (const off of PROBES) {
+              const idx = w - off;
+              if (idx < 0 || idx + SLOT > buf.length) continue;
+              const got = await decodeAt(idx, labelFor(idx), false);
+              if (got > 0) {
+                best = idx;
+                break;
+              }
+            }
+            if (best >= 0) break;
+          }
+          if (best >= 0) {
+            grid = best + SLOT;
+            slotLabel = labelFor(best) + SLOT_MS;
+            zeroRun = 0;
+            stderr(`re-locked at ${best}, next slot ${slotLabel}`);
+          } else if (zeroRun >= 6) {
+            grid = -1; // genuinely silent: back to fresh probing
+            stderr("unlocked (long silence)");
+          }
+        } finally {
+          probing = false;
+        }
+      }
+      // bound memory: keep the pending window plus context
+      if (grid >= 0 && buf.length - grid > SLOT + Math.round(2 * rate)) {
+        const drop = buf.length - grid - SLOT - Math.round(2 * rate);
         buf = buf.slice(drop);
-        grid = Math.max(0, grid - drop);
-        envPos -= drop;
-        envStart -= drop;
+        grid -= drop;
+      } else if (grid < 0 && buf.length > SLOT * 2) {
+        const drop = buf.length - SLOT * 2;
+        buf = buf.slice(drop);
       }
     }
   } catch (e) {

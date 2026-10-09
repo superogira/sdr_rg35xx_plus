@@ -27,13 +27,11 @@ def feed(data):
         p.stdin.write(data[off:off+16000]); p.stdin.flush(); off += 16000
         tgt = off/(RATE*4.0); now=time.time()-t0
         if tgt-now>0: time.sleep(tgt-now)
-# start mid-burst: first 7 s of the burst with NO silence lead
-feed(raw[:RATE*4*7])
-# then two normal slots
-feed(sil + raw)
-feed(sil + raw)
-print("fed; waiting 20 s for lagging decodes", flush=True)
-time.sleep(20)
+# start mid-burst: first 7 s of the burst with NO silence lead, then
+# three full slots so the trailing window has time to decode after lock
+feed(raw[:RATE*4*7] + sil + raw + raw + sil + raw)
+print("fed; waiting 25 s for lagging decodes", flush=True)
+time.sleep(25)
 p.kill()
 out = p.stdout.read().decode()
 msgs  = [l for l in out.splitlines() if '"msg"' in l]
