@@ -30,3 +30,9 @@ third_party/ft8ts/ft8ts.d.ts
 third_party/ft8ts/package.json
 third_party/ft8ts/bench/*.raw
 .webtest/nodestage/
+
+# credentials and dev artifacts — never commit
+/ftp.env
+/capture.wav
+/device_screen_now.png
+/dist/
