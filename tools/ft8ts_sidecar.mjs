@@ -58,7 +58,15 @@ setInterval(() => {
 
 stderr(`READY ${rate} ${depth} ${threads}`);
 
-// envelope lock: start block of the longest tone run, or -1
+// envelope lock: start block of the longest tone run, or -1.
+// HEAD RULE: a run touching env[0] may be a burst whose head arrived
+// before the buffer/envelope began (sidecar restarted mid-burst — the
+// tone occupies 84% of the 15 s cycle). Locking on it aliases the grid
+// 2-4 s early, every window then misses the burst head and decodes
+// nothing FOREVER (field log: endless n=0 after depth/thread changes;
+// only off/on fixed it). Require the run to start at index >= 1 — the
+// run tracker guarantees env[start-1] is below threshold — and wait
+// for the next burst when the head is not visible.
 function findBurst() {
   if (env.length < BURST_BLOCKS + 8) return -1;
   let max = 0;
@@ -75,7 +83,8 @@ function findBurst() {
       start = -1;
     }
   }
-  return bestLen >= BURST_BLOCKS ? best : -1;
+  if (bestLen < BURST_BLOCKS || best < 1) return -1;
+  return best;
 }
 
 // extend env over whole blocks; drop blocks that fell behind `grid`
