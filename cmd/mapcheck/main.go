@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 superogira <SDRg35xx project>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// mapcheck — dev tool: verifies every maps/*.png shares the world map's
+// mapcheck — dev tool: verifies every internal/ui/maps/*.png shares the world map's
 // geography (same projection & alignment). Compares coastline edge maps
 // at coarse resolution; the reference is world_map_2.png (landmark-
 // verified equirectangular). A map passes when its edge structure
@@ -108,13 +108,13 @@ func pearson(ref, m []float64, dx, dy int) float64 {
 }
 
 func main() {
-	files, err := filepath.Glob("maps/*.png")
+	files, err := filepath.Glob("internal/ui/maps/*.png")
 	if err != nil || len(files) == 0 {
 		fmt.Println("no maps found:", err)
 		os.Exit(1)
 	}
 	sort.Strings(files)
-	ref, err := edgeMap("maps/world_map_2.png")
+	ref, err := edgeMap("internal/ui/maps/world_map_2.png")
 	if err != nil {
 		fmt.Println("reference:", err)
 		os.Exit(1)

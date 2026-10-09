@@ -36,3 +36,12 @@ third_party/ft8ts/bench/*.raw
 /capture.wav
 /device_screen_now.png
 /dist/
+
+# one-off render captures — never commit
+/preview_*.png
+/pv_*.png
+/pal_*.png
+/smoke*.png
+/x
+/maps/
+/res/
