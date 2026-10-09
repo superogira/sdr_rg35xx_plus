@@ -163,15 +163,24 @@ tr:hover td { background:var(--row-hover); }
   white-space:nowrap; align-self:center; min-width:0; }
 [data-theme=rig] #rigstatus .r { text-align:right; }
 [data-theme=rig] #rigstatus .u { color:#8a929b; font-size:10px; text-shadow:none; }
-[data-theme=rig] #rigst-mode { grid-area:1/1; font-weight:700; }
+[data-theme=rig] #rigst-mbw { grid-area:1/1; display:inline-flex; gap:6px; justify-self:start; }
 [data-theme=rig] #rigst-freq { grid-area:2/2; text-align:center; }
 [data-theme=rig] #rigst-clock { grid-area:1/4/3/5; line-height:1.35; }
-/* mode + the clock block read as separate lit segments on the LCD */
-[data-theme=rig] #rigst-mode, [data-theme=rig] #rigst-clock {
+/* mode and BW are separate lit segments on the LCD; the mode/BW
+   dropdown row moves into them in rig theme */
+[data-theme=rig] #moderow { display:none; }
+[data-theme=rig] #rigst-mbw .clk {
+  font-weight:700; cursor:pointer;
   border:1px solid #4d3f22; border-radius:4px; padding:1px 8px;
-  justify-self:start; background:rgba(244,166,60,.05);
+  background:rgba(244,166,60,.05);
   box-shadow:inset 0 1px 4px rgba(0,0,0,.6), 0 0 6px rgba(244,166,60,.12); }
-[data-theme=rig] #rigst-clock { justify-self:end; }
+[data-theme=rig] #rigst-mbw .clk:hover { color:#ffd28a; text-shadow:0 0 12px rgba(244,166,60,.75); }
+[data-theme=rig] #rigst-clock {
+  border:1px solid #4d3f22; border-radius:4px; padding:1px 8px;
+  justify-self:end; background:rgba(244,166,60,.05);
+  box-shadow:inset 0 1px 4px rgba(0,0,0,.6), 0 0 6px rgba(244,166,60,.12); }
+.pickgrid { display:flex; flex-wrap:wrap; gap:8px; }
+.pickgrid button { min-width:68px; }
 [data-theme=rig] #rigst-freq #freq { display:inline-block; font-size:25px;
   padding:0 10px; letter-spacing:2px; }
 [data-theme=rig] #spc, [data-theme=rig] #spcOv { height:130px !important; }
@@ -264,7 +273,7 @@ tr:hover td { background:var(--row-hover); }
         </div>
         <span class="val" id="sval" style="min-width:112px;text-align:right">S0 · −100.0 dBFS</span>
       </div>
-      <div class="row"><label data-i18n="mode">Mode</label><select id="mode"></select>
+      <div class="row" id="moderow"><label data-i18n="mode">Mode</label><select id="mode"></select>
         <label style="flex:0 0 auto">BW</label><select id="bw"></select></div>
       <div class="row rigrow" id="rigrow" style="margin-top:10px">
         <div><div class="rigknob" tabindex="0" id="kn-gain" role="slider" aria-label="Gain" aria-valuemin="-10" aria-valuemax="49.6"></div><div class="riglab">Gain</div></div>
@@ -452,6 +461,15 @@ tr:hover td { background:var(--row-hover); }
     </div>
   </div>
 </div>
+<div id="pickmodal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);align-items:center;justify-content:center;z-index:50">
+  <div style="background:var(--panel);border:1px solid var(--card-border);border-radius:10px;padding:14px 16px;min-width:240px;max-width:380px">
+    <div style="display:flex;align-items:center;margin-bottom:10px">
+      <b style="font-size:15px" id="picktitle">—</b>
+      <button id="pickclose" style="margin-left:auto;padding:2px 10px">✕</button>
+    </div>
+    <div id="pickgrid" class="pickgrid"></div>
+  </div>
+</div>
 <script>
 const $ = id => document.getElementById(id);
 const fmtMHz = hz => (hz/1e6).toFixed(4);
@@ -584,11 +602,13 @@ function rigLayout(on) {
     scr.id = 'rigscreen';
     const bar = document.createElement('div');
     bar.id = 'rigstatus';
-    bar.innerHTML = '<div class="st" id="rigst-mode">—</div>' +
+    bar.innerHTML = '<div class="st" id="rigst-mbw"><span id="rigst-mode" class="clk">—</span><span id="rigst-bw" class="clk">—</span></div>' +
       '<div class="st" id="rigst-freq"></div>' +
       '<div class="st r" id="rigst-clock"><div id="rigst-lcl"></div><div id="rigst-utc"><span id="rigst-utct"></span> <span class="u">UTC</span></div></div>';
     scr.appendChild(bar);
-    ctrls.parentNode.insertBefore(scr, ctrls);
+    ctrls.parentNode.insertBefore(scr, ctrls); // bar must be in the document before getElementById can see its cells
+    $('rigst-mode').onclick = () => rigPick('mode');
+    $('rigst-bw').onclick = () => rigPick('bw');
     scr.appendChild($('spc').parentElement);
     scr.appendChild($('freqaxis'));
     scr.appendChild($('wfwrap'));
@@ -721,6 +741,7 @@ function renderState(s) {
   $('freq').innerHTML = fmtFreq(s.freqHz);
   if (s.timeMs) clockOff = s.timeMs - Date.now();
   { const m = $('rigst-mode'); if (m) m.textContent = s.mode; }
+  { const b = $('rigst-bw'); if (b) b.textContent = (s.bwHz/1000).toFixed(1) + 'k'; }
   $('up').textContent = 'up ' + Math.floor(s.upSecs/60) + 'm';
   // selects
   if ($('mode').options.length !== s.modes.length) {
@@ -929,6 +950,34 @@ $('fqcancel').onclick = fqClose;
 $('fqclose').onclick = fqClose;
 $('fqmodal').addEventListener('click', (e) => {
   if (e.target === $('fqmodal')) fqClose();
+});
+// ---- rig status pickers (mode / BW): the dropdown row is hidden in
+// rig theme; the hidden selects stay the source of truth and picking
+// an option just sets the select and fires its change event, so the
+// command path is exactly the dropdown's ----
+function rigPick(which) {
+  const sel = $(which);
+  const grid = $('pickgrid');
+  $('picktitle').textContent = which === 'mode' ? STRINGS[lang].mode : 'BW';
+  grid.innerHTML = '';
+  for (const opt of sel.options) {
+    const b = document.createElement('button');
+    b.textContent = opt.textContent;
+    if (opt.value === sel.value) b.className = 'on';
+    b.onclick = () => {
+      if (sel.value !== opt.value) {
+        sel.value = opt.value;
+        sel.dispatchEvent(new Event('change', {bubbles: true}));
+      }
+      $('pickmodal').style.display = 'none';
+    };
+    grid.appendChild(b);
+  }
+  $('pickmodal').style.display = 'flex';
+}
+$('pickclose').onclick = () => { $('pickmodal').style.display = 'none'; };
+$('pickmodal').addEventListener('click', (e) => {
+  if (e.target === $('pickmodal')) $('pickmodal').style.display = 'none';
 });
 $('fqin').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') fqApply();
